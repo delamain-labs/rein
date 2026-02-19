@@ -21,6 +21,8 @@ A vendor-neutral control plane for production AI agents. `.rein` files define ag
 - **Small commits.** One logical change per commit.
 - **Commit format:** `feat:`, `fix:`, `docs:`, `test:`, `refactor:`
 - **All tests must pass** (`cargo test`) before committing.
+- **Run `cargo fmt`** before committing. No formatting diffs allowed.
+- **Run `cargo clippy`** before committing. No warnings allowed.
 
 ### Review Criteria (what reviewers check)
 1. **Does this work?** — Tests pass, logic correct, edge cases handled
