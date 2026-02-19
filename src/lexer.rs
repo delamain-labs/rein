@@ -28,6 +28,32 @@ pub enum TokenKind {
     Eof,
 }
 
+impl std::fmt::Display for TokenKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TokenKind::LBrace => write!(f, "{{"),
+            TokenKind::RBrace => write!(f, "}}"),
+            TokenKind::LBracket => write!(f, "["),
+            TokenKind::RBracket => write!(f, "]"),
+            TokenKind::Colon => write!(f, ":"),
+            TokenKind::Dot => write!(f, "."),
+            TokenKind::Agent => write!(f, "agent"),
+            TokenKind::Can => write!(f, "can"),
+            TokenKind::Cannot => write!(f, "cannot"),
+            TokenKind::Model => write!(f, "model"),
+            TokenKind::Budget => write!(f, "budget"),
+            TokenKind::Per => write!(f, "per"),
+            TokenKind::Up => write!(f, "up"),
+            TokenKind::To => write!(f, "to"),
+            TokenKind::Ident(s) => write!(f, "{s}"),
+            TokenKind::Dollar(n) => write!(f, "${}.{:02}", n / 100, n % 100),
+            TokenKind::StringLiteral(s) => write!(f, "\"{s}\""),
+            TokenKind::Comment => write!(f, "comment"),
+            TokenKind::Eof => write!(f, "end of file"),
+        }
+    }
+}
+
 /// A token with its source span.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
@@ -612,5 +638,72 @@ agent support_triage {
             "got: {}",
             err.message
         );
+    }
+
+    // ── Display impl tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn display_symbols() {
+        assert_eq!(TokenKind::LBrace.to_string(), "{");
+        assert_eq!(TokenKind::RBrace.to_string(), "}");
+        assert_eq!(TokenKind::LBracket.to_string(), "[");
+        assert_eq!(TokenKind::RBracket.to_string(), "]");
+        assert_eq!(TokenKind::Colon.to_string(), ":");
+        assert_eq!(TokenKind::Dot.to_string(), ".");
+    }
+
+    #[test]
+    fn display_keywords() {
+        assert_eq!(TokenKind::Agent.to_string(), "agent");
+        assert_eq!(TokenKind::Can.to_string(), "can");
+        assert_eq!(TokenKind::Cannot.to_string(), "cannot");
+        assert_eq!(TokenKind::Model.to_string(), "model");
+        assert_eq!(TokenKind::Budget.to_string(), "budget");
+        assert_eq!(TokenKind::Per.to_string(), "per");
+        assert_eq!(TokenKind::Up.to_string(), "up");
+        assert_eq!(TokenKind::To.to_string(), "to");
+    }
+
+    #[test]
+    fn display_ident() {
+        assert_eq!(TokenKind::Ident("foo".into()).to_string(), "foo");
+        assert_eq!(
+            TokenKind::Ident("read_ticket".into()).to_string(),
+            "read_ticket"
+        );
+    }
+
+    #[test]
+    fn display_dollar_cents_only() {
+        assert_eq!(TokenKind::Dollar(3).to_string(), "$0.03");
+    }
+
+    #[test]
+    fn display_dollar_whole() {
+        assert_eq!(TokenKind::Dollar(5000).to_string(), "$50.00");
+    }
+
+    #[test]
+    fn display_dollar_mixed() {
+        assert_eq!(TokenKind::Dollar(503).to_string(), "$5.03");
+    }
+
+    #[test]
+    fn display_string_literal() {
+        assert_eq!(
+            TokenKind::StringLiteral("anthropic".into()).to_string(),
+            "\"anthropic\""
+        );
+        assert_eq!(TokenKind::StringLiteral("".into()).to_string(), "\"\"");
+    }
+
+    #[test]
+    fn display_comment() {
+        assert_eq!(TokenKind::Comment.to_string(), "comment");
+    }
+
+    #[test]
+    fn display_eof() {
+        assert_eq!(TokenKind::Eof.to_string(), "end of file");
     }
 }

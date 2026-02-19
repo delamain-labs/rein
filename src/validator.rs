@@ -115,17 +115,17 @@ fn check_budget_positive(agent: &AgentDef, diags: &mut Vec<Diagnostic>) {
 /// E004: monetary constraint amount must be positive.
 fn check_constraint_amounts(agent: &AgentDef, diags: &mut Vec<Diagnostic>) {
     for cap in agent.can.iter().chain(agent.cannot.iter()) {
-        if let Some(Constraint::MonetaryCap { amount, .. }) = &cap.constraint {
-            if *amount == 0 {
-                diags.push(Diagnostic::error(
-                    "E004",
-                    format!(
-                        "constraint amount must be positive in agent '{}'",
-                        agent.name
-                    ),
-                    cap.span.clone(),
-                ));
-            }
+        if let Some(Constraint::MonetaryCap { amount, .. }) = &cap.constraint
+            && *amount == 0
+        {
+            diags.push(Diagnostic::error(
+                "E004",
+                format!(
+                    "constraint amount must be positive in agent '{}'",
+                    agent.name
+                ),
+                cap.span.clone(),
+            ));
         }
     }
 }
