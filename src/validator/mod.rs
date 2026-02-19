@@ -52,6 +52,11 @@ pub fn validate(file: &ReinFile) -> Vec<Diagnostic> {
         check_duplicate_capabilities(agent, &mut diags);
         check_model_present(agent, &mut diags);
     }
+    check_duplicate_workflow_names(file, &mut diags);
+    for workflow in &file.workflows {
+        check_workflow_stages_reference_agents(file, workflow, &mut diags);
+        check_duplicate_stages(workflow, &mut diags);
+    }
     diags
 }
 
@@ -149,6 +154,66 @@ fn check_duplicate_capabilities(agent: &AgentDef, diags: &mut Vec<Diagnostic>) {
                     cap.span.clone(),
                 ));
             }
+        }
+    }
+}
+
+/// E005: duplicate workflow names.
+fn check_duplicate_workflow_names(file: &ReinFile, diags: &mut Vec<Diagnostic>) {
+    use std::collections::HashMap;
+    let mut seen: HashMap<&str, usize> = HashMap::new();
+    for workflow in &file.workflows {
+        if let Some(&first_start) = seen.get(workflow.name.as_str()) {
+            diags.push(Diagnostic::error(
+                "E005",
+                format!(
+                    "duplicate workflow name '{}': first defined at {first_start}",
+                    workflow.name
+                ),
+                workflow.span.clone(),
+            ));
+        } else {
+            seen.insert(&workflow.name, workflow.span.start);
+        }
+    }
+}
+
+/// E006: workflow stage references a non-existent agent.
+fn check_workflow_stages_reference_agents(
+    file: &ReinFile,
+    workflow: &crate::ast::WorkflowDef,
+    diags: &mut Vec<Diagnostic>,
+) {
+    use std::collections::HashSet;
+    let agent_names: HashSet<&str> = file.agents.iter().map(|a| a.name.as_str()).collect();
+    for stage in &workflow.stages {
+        if !agent_names.contains(stage.agent.as_str()) {
+            diags.push(Diagnostic::error(
+                "E006",
+                format!(
+                    "stage '{}' in workflow '{}' references unknown agent '{}'",
+                    stage.name, workflow.name, stage.agent
+                ),
+                stage.span.clone(),
+            ));
+        }
+    }
+}
+
+/// W004: duplicate stage names in a workflow.
+fn check_duplicate_stages(workflow: &crate::ast::WorkflowDef, diags: &mut Vec<Diagnostic>) {
+    use std::collections::HashSet;
+    let mut seen = HashSet::new();
+    for stage in &workflow.stages {
+        if !seen.insert(stage.name.as_str()) {
+            diags.push(Diagnostic::warning(
+                "W004",
+                format!(
+                    "duplicate stage '{}' in workflow '{}'",
+                    stage.name, workflow.name
+                ),
+                stage.span.clone(),
+            ));
         }
     }
 }

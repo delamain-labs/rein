@@ -189,3 +189,60 @@ agent dup { }
     assert!(diags.iter().any(|d| d.code == "E001"));
     assert!(diags.iter().any(|d| d.code == "W001"));
 }
+
+// ── Workflow validation ──────────────────────────────────────────────────
+
+#[test]
+fn workflow_valid_stages_no_errors() {
+    let diags = validate_src(r#"
+        agent triage { model: openai }
+        agent responder { model: openai }
+        workflow pipe {
+            trigger: event
+            stages: [triage, responder]
+        }
+    "#);
+    let errs = errors(&diags);
+    assert!(errs.is_empty(), "unexpected errors: {errs:?}");
+}
+
+#[test]
+fn workflow_unknown_agent_errors() {
+    let diags = validate_src(r#"
+        agent triage { model: openai }
+        workflow pipe {
+            trigger: event
+            stages: [triage, nonexistent]
+        }
+    "#);
+    let errs = errors(&diags);
+    assert_eq!(errs.len(), 1);
+    assert!(errs[0].message.contains("nonexistent"), "msg: {}", errs[0].message);
+    assert_eq!(errs[0].code, "E006");
+}
+
+#[test]
+fn workflow_duplicate_names_errors() {
+    let diags = validate_src(r#"
+        agent a { model: openai }
+        workflow pipe { trigger: e1 stages: [a] }
+        workflow pipe { trigger: e2 stages: [a] }
+    "#);
+    let errs = errors(&diags);
+    assert_eq!(errs.len(), 1);
+    assert_eq!(errs[0].code, "E005");
+}
+
+#[test]
+fn workflow_duplicate_stages_warns() {
+    let diags = validate_src(r#"
+        agent a { model: openai }
+        workflow pipe {
+            trigger: event
+            stages: [a, a]
+        }
+    "#);
+    let warns = warnings(&diags);
+    assert_eq!(warns.len(), 1);
+    assert_eq!(warns[0].code, "W004");
+}
