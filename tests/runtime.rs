@@ -220,3 +220,71 @@ async fn full_pipeline_trace_summary_is_readable() {
     assert!(summary.contains("search.web"), "summary: {summary}");
     assert!(summary.contains("Done"), "summary: {summary}");
 }
+
+// ── Workflow integration tests ───────────────────────────────────────────
+
+use rein::ast::{ExecutionMode, RouteRule, Span, Stage, WorkflowDef};
+use rein::runtime::workflow::{run_parallel, run_sequential};
+
+fn make_workflow(name: &str, trigger: &str, agents: &[&str]) -> WorkflowDef {
+    WorkflowDef {
+        name: name.to_string(),
+        trigger: trigger.to_string(),
+        stages: agents.iter().map(|a| Stage {
+            name: (*a).to_string(),
+            agent: (*a).to_string(),
+            route: RouteRule::Next,
+            span: Span::new(0, 1),
+        }).collect(),
+        mode: ExecutionMode::Sequential,
+        span: Span::new(0, 1),
+    }
+}
+
+#[tokio::test]
+async fn integration_sequential_workflow() {
+    let source = r#"
+        agent classifier { model: openai can [ zendesk.classify ] }
+        agent responder { model: openai can [ zendesk.reply_ticket ] }
+    "#;
+    let file = rein::parser::parse(source).expect("parse");
+    let workflow = make_workflow("pipe", "ticket_123", &["classifier", "responder"]);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    provider.push_response(simple_response("Category: billing. Priority: high."));
+    provider.push_response(simple_response("Dear customer, we've resolved your billing issue."));
+
+    let result = run_sequential(&workflow, &file, &provider, &executor, &[], &RunConfig::default())
+        .await
+        .expect("ok");
+
+    assert_eq!(result.stage_results.len(), 2);
+    assert_eq!(result.stage_results[0].agent_name, "classifier");
+    assert_eq!(result.stage_results[1].agent_name, "responder");
+    assert!(result.final_output.contains("billing issue"));
+}
+
+#[tokio::test]
+async fn integration_parallel_workflow() {
+    let source = r#"
+        agent sentiment { model: openai }
+        agent summary { model: openai }
+    "#;
+    let file = rein::parser::parse(source).expect("parse");
+    let mut workflow = make_workflow("analyze", "document", &["sentiment", "summary"]);
+    workflow.mode = ExecutionMode::Parallel;
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    provider.push_response(simple_response("Sentiment: positive"));
+    provider.push_response(simple_response("Summary: quarterly results are up"));
+
+    let result = run_parallel(&workflow, &file, &provider, &executor, &[], &RunConfig::default())
+        .await
+        .expect("ok");
+
+    assert_eq!(result.stage_results.len(), 2);
+    assert!(result.final_output.contains("Sentiment"));
+    assert!(result.final_output.contains("Summary"));
+}
