@@ -142,6 +142,11 @@ impl Parser {
         let mut cannot: Vec<Capability> = Vec::new();
         let mut budget: Option<Budget> = None;
 
+        let mut seen_model = false;
+        let mut seen_can = false;
+        let mut seen_cannot = false;
+        let mut seen_budget = false;
+
         // Parse fields until `}`
         loop {
             self.skip_comments();
@@ -159,6 +164,13 @@ impl Parser {
                     });
                 }
                 TokenKind::Model => {
+                    if seen_model {
+                        return Err(ParseError::new(
+                            format!("duplicate field 'model' in agent '{}'", name),
+                            self.current_span(),
+                        ));
+                    }
+                    seen_model = true;
                     self.advance(); // consume `model`
                     self.expect(&TokenKind::Colon)?;
                     // model value is an ident (e.g. `anthropic`)
@@ -166,14 +178,35 @@ impl Parser {
                     model = Some(value);
                 }
                 TokenKind::Can => {
+                    if seen_can {
+                        return Err(ParseError::new(
+                            format!("duplicate field 'can' in agent '{}'", name),
+                            self.current_span(),
+                        ));
+                    }
+                    seen_can = true;
                     self.advance(); // consume `can`
                     can = self.parse_capability_list()?;
                 }
                 TokenKind::Cannot => {
+                    if seen_cannot {
+                        return Err(ParseError::new(
+                            format!("duplicate field 'cannot' in agent '{}'", name),
+                            self.current_span(),
+                        ));
+                    }
+                    seen_cannot = true;
                     self.advance(); // consume `cannot`
                     cannot = self.parse_capability_list()?;
                 }
                 TokenKind::Budget => {
+                    if seen_budget {
+                        return Err(ParseError::new(
+                            format!("duplicate field 'budget' in agent '{}'", name),
+                            self.current_span(),
+                        ));
+                    }
+                    seen_budget = true;
                     self.advance(); // consume `budget`
                     self.expect(&TokenKind::Colon)?;
                     budget = Some(self.parse_budget(start)?);
@@ -494,6 +527,46 @@ agent foo {
         let err = parse_err("agent foo { can zendesk.read_ticket }");
         assert!(
             err.message.contains("LBracket") || err.message.contains('['),
+            "got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn error_duplicate_model() {
+        let err = parse_err("agent foo { model: a model: b }");
+        assert!(
+            err.message.contains("duplicate field 'model'"),
+            "got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn error_duplicate_can() {
+        let err = parse_err("agent foo { can [ zendesk.read ] can [ zendesk.write ] }");
+        assert!(
+            err.message.contains("duplicate field 'can'"),
+            "got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn error_duplicate_cannot() {
+        let err = parse_err("agent foo { cannot [ zendesk.read ] cannot [ zendesk.write ] }");
+        assert!(
+            err.message.contains("duplicate field 'cannot'"),
+            "got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn error_duplicate_budget() {
+        let err = parse_err("agent foo { budget: $0.03 per ticket budget: $0.05 per ticket }");
+        assert!(
+            err.message.contains("duplicate field 'budget'"),
             "got: {}",
             err.message
         );
