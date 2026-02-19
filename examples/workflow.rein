@@ -1,0 +1,34 @@
+// A support pipeline workflow with three stages.
+
+agent triage {
+    model: openai
+    can [
+        zendesk.read_ticket
+        zendesk.classify_ticket
+    ]
+    cannot [
+        zendesk.delete_ticket
+    ]
+}
+
+agent responder {
+    model: openai
+    can [
+        zendesk.read_ticket
+        zendesk.reply_ticket
+    ]
+}
+
+agent escalator {
+    model: anthropic
+    can [
+        zendesk.read_ticket
+        zendesk.escalate_ticket
+        slack.send_message
+    ]
+}
+
+workflow support_pipeline {
+    trigger: incoming_ticket
+    stages: [triage, responder, escalator]
+}

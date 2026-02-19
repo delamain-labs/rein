@@ -281,3 +281,111 @@ fn error_budget_missing_dollar() {
         err.message
     );
 }
+
+// ── Workflow parsing ──────────────────────────────────────────────────────
+
+#[test]
+fn parse_simple_workflow() {
+    let file = parse_ok(r#"
+        agent triage { model: openai can [ zendesk.read_ticket ] }
+        workflow pipeline {
+            trigger: incoming_ticket
+            stages: [triage]
+        }
+    "#);
+    assert_eq!(file.workflows.len(), 1);
+    let wf = &file.workflows[0];
+    assert_eq!(wf.name, "pipeline");
+    assert_eq!(wf.trigger, "incoming_ticket");
+    assert_eq!(wf.stages.len(), 1);
+    assert_eq!(wf.stages[0].agent, "triage");
+}
+
+#[test]
+fn parse_workflow_multiple_stages() {
+    let file = parse_ok(r#"
+        agent a { model: openai }
+        agent b { model: openai }
+        agent c { model: openai }
+        workflow pipe {
+            trigger: event
+            stages: [a, b, c]
+        }
+    "#);
+    assert_eq!(file.workflows[0].stages.len(), 3);
+    assert_eq!(file.workflows[0].stages[0].agent, "a");
+    assert_eq!(file.workflows[0].stages[1].agent, "b");
+    assert_eq!(file.workflows[0].stages[2].agent, "c");
+}
+
+#[test]
+fn parse_workflow_stages_without_commas() {
+    let file = parse_ok(r#"
+        agent a { model: openai }
+        agent b { model: openai }
+        workflow pipe {
+            trigger: event
+            stages: [a b]
+        }
+    "#);
+    assert_eq!(file.workflows[0].stages.len(), 2);
+}
+
+#[test]
+fn parse_workflow_missing_trigger_errors() {
+    let err = parse_err(r#"
+        workflow pipe {
+            stages: [a]
+        }
+    "#);
+    assert!(err.message.contains("trigger"), "err: {}", err.message);
+}
+
+#[test]
+fn parse_workflow_empty_stages_errors() {
+    let err = parse_err(r#"
+        workflow pipe {
+            trigger: event
+            stages: []
+        }
+    "#);
+    assert!(err.message.contains("at least one stage"), "err: {}", err.message);
+}
+
+#[test]
+fn parse_workflow_duplicate_trigger_errors() {
+    let err = parse_err(r#"
+        workflow pipe {
+            trigger: a
+            trigger: b
+            stages: [x]
+        }
+    "#);
+    assert!(err.message.contains("duplicate"), "err: {}", err.message);
+}
+
+#[test]
+fn parse_file_with_agents_and_workflows() {
+    let file = parse_ok(r#"
+        agent triage { model: openai can [ zendesk.read_ticket ] }
+        agent responder { model: anthropic can [ zendesk.reply_ticket ] }
+        workflow pipeline {
+            trigger: ticket
+            stages: [triage, responder]
+        }
+    "#);
+    assert_eq!(file.agents.len(), 2);
+    assert_eq!(file.workflows.len(), 1);
+}
+
+#[test]
+fn parse_multiple_workflows() {
+    let file = parse_ok(r#"
+        agent a { model: openai }
+        workflow w1 { trigger: e1 stages: [a] }
+        workflow w2 { trigger: e2 stages: [a] }
+    "#);
+    assert_eq!(file.workflows.len(), 2);
+    assert_eq!(file.workflows[0].name, "w1");
+    assert_eq!(file.workflows[1].name, "w2");
+}

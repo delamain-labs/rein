@@ -1,4 +1,7 @@
-use crate::ast::{AgentDef, Budget, Capability, Constraint, ReinFile, Span};
+use crate::ast::{
+    AgentDef, Budget, Capability, Constraint, ExecutionMode, ReinFile, RouteRule, Span, Stage,
+    WorkflowDef,
+};
 use crate::lexer::{Token, TokenKind, tokenize};
 
 /// Parse error with source location and message.
@@ -142,11 +145,21 @@ impl Parser {
     pub fn parse_file(&mut self) -> Result<ReinFile, ParseError> {
         self.skip_comments();
         let mut agents = Vec::new();
+        let mut workflows = Vec::new();
         while self.peek() != &TokenKind::Eof {
-            agents.push(self.parse_agent()?);
+            match self.peek() {
+                TokenKind::Agent => agents.push(self.parse_agent()?),
+                TokenKind::Workflow => workflows.push(self.parse_workflow()?),
+                other => {
+                    return Err(ParseError::new(
+                        format!("expected 'agent' or 'workflow', got {other}"),
+                        self.current_span(),
+                    ));
+                }
+            }
             self.skip_comments();
         }
-        Ok(ReinFile { agents, workflows: Vec::new() })
+        Ok(ReinFile { agents, workflows })
     }
 
     fn parse_agent(&mut self) -> Result<AgentDef, ParseError> {
@@ -250,6 +263,127 @@ impl Parser {
                 }
             }
         }
+    }
+
+    fn parse_workflow(&mut self) -> Result<WorkflowDef, ParseError> {
+        self.skip_comments();
+        let start = self.current_span().start;
+
+        self.expect(&TokenKind::Workflow)?;
+        let (name, _) = self.expect_ident()?;
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut trigger: Option<String> = None;
+        let mut stages: Vec<Stage> = Vec::new();
+        let mut seen_trigger = false;
+        let mut seen_stages = false;
+
+        loop {
+            self.skip_comments();
+            match self.peek().clone() {
+                TokenKind::RBrace => {
+                    let end = self.current_span().end;
+                    self.advance();
+
+                    let trigger = trigger.ok_or_else(|| {
+                        ParseError::new(
+                            format!("workflow '{name}' is missing required field 'trigger'"),
+                            Span::new(start, end),
+                        )
+                    })?;
+
+                    if stages.is_empty() {
+                        return Err(ParseError::new(
+                            format!("workflow '{name}' must have at least one stage"),
+                            Span::new(start, end),
+                        ));
+                    }
+
+                    return Ok(WorkflowDef {
+                        name,
+                        trigger,
+                        stages,
+                        mode: ExecutionMode::Sequential,
+                        span: Span::new(start, end),
+                    });
+                }
+                TokenKind::Trigger => {
+                    if seen_trigger {
+                        return Err(ParseError::new(
+                            format!("duplicate field 'trigger' in workflow '{name}'"),
+                            self.current_span(),
+                        ));
+                    }
+                    seen_trigger = true;
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    let (value, _) = self.expect_ident()?;
+                    trigger = Some(value);
+                }
+                TokenKind::Stages => {
+                    if seen_stages {
+                        return Err(ParseError::new(
+                            format!("duplicate field 'stages' in workflow '{name}'"),
+                            self.current_span(),
+                        ));
+                    }
+                    seen_stages = true;
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    stages = self.parse_stage_list()?;
+                }
+                TokenKind::Eof => {
+                    return Err(ParseError::new(
+                        "unexpected end of file: expected `}`",
+                        self.current_span(),
+                    ));
+                }
+                other => {
+                    return Err(ParseError::new(
+                        format!("unexpected token in workflow body: {other}"),
+                        self.current_span(),
+                    ));
+                }
+            }
+        }
+    }
+
+    fn parse_stage_list(&mut self) -> Result<Vec<Stage>, ParseError> {
+        self.expect(&TokenKind::LBracket)?;
+        let mut stages = Vec::new();
+        loop {
+            self.skip_comments();
+            match self.peek() {
+                TokenKind::RBracket => {
+                    self.advance();
+                    break;
+                }
+                TokenKind::Eof => {
+                    return Err(ParseError::new(
+                        "unexpected end of file: expected `]`",
+                        self.current_span(),
+                    ));
+                }
+                _ => {
+                    let stage_start = self.current_span().start;
+                    let (agent_name, _) = self.expect_ident()?;
+                    let end = self.last_consumed_end;
+
+                    stages.push(Stage {
+                        name: agent_name.clone(),
+                        agent: agent_name,
+                        route: RouteRule::Next,
+                        span: Span::new(stage_start, end),
+                    });
+
+                    // Optional comma separator
+                    if self.peek() == &TokenKind::Comma {
+                        self.advance();
+                    }
+                }
+            }
+        }
+        Ok(stages)
     }
 
     fn parse_capability_list(&mut self) -> Result<Vec<Capability>, ParseError> {

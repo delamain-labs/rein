@@ -12,6 +12,9 @@ pub enum TokenKind {
     Per,
     Up,
     To,
+    Workflow,
+    Trigger,
+    Stages,
     // Symbols
     LBrace,
     RBrace,
@@ -19,6 +22,7 @@ pub enum TokenKind {
     RBracket,
     Colon,
     Dot,
+    Comma,
     // Literals
     Ident(String),
     StringLiteral(String),
@@ -37,6 +41,7 @@ impl std::fmt::Display for TokenKind {
             TokenKind::RBracket => write!(f, "]"),
             TokenKind::Colon => write!(f, ":"),
             TokenKind::Dot => write!(f, "."),
+            TokenKind::Comma => write!(f, ","),
             TokenKind::Agent => write!(f, "agent"),
             TokenKind::Can => write!(f, "can"),
             TokenKind::Cannot => write!(f, "cannot"),
@@ -45,6 +50,9 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Per => write!(f, "per"),
             TokenKind::Up => write!(f, "up"),
             TokenKind::To => write!(f, "to"),
+            TokenKind::Workflow => write!(f, "workflow"),
+            TokenKind::Trigger => write!(f, "trigger"),
+            TokenKind::Stages => write!(f, "stages"),
             TokenKind::Ident(s) => write!(f, "{s}"),
             TokenKind::Dollar(n) => write!(f, "${}.{:02}", n / 100, n % 100),
             TokenKind::StringLiteral(s) => write!(f, "\"{s}\""),
@@ -156,6 +164,9 @@ impl<'a> Lexer<'a> {
             "per" => TokenKind::Per,
             "up" => TokenKind::Up,
             "to" => TokenKind::To,
+            "workflow" => TokenKind::Workflow,
+            "trigger" => TokenKind::Trigger,
+            "stages" => TokenKind::Stages,
             _ => TokenKind::Ident(word.to_string()),
         };
         Token::new(kind, start, end)
@@ -304,6 +315,7 @@ impl<'a> Lexer<'a> {
                 Some(b']') => tokens.push(Token::new(TokenKind::RBracket, start, self.pos)),
                 Some(b':') => tokens.push(Token::new(TokenKind::Colon, start, self.pos)),
                 Some(b'.') => tokens.push(Token::new(TokenKind::Dot, start, self.pos)),
+                Some(b',') => tokens.push(Token::new(TokenKind::Comma, start, self.pos)),
                 Some(b'"') => tokens.push(self.read_string(start)?),
                 Some(b'$') => tokens.push(self.read_dollar(start)?),
                 Some(b'/') if self.peek() == Some(b'/') => {
