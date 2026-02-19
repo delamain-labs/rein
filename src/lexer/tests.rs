@@ -384,7 +384,11 @@ fn hash_comment_inline_after_code() {
     let tokens = non_eof(lex_ok("agent foo # a comment"));
     assert_eq!(
         kinds(&tokens),
-        vec![&TokenKind::Agent, &TokenKind::Ident("foo".into()), &TokenKind::Comment]
+        vec![
+            &TokenKind::Agent,
+            &TokenKind::Ident("foo".into()),
+            &TokenKind::Comment
+        ]
     );
 }
 
@@ -394,7 +398,11 @@ fn hash_comment_mixed_with_slash_comments() {
     let tokens = non_eof(lex_ok(src));
     assert_eq!(
         kinds(&tokens),
-        vec![&TokenKind::Comment, &TokenKind::Comment, &TokenKind::Comment]
+        vec![
+            &TokenKind::Comment,
+            &TokenKind::Comment,
+            &TokenKind::Comment
+        ]
     );
 }
 

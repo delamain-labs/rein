@@ -34,14 +34,15 @@ async fn basic_chat_completion() {
     Mock::given(method("POST"))
         .and(path("/chat/completions"))
         .and(header("Authorization", "Bearer test-key"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(mock_response("Hello!", json!([]))),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(mock_response("Hello!", json!([]))))
         .mount(&server)
         .await;
 
     let provider = OpenAiProvider::new("test-key", "gpt-4o", Some(server.uri()));
-    let resp = provider.chat(&[Message::user("Hi")], &[]).await.expect("should succeed");
+    let resp = provider
+        .chat(&[Message::user("Hi")], &[])
+        .await
+        .expect("should succeed");
 
     assert_eq!(resp.content, "Hello!");
     assert!(resp.tool_calls.is_empty());
@@ -65,9 +66,7 @@ async fn chat_with_tool_calls() {
 
     Mock::given(method("POST"))
         .and(path("/chat/completions"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(mock_response("", tool_calls)),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(mock_response("", tool_calls)))
         .mount(&server)
         .await;
 
@@ -78,7 +77,10 @@ async fn chat_with_tool_calls() {
     }];
 
     let provider = OpenAiProvider::new("test-key", "gpt-4o", Some(server.uri()));
-    let resp = provider.chat(&[Message::user("Read /tmp/test")], &tools).await.expect("should succeed");
+    let resp = provider
+        .chat(&[Message::user("Read /tmp/test")], &tools)
+        .await
+        .expect("should succeed");
 
     assert!(resp.content.is_empty());
     assert_eq!(resp.tool_calls.len(), 1);
@@ -100,7 +102,10 @@ async fn auth_error_returns_auth() {
         .await;
 
     let provider = OpenAiProvider::new("bad-key", "gpt-4o", Some(server.uri()));
-    let err = provider.chat(&[Message::user("Hi")], &[]).await.unwrap_err();
+    let err = provider
+        .chat(&[Message::user("Hi")], &[])
+        .await
+        .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("auth error"), "got: {msg}");
 }
@@ -118,7 +123,10 @@ async fn rate_limit_returns_rate_limited() {
         .await;
 
     let provider = OpenAiProvider::new("test-key", "gpt-4o", Some(server.uri()));
-    let err = provider.chat(&[Message::user("Hi")], &[]).await.unwrap_err();
+    let err = provider
+        .chat(&[Message::user("Hi")], &[])
+        .await
+        .unwrap_err();
     let msg = err.to_string();
     assert_eq!(msg, "rate limited");
 }
@@ -136,7 +144,10 @@ async fn server_error_returns_api_error() {
         .await;
 
     let provider = OpenAiProvider::new("test-key", "gpt-4o", Some(server.uri()));
-    let err = provider.chat(&[Message::user("Hi")], &[]).await.unwrap_err();
+    let err = provider
+        .chat(&[Message::user("Hi")], &[])
+        .await
+        .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("API error (500)"), "got: {msg}");
     assert!(msg.contains("Internal server error"), "got: {msg}");
@@ -159,7 +170,10 @@ async fn empty_choices_returns_parse_error() {
         .await;
 
     let provider = OpenAiProvider::new("test-key", "gpt-4o", Some(server.uri()));
-    let err = provider.chat(&[Message::user("Hi")], &[]).await.unwrap_err();
+    let err = provider
+        .chat(&[Message::user("Hi")], &[])
+        .await
+        .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("no choices"), "got: {msg}");
 }

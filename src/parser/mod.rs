@@ -120,10 +120,7 @@ impl Parser {
                     }
                     _ => {
                         return Err(ParseError::new(
-                            format!(
-                                "env() expects a string argument, got {}",
-                                arg_tok.kind
-                            ),
+                            format!("env() expects a string argument, got {}", arg_tok.kind),
                             arg_tok.span,
                         ));
                     }
@@ -145,7 +142,10 @@ impl Parser {
                 Ok(ValueExpr::Literal(s))
             }
             _ => Err(ParseError::new(
-                format!("expected value (identifier, string, or env()), got {}", tok.kind),
+                format!(
+                    "expected value (identifier, string, or env()), got {}",
+                    tok.kind
+                ),
                 tok.span,
             )),
         }
@@ -248,9 +248,7 @@ impl Parser {
                 }
                 other => {
                     return Err(ParseError::new(
-                        format!(
-                            "unexpected field in provider '{name}': {other}"
-                        ),
+                        format!("unexpected field in provider '{name}': {other}"),
                         self.current_span(),
                     ));
                 }
@@ -548,8 +546,11 @@ impl Parser {
                     let value = self.parse_value_expr()?;
                     goal = Some(match value {
                         ValueExpr::Literal(s) => s,
-                        ValueExpr::EnvRef { var_name, .. } => {
-                            format!("env({var_name})")
+                        ValueExpr::EnvRef { span, .. } => {
+                            return Err(ParseError::new(
+                                "goal must be a string literal, not env()",
+                                span,
+                            ));
                         }
                     });
                 }

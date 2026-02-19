@@ -62,6 +62,7 @@ pub fn validate(file: &ReinFile) -> Vec<Diagnostic> {
         check_duplicate_stages(workflow, &mut diags);
         check_workflow_steps_reference_agents(file, workflow, &mut diags);
         check_duplicate_step_names(workflow, &mut diags);
+        check_step_stage_name_collisions(workflow, &mut diags);
     }
     diags
 }
@@ -256,10 +257,7 @@ fn check_workflow_steps_reference_agents(
 }
 
 /// E009: duplicate step names within a workflow.
-fn check_duplicate_step_names(
-    workflow: &crate::ast::WorkflowDef,
-    diags: &mut Vec<Diagnostic>,
-) {
+fn check_duplicate_step_names(workflow: &crate::ast::WorkflowDef, diags: &mut Vec<Diagnostic>) {
     use std::collections::HashMap;
     let mut seen: HashMap<&str, &crate::ast::StepDef> = HashMap::new();
     for step in &workflow.steps {
@@ -274,6 +272,31 @@ fn check_duplicate_step_names(
             ));
         } else {
             seen.insert(&step.name, step);
+        }
+    }
+}
+
+/// E010: step name collides with a stage name in the same workflow.
+fn check_step_stage_name_collisions(
+    workflow: &crate::ast::WorkflowDef,
+    diags: &mut Vec<Diagnostic>,
+) {
+    use std::collections::HashMap;
+    let stage_names: HashMap<&str, &crate::ast::Stage> = workflow
+        .stages
+        .iter()
+        .map(|s| (s.name.as_str(), s))
+        .collect();
+    for step in &workflow.steps {
+        if let Some(stage) = stage_names.get(step.name.as_str()) {
+            diags.push(Diagnostic::error(
+                "E010",
+                format!(
+                    "step '{}' in workflow '{}' collides with stage of the same name at {}",
+                    step.name, workflow.name, stage.span.start
+                ),
+                step.span.clone(),
+            ));
         }
     }
 }

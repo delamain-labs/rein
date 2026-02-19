@@ -53,8 +53,9 @@ impl ValueExpr {
     {
         match self {
             Self::Literal(s) => Ok(s.clone()),
-            Self::EnvRef { var_name, .. } => env_lookup(var_name)
-                .ok_or_else(|| ResolveError::EnvVarNotSet(var_name.clone())),
+            Self::EnvRef { var_name, .. } => {
+                env_lookup(var_name).ok_or_else(|| ResolveError::EnvVarNotSet(var_name.clone()))
+            }
         }
     }
 
@@ -431,7 +432,7 @@ mod tests {
                 trigger: "event".to_string(),
                 stages: vec![],
                 steps: vec![],
-            mode: ExecutionMode::Sequential,
+                mode: ExecutionMode::Sequential,
                 span: dummy_span(),
             }],
         };

@@ -6,7 +6,11 @@ use crate::ast::{AgentDef, Capability, Constraint, Span};
 use crate::runtime::executor::MockExecutor;
 use crate::runtime::provider::{ChatResponse, MockProvider, ToolCallRequest, ToolDef, Usage};
 
-fn make_agent(can: Vec<Capability>, cannot: Vec<Capability>, budget_cents: Option<u64>) -> AgentDef {
+fn make_agent(
+    can: Vec<Capability>,
+    cannot: Vec<Capability>,
+    budget_cents: Option<u64>,
+) -> AgentDef {
     AgentDef {
         name: "test".to_string(),
         model: Some(ValueExpr::Literal("gpt-4o".into())),
@@ -35,7 +39,10 @@ fn simple_response(content: &str) -> ChatResponse {
     ChatResponse {
         content: content.to_string(),
         tool_calls: vec![],
-        usage: Usage { input_tokens: 100, output_tokens: 50 },
+        usage: Usage {
+            input_tokens: 100,
+            output_tokens: 50,
+        },
         model: "gpt-4o".to_string(),
     }
 }
@@ -48,7 +55,10 @@ fn tool_call_response(tool_name: &str, args: serde_json::Value) -> ChatResponse 
             name: tool_name.to_string(),
             arguments: args,
         }],
-        usage: Usage { input_tokens: 100, output_tokens: 50 },
+        usage: Usage {
+            input_tokens: 100,
+            output_tokens: 50,
+        },
         model: "gpt-4o".to_string(),
     }
 }
@@ -83,11 +93,18 @@ async fn tool_call_then_response() {
     let executor = MockExecutor::new();
 
     // First: LLM requests a tool call
-    provider.push_response(tool_call_response("zendesk.read_ticket", json!({"id": 123})));
+    provider.push_response(tool_call_response(
+        "zendesk.read_ticket",
+        json!({"id": 123}),
+    ));
     // Second: LLM responds with final answer
     provider.push_response(simple_response("Ticket #123 is about billing."));
 
-    executor.on_call("zendesk", "read_ticket", r#"{"id": 123, "subject": "Billing issue"}"#);
+    executor.on_call(
+        "zendesk",
+        "read_ticket",
+        r#"{"id": 123, "subject": "Billing issue"}"#,
+    );
 
     let engine = AgentEngine::new(
         &provider,
@@ -101,11 +118,19 @@ async fn tool_call_then_response() {
         RunConfig::default(),
     );
 
-    let result = engine.run("What's ticket 123?").await.expect("should succeed");
+    let result = engine
+        .run("What's ticket 123?")
+        .await
+        .expect("should succeed");
     assert_eq!(result.response, "Ticket #123 is about billing.");
 
     // Should have 2 LLM calls and tool events in trace
-    let llm_calls: Vec<_> = result.trace.events.iter().filter(|e| matches!(e, RunEvent::LlmCall { .. })).collect();
+    let llm_calls: Vec<_> = result
+        .trace
+        .events
+        .iter()
+        .filter(|e| matches!(e, RunEvent::LlmCall { .. }))
+        .collect();
     assert_eq!(llm_calls.len(), 2);
 }
 
@@ -129,13 +154,19 @@ async fn denied_tool_sends_error_to_llm() {
         RunConfig::default(),
     );
 
-    let result = engine.run("Delete ticket 123").await.expect("should succeed");
+    let result = engine
+        .run("Delete ticket 123")
+        .await
+        .expect("should succeed");
     assert_eq!(result.response, "I can't delete tickets.");
 
     // Verify there's a denied tool attempt
-    let denied: Vec<_> = result.trace.events.iter().filter(|e| {
-        matches!(e, RunEvent::ToolCallAttempt { allowed: false, .. })
-    }).collect();
+    let denied: Vec<_> = result
+        .trace
+        .events
+        .iter()
+        .filter(|e| matches!(e, RunEvent::ToolCallAttempt { allowed: false, .. }))
+        .collect();
     assert_eq!(denied.len(), 1);
 }
 
@@ -150,7 +181,10 @@ async fn budget_exceeded_stops_run() {
     provider.push_response(ChatResponse {
         content: String::new(),
         tool_calls: vec![],
-        usage: Usage { input_tokens: 100_000, output_tokens: 50_000 }, // ~75 cents for gpt-4o
+        usage: Usage {
+            input_tokens: 100_000,
+            output_tokens: 50_000,
+        }, // ~75 cents for gpt-4o
         model: "gpt-4o".to_string(),
     });
 
@@ -239,8 +273,11 @@ async fn trace_contains_run_complete() {
     );
 
     let result = engine.run("test").await.expect("ok");
-    let complete: Vec<_> = result.trace.events.iter().filter(|e| {
-        matches!(e, RunEvent::RunComplete { .. })
-    }).collect();
+    let complete: Vec<_> = result
+        .trace
+        .events
+        .iter()
+        .filter(|e| matches!(e, RunEvent::RunComplete { .. }))
+        .collect();
     assert_eq!(complete.len(), 1);
 }

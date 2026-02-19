@@ -127,7 +127,8 @@ impl<'a> AgentEngine<'a> {
             }
 
             state.messages.push(Message::assistant(&response.content));
-            self.process_tool_calls(&mut state, &response.tool_calls).await;
+            self.process_tool_calls(&mut state, &response.tool_calls)
+                .await;
         }
 
         Ok(Self::finish(state, "Max turns reached".to_string()))
@@ -164,7 +165,8 @@ impl<'a> AgentEngine<'a> {
 
             match intercept {
                 InterceptResult::Allowed | InterceptResult::CappedAt { .. } => {
-                    self.execute_allowed_tool(state, &tc_req.id, tool_call).await;
+                    self.execute_allowed_tool(state, &tc_req.id, tool_call)
+                        .await;
                 }
                 InterceptResult::Denied { reason } => {
                     state.events.push(RunEvent::ToolCallAttempt {
@@ -232,7 +234,10 @@ impl<'a> AgentEngine<'a> {
     /// Extract namespace from a tool name like `zendesk.read_ticket`.
     fn extract_namespace(name: &str) -> String {
         name.find('.').map_or_else(
-            || name.find('_').map_or_else(|| name.to_string(), |i| name[..i].to_string()),
+            || {
+                name.find('_')
+                    .map_or_else(|| name.to_string(), |i| name[..i].to_string())
+            },
             |i| name[..i].to_string(),
         )
     }
@@ -240,7 +245,10 @@ impl<'a> AgentEngine<'a> {
     /// Extract action from a tool name like `zendesk.read_ticket`.
     fn extract_action(name: &str) -> String {
         name.find('.').map_or_else(
-            || name.find('_').map_or_else(|| name.to_string(), |i| name[i + 1..].to_string()),
+            || {
+                name.find('_')
+                    .map_or_else(|| name.to_string(), |i| name[i + 1..].to_string())
+            },
             |i| name[i + 1..].to_string(),
         )
     }

@@ -16,7 +16,11 @@ fn mock_text_response(text: &str) -> serde_json::Value {
     })
 }
 
-fn mock_tool_response(tool_id: &str, tool_name: &str, input: serde_json::Value) -> serde_json::Value {
+fn mock_tool_response(
+    tool_id: &str,
+    tool_name: &str,
+    input: serde_json::Value,
+) -> serde_json::Value {
     json!({
         "id": "msg_test",
         "type": "message",
@@ -37,14 +41,20 @@ async fn basic_text_response() {
         .and(path("/v1/messages"))
         .and(header("x-api-key", "test-key"))
         .and(header("anthropic-version", "2023-06-01"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(mock_text_response("Hello!")),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(mock_text_response("Hello!")))
         .mount(&server)
         .await;
 
-    let provider = AnthropicProvider::new("test-key", "claude-sonnet-4-20250514", Some(server.uri()), None);
-    let resp = provider.chat(&[Message::user("Hi")], &[]).await.expect("ok");
+    let provider = AnthropicProvider::new(
+        "test-key",
+        "claude-sonnet-4-20250514",
+        Some(server.uri()),
+        None,
+    );
+    let resp = provider
+        .chat(&[Message::user("Hi")], &[])
+        .await
+        .expect("ok");
 
     assert_eq!(resp.content, "Hello!");
     assert!(resp.tool_calls.is_empty());
@@ -58,21 +68,29 @@ async fn tool_use_response() {
 
     Mock::given(method("POST"))
         .and(path("/v1/messages"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(
-                mock_tool_response("toolu_1", "read_file", json!({"path": "/tmp/test"}))
-            ),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(mock_tool_response(
+            "toolu_1",
+            "read_file",
+            json!({"path": "/tmp/test"}),
+        )))
         .mount(&server)
         .await;
 
-    let provider = AnthropicProvider::new("test-key", "claude-sonnet-4-20250514", Some(server.uri()), None);
+    let provider = AnthropicProvider::new(
+        "test-key",
+        "claude-sonnet-4-20250514",
+        Some(server.uri()),
+        None,
+    );
     let tools = vec![ToolDef {
         name: "read_file".to_string(),
         description: "Read a file".to_string(),
         parameters: json!({"type": "object"}),
     }];
-    let resp = provider.chat(&[Message::user("Read /tmp/test")], &tools).await.expect("ok");
+    let resp = provider
+        .chat(&[Message::user("Read /tmp/test")], &tools)
+        .await
+        .expect("ok");
 
     assert!(resp.content.is_empty());
     assert_eq!(resp.tool_calls.len(), 1);
@@ -93,8 +111,16 @@ async fn auth_error() {
         .mount(&server)
         .await;
 
-    let provider = AnthropicProvider::new("bad-key", "claude-sonnet-4-20250514", Some(server.uri()), None);
-    let err = provider.chat(&[Message::user("Hi")], &[]).await.unwrap_err();
+    let provider = AnthropicProvider::new(
+        "bad-key",
+        "claude-sonnet-4-20250514",
+        Some(server.uri()),
+        None,
+    );
+    let err = provider
+        .chat(&[Message::user("Hi")], &[])
+        .await
+        .unwrap_err();
     assert!(err.to_string().contains("auth"), "got: {}", err);
 }
 
@@ -108,8 +134,12 @@ async fn rate_limit() {
         .mount(&server)
         .await;
 
-    let provider = AnthropicProvider::new("key", "claude-sonnet-4-20250514", Some(server.uri()), None);
-    let err = provider.chat(&[Message::user("Hi")], &[]).await.unwrap_err();
+    let provider =
+        AnthropicProvider::new("key", "claude-sonnet-4-20250514", Some(server.uri()), None);
+    let err = provider
+        .chat(&[Message::user("Hi")], &[])
+        .await
+        .unwrap_err();
     assert_eq!(err.to_string(), "rate limited");
 }
 
@@ -126,8 +156,12 @@ async fn server_error() {
         .mount(&server)
         .await;
 
-    let provider = AnthropicProvider::new("key", "claude-sonnet-4-20250514", Some(server.uri()), None);
-    let err = provider.chat(&[Message::user("Hi")], &[]).await.unwrap_err();
+    let provider =
+        AnthropicProvider::new("key", "claude-sonnet-4-20250514", Some(server.uri()), None);
+    let err = provider
+        .chat(&[Message::user("Hi")], &[])
+        .await
+        .unwrap_err();
     assert!(err.to_string().contains("overloaded"), "got: {}", err);
 }
 
