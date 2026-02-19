@@ -77,31 +77,36 @@ fn env_missing_rparen_errors() {
 }
 
 #[test]
-fn env_resolve_present_var() {
-    // SAFETY: test-only, single-threaded access to env var with unique name.
-    unsafe { std::env::set_var("REIN_TEST_ENV_VAR_42", "test_value") };
+fn env_resolve_with_present_var() {
     let expr = crate::ast::ValueExpr::EnvRef {
-        var_name: "REIN_TEST_ENV_VAR_42".to_string(),
+        var_name: "MY_KEY".to_string(),
         span: crate::ast::Span::new(0, 1),
     };
-    assert_eq!(expr.resolve().unwrap(), "test_value");
-    unsafe { std::env::remove_var("REIN_TEST_ENV_VAR_42") };
+    let lookup = |name: &str| {
+        if name == "MY_KEY" { Some("secret_value".to_string()) } else { None }
+    };
+    assert_eq!(expr.resolve_with(lookup).unwrap(), "secret_value");
 }
 
 #[test]
-fn env_resolve_missing_var() {
+fn env_resolve_with_missing_var() {
     let expr = crate::ast::ValueExpr::EnvRef {
-        var_name: "REIN_DEFINITELY_NOT_SET_12345".to_string(),
+        var_name: "MISSING_KEY".to_string(),
         span: crate::ast::Span::new(0, 1),
     };
-    let err = expr.resolve().unwrap_err();
-    assert!(err.contains("not set"), "got: {err}");
+    let lookup = |_: &str| None;
+    let err = expr.resolve_with(lookup).unwrap_err();
+    assert!(
+        matches!(err, crate::ast::ResolveError::EnvVarNotSet(ref name) if name == "MISSING_KEY"),
+        "got: {err}"
+    );
 }
 
 #[test]
 fn literal_value_resolves_directly() {
     let expr = crate::ast::ValueExpr::Literal("openai".to_string());
-    assert_eq!(expr.resolve().unwrap(), "openai");
+    let lookup = |_: &str| None; // shouldn't be called
+    assert_eq!(expr.resolve_with(lookup).unwrap(), "openai");
 }
 
 // ── Minimal agent ─────────────────────────────────────────────────────────

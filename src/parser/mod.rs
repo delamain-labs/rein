@@ -1,6 +1,6 @@
 use crate::ast::{
     AgentDef, Budget, Capability, Constraint, ExecutionMode, ReinFile, RouteRule, Span, Stage,
-    WorkflowDef,
+    ValueExpr, WorkflowDef,
 };
 use crate::lexer::{Token, TokenKind, tokenize};
 
@@ -102,7 +102,7 @@ impl Parser {
     /// call like `env("VAR_NAME")`.
     ///
     /// Returns a `ValueExpr` representing the parsed value.
-    fn parse_value_expr(&mut self) -> Result<crate::ast::ValueExpr, ParseError> {
+    fn parse_value_expr(&mut self) -> Result<ValueExpr, ParseError> {
         self.skip_comments();
         let tok = self.current().clone();
         match &tok.kind {
@@ -129,20 +129,20 @@ impl Parser {
                     }
                 };
                 let end_span = self.expect(&TokenKind::RParen)?;
-                Ok(crate::ast::ValueExpr::EnvRef {
+                Ok(ValueExpr::EnvRef {
                     var_name,
-                    span: crate::ast::Span::new(start, end_span.end),
+                    span: Span::new(start, end_span.end),
                 })
             }
             TokenKind::Ident(name) => {
                 let name = name.clone();
                 self.advance();
-                Ok(crate::ast::ValueExpr::Literal(name))
+                Ok(ValueExpr::Literal(name))
             }
             TokenKind::StringLiteral(s) => {
                 let s = s.clone();
                 self.advance();
-                Ok(crate::ast::ValueExpr::Literal(s))
+                Ok(ValueExpr::Literal(s))
             }
             _ => Err(ParseError::new(
                 format!("expected value (identifier, string, or env()), got {}", tok.kind),
@@ -203,7 +203,7 @@ impl Parser {
         // `{`
         self.expect(&TokenKind::LBrace)?;
 
-        let mut model: Option<crate::ast::ValueExpr> = None;
+        let mut model: Option<ValueExpr> = None;
         let mut can: Vec<Capability> = Vec::new();
         let mut cannot: Vec<Capability> = Vec::new();
         let mut budget: Option<Budget> = None;
