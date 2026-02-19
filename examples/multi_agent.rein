@@ -1,0 +1,35 @@
+// Two agents in the same file — support triage and a billing bot.
+
+agent support_triage {
+    model: anthropic
+
+    can [
+        zendesk.read_ticket
+        zendesk.reply_ticket
+        zendesk.refund up to $50
+    ]
+
+    cannot [
+        zendesk.delete_ticket
+        zendesk.admin
+    ]
+
+    budget: $0.03 per ticket
+}
+
+agent billing_bot {
+    model: openai
+
+    can [
+        stripe.read_invoice
+        stripe.issue_refund up to $200
+        stripe.send_receipt
+    ]
+
+    cannot [
+        stripe.delete_customer
+        stripe.modify_subscription
+    ]
+
+    budget: $0.05 per request
+}

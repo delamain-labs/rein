@@ -1,0 +1,7 @@
+// This file intentionally contains broken syntax for error-testing purposes.
+// The capability list is missing its surrounding brackets.
+
+agent broken_agent {
+    model: anthropic
+    can zendesk.read_ticket
+}
