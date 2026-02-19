@@ -17,7 +17,7 @@ impl Span {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Constraint {
-    MonetaryCap { amount: f64, currency: String },
+    MonetaryCap { amount: u64, currency: String },
 }
 
 /// A single tool capability, e.g. `zendesk.read_ticket` or `zendesk.refund up to $50`.
@@ -32,7 +32,7 @@ pub struct Capability {
 /// A spending budget, e.g. `budget: $0.03 per ticket`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Budget {
-    pub amount: f64,
+    pub amount: u64,
     pub currency: String,
     pub unit: String,
     pub span: Span,
@@ -73,12 +73,12 @@ mod tests {
     #[test]
     fn constraint_monetary_cap_serializes() {
         let c = Constraint::MonetaryCap {
-            amount: 50.0,
+            amount: 5000,
             currency: "USD".to_string(),
         };
         let json = serde_json::to_value(&c).unwrap();
         assert_eq!(json["type"], "MonetaryCap");
-        assert_eq!(json["amount"], 50.0);
+        assert_eq!(json["amount"], 5000);
         assert_eq!(json["currency"], "USD");
     }
 
@@ -88,7 +88,7 @@ mod tests {
             namespace: "zendesk".to_string(),
             action: "refund".to_string(),
             constraint: Some(Constraint::MonetaryCap {
-                amount: 50.0,
+                amount: 5000,
                 currency: "USD".to_string(),
             }),
             span: dummy_span(),
@@ -96,7 +96,7 @@ mod tests {
         let json = serde_json::to_value(&cap).unwrap();
         assert_eq!(json["namespace"], "zendesk");
         assert_eq!(json["action"], "refund");
-        assert_eq!(json["constraint"]["amount"], 50.0);
+        assert_eq!(json["constraint"]["amount"], 5000);
     }
 
     #[test]
@@ -114,13 +114,13 @@ mod tests {
     #[test]
     fn budget_serializes() {
         let b = Budget {
-            amount: 0.03,
+            amount: 3,
             currency: "USD".to_string(),
             unit: "ticket".to_string(),
             span: dummy_span(),
         };
         let json = serde_json::to_value(&b).unwrap();
-        assert_eq!(json["amount"], 0.03);
+        assert_eq!(json["amount"], 3);
         assert_eq!(json["currency"], "USD");
         assert_eq!(json["unit"], "ticket");
     }
@@ -143,7 +143,7 @@ mod tests {
                 span: dummy_span(),
             }],
             budget: Some(Budget {
-                amount: 0.03,
+                amount: 3,
                 currency: "USD".to_string(),
                 unit: "ticket".to_string(),
                 span: dummy_span(),

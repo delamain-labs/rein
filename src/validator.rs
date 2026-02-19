@@ -91,16 +91,16 @@ fn check_can_cannot_overlap(agent: &AgentDef, diags: &mut Vec<Diagnostic>) {
     }
 }
 
-/// E003: budget amount must be positive.
+/// E003: budget amount must be positive (non-zero cents).
 fn check_budget_positive(agent: &AgentDef, diags: &mut Vec<Diagnostic>) {
     if let Some(budget) = &agent.budget
-        && budget.amount <= 0.0
+        && budget.amount == 0
     {
         diags.push(Diagnostic::error(
             "E003",
             format!(
-                "budget amount must be positive, got {} in agent '{}'",
-                budget.amount, agent.name
+                "budget amount must be positive, got 0 in agent '{}'",
+                agent.name
             ),
             budget.span.clone(),
         ));
@@ -196,8 +196,8 @@ agent foo {
 
     #[test]
     fn zero_budget_detected() {
-        // We can't express $0 directly in the grammar (0.0 parses fine),
-        // so we build the AST directly for zero/negative checks.
+        // We can't express $0 directly in the grammar, so we build the AST
+        // directly. amount is u64 (cents), so 0 is the only invalid value.
         use crate::ast::{AgentDef, Budget, ReinFile, Span};
         let file = ReinFile {
             agents: vec![AgentDef {
@@ -206,7 +206,7 @@ agent foo {
                 can: vec![],
                 cannot: vec![],
                 budget: Some(Budget {
-                    amount: 0.0,
+                    amount: 0,
                     currency: "USD".into(),
                     unit: "ticket".into(),
                     span: Span::new(0, 1),
@@ -220,27 +220,7 @@ agent foo {
         assert_eq!(errs[0].code, "E003");
     }
 
-    #[test]
-    fn negative_budget_detected() {
-        use crate::ast::{AgentDef, Budget, ReinFile, Span};
-        let file = ReinFile {
-            agents: vec![AgentDef {
-                name: "bot".into(),
-                model: Some("anthropic".into()),
-                can: vec![],
-                cannot: vec![],
-                budget: Some(Budget {
-                    amount: -5.0,
-                    currency: "USD".into(),
-                    unit: "ticket".into(),
-                    span: Span::new(0, 1),
-                }),
-                span: Span::new(0, 1),
-            }],
-        };
-        let diags = validate(&file);
-        assert!(errors(&diags).iter().any(|d| d.code == "E003"));
-    }
+    // NOTE: negative budgets are impossible to represent — amount is u64 (cents).
 
     #[test]
     fn positive_budget_ok() {

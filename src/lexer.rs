@@ -21,7 +21,7 @@ pub enum TokenKind {
     Dot,
     // Literals
     Ident(String),
-    Dollar(f64),
+    Dollar(u64),
     // Trivia
     Comment,
     Eof,
@@ -54,6 +54,26 @@ pub struct LexError {
 pub fn tokenize(source: &str) -> Result<Vec<Token>, LexError> {
     let mut lexer = Lexer::new(source);
     lexer.run()
+}
+
+/// Convert a dollar string (e.g. "0.03", "50") to integer cents without
+/// using f64, avoiding floating-point precision issues.
+fn parse_cents(s: &str) -> Result<u64, ()> {
+    let mut parts = s.splitn(2, '.');
+    let whole_str = parts.next().unwrap_or("0");
+    let frac_str = parts.next().unwrap_or("");
+
+    let whole: u64 = whole_str.parse().map_err(|_| ())?;
+
+    // Normalise fractional part to exactly 2 digits (truncate beyond cent).
+    let cents_str = match frac_str.len() {
+        0 => "00".to_string(),
+        1 => format!("{}0", frac_str),
+        _ => frac_str[..2].to_string(),
+    };
+    let cents: u64 = cents_str.parse().map_err(|_| ())?;
+
+    Ok(whole * 100 + cents)
 }
 
 struct Lexer<'a> {
@@ -124,11 +144,11 @@ impl<'a> Lexer<'a> {
             self.advance();
         }
         let num_str = std::str::from_utf8(&self.src[num_start..self.pos]).unwrap();
-        let amount: f64 = num_str.parse().map_err(|_| LexError {
+        let cents = parse_cents(num_str).map_err(|_| LexError {
             message: format!("invalid dollar amount: ${}", num_str),
             span: Span::new(start, self.pos),
         })?;
-        Ok(Token::new(TokenKind::Dollar(amount), start, self.pos))
+        Ok(Token::new(TokenKind::Dollar(cents), start, self.pos))
     }
 
     fn skip_line_comment(&mut self, start: usize) -> Token {
@@ -220,6 +240,33 @@ mod tests {
             .collect()
     }
 
+    // ── parse_cents unit tests ────────────────────────────────────────────────
+
+    #[test]
+    fn parse_cents_whole_number() {
+        assert_eq!(parse_cents("50").unwrap(), 5000);
+    }
+
+    #[test]
+    fn parse_cents_fractional() {
+        assert_eq!(parse_cents("0.03").unwrap(), 3);
+    }
+
+    #[test]
+    fn parse_cents_one_decimal_place() {
+        assert_eq!(parse_cents("1.5").unwrap(), 150);
+    }
+
+    #[test]
+    fn parse_cents_truncates_sub_cent() {
+        assert_eq!(parse_cents("0.005").unwrap(), 0);
+    }
+
+    #[test]
+    fn parse_cents_dollar_fifty() {
+        assert_eq!(parse_cents("0.50").unwrap(), 50);
+    }
+
     // ── Happy-path tests ──────────────────────────────────────────────────────
 
     #[test]
@@ -238,13 +285,13 @@ mod tests {
     #[test]
     fn tokenize_dollar_amount() {
         let tokens = non_eof(lex_ok("$0.03"));
-        assert_eq!(kinds(&tokens), vec![&TokenKind::Dollar(0.03)]);
+        assert_eq!(kinds(&tokens), vec![&TokenKind::Dollar(3)]);
     }
 
     #[test]
     fn tokenize_dollar_integer() {
         let tokens = non_eof(lex_ok("$50"));
-        assert_eq!(kinds(&tokens), vec![&TokenKind::Dollar(50.0)]);
+        assert_eq!(kinds(&tokens), vec![&TokenKind::Dollar(5000)]);
     }
 
     #[test]
@@ -265,7 +312,7 @@ mod tests {
         let tokens = non_eof(lex_ok("up to $50"));
         assert_eq!(
             kinds(&tokens),
-            vec![&TokenKind::Up, &TokenKind::To, &TokenKind::Dollar(50.0)]
+            vec![&TokenKind::Up, &TokenKind::To, &TokenKind::Dollar(5000)]
         );
     }
 
@@ -332,7 +379,7 @@ agent support_triage {
         assert!(tokens.iter().any(|t| t.kind == TokenKind::Model));
         assert!(tokens.iter().any(|t| t.kind == TokenKind::Can));
         assert!(tokens.iter().any(|t| t.kind == TokenKind::Budget));
-        assert!(tokens.iter().any(|t| t.kind == TokenKind::Dollar(0.03)));
+        assert!(tokens.iter().any(|t| t.kind == TokenKind::Dollar(3)));
         assert!(tokens.iter().any(|t| t.kind == TokenKind::Per));
     }
 

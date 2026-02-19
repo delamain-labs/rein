@@ -244,7 +244,7 @@ impl Parser {
         })
     }
 
-    fn expect_dollar(&mut self) -> Result<(f64, Span), ParseError> {
+    fn expect_dollar(&mut self) -> Result<(u64, Span), ParseError> {
         self.skip_comments();
         let tok = self.current().clone();
         match tok.kind {
@@ -341,7 +341,7 @@ agent foo {
         assert_eq!(cap.action, "refund");
         match &cap.constraint {
             Some(Constraint::MonetaryCap { amount, currency }) => {
-                assert_eq!(*amount, 50.0);
+                assert_eq!(*amount, 5000u64);
                 assert_eq!(currency, "USD");
             }
             None => panic!("expected MonetaryCap constraint"),
@@ -355,7 +355,7 @@ agent foo {
         let src = "agent foo { budget: $0.03 per ticket }";
         let f = parse_ok(src);
         let b = f.agents[0].budget.as_ref().unwrap();
-        assert_eq!(b.amount, 0.03);
+        assert_eq!(b.amount, 3u64);
         assert_eq!(b.currency, "USD");
         assert_eq!(b.unit, "ticket");
     }
