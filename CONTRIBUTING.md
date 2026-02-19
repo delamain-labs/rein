@@ -3,7 +3,7 @@
 ## Workflow
 1. **Ticket** — Every piece of work starts as a GitHub issue
 2. **Branch** — Create a branch from `master` for each issue
-3. **Build (TDD)** — Write tests first, then implementation. Use Claude Code.
+3. **Build (TDD)** — Write tests first, then implementation.
 4. **PR** — Push branch, open PR referencing the issue
 5. **Review** — Sub-agent reviewer provides feedback on the PR
 6. **Address** — Claude Code fixes review feedback, pushes updates

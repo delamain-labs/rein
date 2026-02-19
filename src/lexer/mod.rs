@@ -318,6 +318,9 @@ impl<'a> Lexer<'a> {
                 Some(b',') => tokens.push(Token::new(TokenKind::Comma, start, self.pos)),
                 Some(b'"') => tokens.push(self.read_string(start)?),
                 Some(b'$') => tokens.push(self.read_dollar(start)?),
+                Some(b'#') => {
+                    tokens.push(self.skip_line_comment(start));
+                }
                 Some(b'/') if self.peek() == Some(b'/') => {
                     self.advance(); // second '/'
                     tokens.push(self.skip_line_comment(start));
