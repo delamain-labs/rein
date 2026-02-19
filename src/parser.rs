@@ -209,7 +209,7 @@ impl Parser {
                     seen_budget = true;
                     self.advance(); // consume `budget`
                     self.expect(&TokenKind::Colon)?;
-                    budget = Some(self.parse_budget(start)?);
+                    budget = Some(self.parse_budget()?);
                 }
                 TokenKind::Eof => {
                     return Err(ParseError::new(
@@ -292,7 +292,7 @@ impl Parser {
         }
     }
 
-    fn parse_budget(&mut self, _agent_start: usize) -> Result<Budget, ParseError> {
+    fn parse_budget(&mut self) -> Result<Budget, ParseError> {
         let start = self.current_span().start;
         let (amount, _) = self.expect_dollar()?;
         self.expect(&TokenKind::Per)?;
