@@ -1,4 +1,4 @@
-use crate::ast::{AgentDef, Constraint, ProviderDef, ReinFile, Span};
+use crate::ast::{AgentDef, Constraint, ProviderDef, ReinFile, Span, ToolDef};
 
 /// Severity of a diagnostic.
 #[derive(Debug, Clone, PartialEq)]
@@ -45,6 +45,7 @@ impl Diagnostic {
 pub fn validate(file: &ReinFile) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     check_duplicate_provider_names(file, &mut diags);
+    check_duplicate_tool_names(file, &mut diags);
     for provider in &file.providers {
         check_provider_key_present(provider, &mut diags);
     }
@@ -317,6 +318,26 @@ fn check_duplicate_provider_names(file: &ReinFile, diags: &mut Vec<Diagnostic>) 
             ));
         } else {
             seen.insert(&provider.name, provider);
+        }
+    }
+}
+
+/// E011: two tools with the same name.
+fn check_duplicate_tool_names(file: &ReinFile, diags: &mut Vec<Diagnostic>) {
+    use std::collections::HashMap;
+    let mut seen: HashMap<&str, &ToolDef> = HashMap::new();
+    for tool in &file.tools {
+        if let Some(first) = seen.get(tool.name.as_str()) {
+            diags.push(Diagnostic::error(
+                "E011",
+                format!(
+                    "duplicate tool name '{}': first defined at {}",
+                    tool.name, first.span.start
+                ),
+                tool.span.clone(),
+            ));
+        } else {
+            seen.insert(&tool.name, tool);
         }
     }
 }

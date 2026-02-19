@@ -19,6 +19,8 @@ pub enum TokenKind {
     Key,
     Step,
     Goal,
+    Tool,
+    Endpoint,
     // Symbols
     LBrace,
     RBrace,
@@ -65,6 +67,8 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Key => write!(f, "key"),
             TokenKind::Step => write!(f, "step"),
             TokenKind::Goal => write!(f, "goal"),
+            TokenKind::Tool => write!(f, "tool"),
+            TokenKind::Endpoint => write!(f, "endpoint"),
             TokenKind::Ident(s) => write!(f, "{s}"),
             TokenKind::Dollar(n) => write!(f, "${}.{:02}", n / 100, n % 100),
             TokenKind::StringLiteral(s) => write!(f, "\"{s}\""),
@@ -183,6 +187,8 @@ impl<'a> Lexer<'a> {
             "key" => TokenKind::Key,
             "step" => TokenKind::Step,
             "goal" => TokenKind::Goal,
+            "tool" => TokenKind::Tool,
+            "endpoint" => TokenKind::Endpoint,
             _ => TokenKind::Ident(word.to_string()),
         };
         Token::new(kind, start, end)

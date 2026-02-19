@@ -80,6 +80,7 @@ fn zero_budget_detected() {
     use crate::ast::{AgentDef, Budget, ReinFile, Span};
     let file = ReinFile {
         providers: vec![],
+        tools: vec![],
         agents: vec![AgentDef {
             name: "bot".into(),
             model: Some(ValueExpr::Literal("anthropic".into())),
@@ -339,6 +340,19 @@ fn duplicate_step_names_error() {
     );
     let errors: Vec<_> = diags.iter().filter(|d| d.code == "E009").collect();
     assert_eq!(errors.len(), 1);
+}
+
+#[test]
+fn duplicate_tool_names_error() {
+    let diags = validate_src(
+        r#"
+        tool zendesk { endpoint: "https://a.com" }
+        tool zendesk { endpoint: "https://b.com" }
+    "#,
+    );
+    let errors: Vec<_> = diags.iter().filter(|d| d.code == "E011").collect();
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].message.contains("duplicate tool name"));
 }
 
 #[test]

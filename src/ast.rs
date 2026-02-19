@@ -134,6 +134,23 @@ pub struct ProviderDef {
 }
 
 // ---------------------------------------------------------------------------
+// Tool types
+// ---------------------------------------------------------------------------
+
+/// A tool block: `tool zendesk { endpoint: "https://..." }`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToolDef {
+    pub name: String,
+    /// The endpoint URL for this tool.
+    pub endpoint: Option<ValueExpr>,
+    /// Optional provider type (e.g. `rest_api`, `mcp`).
+    pub provider: Option<ValueExpr>,
+    /// Optional API key or credential reference.
+    pub key: Option<ValueExpr>,
+    pub span: Span,
+}
+
+// ---------------------------------------------------------------------------
 // Workflow types
 // ---------------------------------------------------------------------------
 
@@ -206,6 +223,7 @@ pub struct WorkflowDef {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReinFile {
     pub providers: Vec<ProviderDef>,
+    pub tools: Vec<ToolDef>,
     pub agents: Vec<AgentDef>,
     pub workflows: Vec<WorkflowDef>,
 }
@@ -317,6 +335,7 @@ mod tests {
     fn rein_file_roundtrips_via_json() {
         let file = ReinFile {
             providers: vec![],
+            tools: vec![],
             agents: vec![AgentDef {
                 name: "bot".to_string(),
                 model: None,
@@ -426,6 +445,7 @@ mod tests {
     fn rein_file_with_workflows_roundtrips() {
         let file = ReinFile {
             providers: vec![],
+            tools: vec![],
             agents: vec![],
             workflows: vec![WorkflowDef {
                 name: "pipeline".to_string(),
