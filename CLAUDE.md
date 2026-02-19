@@ -1,9 +1,38 @@
-# Rein — Phase 1: Proof of Life
+# Rein
 
-You are building **Rein**, a declarative language + runtime for AI agent orchestration. Think "Terraform for AI agents." This is the Rust runtime.
+You are working on **Rein**, a declarative language + runtime for AI agent orchestration. "The Terraform of AI agents." This is the Rust runtime.
 
 ## What Rein Is
 A vendor-neutral control plane for production AI agents. `.rein` files define agents with permissions (`can`/`cannot`), budgets, and tool access. The runtime **enforces** these at execution time — not via prompts, but via actual runtime interception.
+
+## Development Rules (ALWAYS follow these)
+
+### Workflow
+1. Every piece of work starts as a **GitHub issue** on `delamain-labs/rein`
+2. Create a **branch** from `master` for each issue
+3. **TDD** — write tests FIRST, then implementation
+4. Push branch, open a **PR** referencing the issue
+5. PRs are reviewed before merge. Never merge without review.
+6. Out-of-scope findings become new GitHub issues
+
+### Code Standards
+- **Idiomatic Rust.** Proper `Result<T, E>`. No `.unwrap()` outside tests.
+- **SOLID principles.** Single responsibility per module. Open for extension.
+- **Small commits.** One logical change per commit.
+- **Commit format:** `feat:`, `fix:`, `docs:`, `test:`, `refactor:`
+- **All tests must pass** (`cargo test`) before committing.
+
+### Review Criteria (what reviewers check)
+1. **Does this work?** — Tests pass, logic correct, edge cases handled
+2. **Does this adhere to SOLID principles?**
+3. **Would I merge this into production?** — No shortcuts, no tech debt
+
+### Project Structure
+- Repo: `delamain-labs/rein` (private)
+- Project board: GitHub Projects on delamain-labs
+- Language: Rust (single binary, no runtime deps)
+- Error reporting: `ariadne` crate
+- CLI: `clap` crate
 
 ## Phase 1 Goal (This Session)
 Build `rein validate` — a CLI that parses `.rein` files into a typed AST and validates them.

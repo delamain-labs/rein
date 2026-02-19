@@ -1,0 +1,18 @@
+// A single support triage agent with full capability and budget declarations.
+
+agent support_triage {
+    model: anthropic
+
+    can [
+        zendesk.read_ticket
+        zendesk.reply_ticket
+        zendesk.refund up to $50
+    ]
+
+    cannot [
+        zendesk.delete_ticket
+        zendesk.admin
+    ]
+
+    budget: $0.03 per ticket
+}
