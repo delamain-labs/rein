@@ -586,8 +586,7 @@ impl Parser {
                     seen_trigger = true;
                     self.advance();
                     self.expect(&TokenKind::Colon)?;
-                    let (value, _) = self.expect_ident()?;
-                    trigger = Some(value);
+                    trigger = Some(self.parse_trigger_expr()?);
                 }
                 TokenKind::Stages => {
                     if seen_stages {
@@ -821,6 +820,35 @@ impl Parser {
             unit,
             span: Span::new(start, end),
         })
+    }
+    /// Parse a trigger expression: either a string literal or a sequence of
+    /// identifiers (e.g., `new ticket in zendesk`).
+    fn parse_trigger_expr(&mut self) -> Result<String, ParseError> {
+        self.skip_comments();
+        match self.peek().clone() {
+            TokenKind::StringLiteral(s) => {
+                self.advance();
+                Ok(s)
+            }
+            TokenKind::Ident(_) => {
+                let mut parts = Vec::new();
+                while let TokenKind::Ident(word) = self.peek().clone() {
+                    parts.push(word);
+                    self.advance();
+                }
+                if parts.is_empty() {
+                    return Err(ParseError::new(
+                        "expected trigger expression",
+                        self.current_span(),
+                    ));
+                }
+                Ok(parts.join(" "))
+            }
+            _ => Err(ParseError::new(
+                format!("expected trigger expression, got {}", self.peek()),
+                self.current_span(),
+            )),
+        }
     }
 }
 
