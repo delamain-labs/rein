@@ -22,6 +22,7 @@ fn make_agent(
             unit: "per run".to_string(),
             span: Span { start: 0, end: 1 },
         }),
+        guardrails: None,
         span: Span { start: 0, end: 10 },
     }
 }

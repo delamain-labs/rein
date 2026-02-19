@@ -92,6 +92,7 @@ fn zero_budget_detected() {
                 unit: "ticket".into(),
                 span: Span::new(0, 1),
             }),
+            guardrails: None,
             span: Span::new(0, 1),
         }],
         workflows: vec![],

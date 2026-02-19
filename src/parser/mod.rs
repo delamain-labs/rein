@@ -1,6 +1,6 @@
 use crate::ast::{
-    AgentDef, Budget, Capability, Constraint, ExecutionMode, ProviderDef, ReinFile, RouteRule,
-    Span, Stage, ToolDef, ValueExpr, WorkflowDef,
+    AgentDef, Budget, Capability, Constraint, ExecutionMode, GuardrailRule, GuardrailSection,
+    GuardrailsDef, ProviderDef, ReinFile, RouteRule, Span, Stage, ToolDef, ValueExpr, WorkflowDef,
 };
 use crate::lexer::{Token, TokenKind, tokenize};
 
@@ -108,7 +108,7 @@ impl Parser {
         match &tok.kind {
             TokenKind::Ident(name) if name == "env" => {
                 let start = tok.span.start;
-                self.advance(); // consume 'env'
+                self.advance();
                 self.expect(&TokenKind::LParen)?;
                 self.skip_comments();
                 let arg_tok = self.current().clone();
@@ -338,26 +338,19 @@ impl Parser {
         self.skip_comments();
         let start = self.current_span().start;
 
-        // `agent`
         self.expect(&TokenKind::Agent)?;
-
-        // agent name
         let (name, _) = self.expect_ident()?;
-
-        // `{`
         self.expect(&TokenKind::LBrace)?;
 
         let mut model: Option<ValueExpr> = None;
         let mut can: Vec<Capability> = Vec::new();
         let mut cannot: Vec<Capability> = Vec::new();
         let mut budget: Option<Budget> = None;
+        let mut guardrails: Option<GuardrailsDef> = None;
 
-        let mut seen_model = false;
-        let mut seen_can = false;
-        let mut seen_cannot = false;
-        let mut seen_budget = false;
+        let (mut seen_model, mut seen_can, mut seen_cannot) = (false, false, false);
+        let (mut seen_budget, mut seen_guardrails) = (false, false);
 
-        // Parse fields until `}`
         loop {
             self.skip_comments();
             match self.peek().clone() {
@@ -370,6 +363,7 @@ impl Parser {
                         can,
                         cannot,
                         budget,
+                        guardrails,
                         span: Span::new(start, end),
                     });
                 }
@@ -381,7 +375,7 @@ impl Parser {
                         ));
                     }
                     seen_model = true;
-                    self.advance(); // consume `model`
+                    self.advance();
                     self.expect(&TokenKind::Colon)?;
                     let value = self.parse_value_expr()?;
                     model = Some(value);
@@ -394,7 +388,7 @@ impl Parser {
                         ));
                     }
                     seen_can = true;
-                    self.advance(); // consume `can`
+                    self.advance();
                     can = self.parse_capability_list()?;
                 }
                 TokenKind::Cannot => {
@@ -405,7 +399,7 @@ impl Parser {
                         ));
                     }
                     seen_cannot = true;
-                    self.advance(); // consume `cannot`
+                    self.advance();
                     cannot = self.parse_capability_list()?;
                 }
                 TokenKind::Budget => {
@@ -416,9 +410,19 @@ impl Parser {
                         ));
                     }
                     seen_budget = true;
-                    self.advance(); // consume `budget`
+                    self.advance();
                     self.expect(&TokenKind::Colon)?;
                     budget = Some(self.parse_budget()?);
+                }
+                TokenKind::Guardrails => {
+                    if seen_guardrails {
+                        return Err(ParseError::new(
+                            format!("duplicate field 'guardrails' in agent '{name}'"),
+                            self.current_span(),
+                        ));
+                    }
+                    seen_guardrails = true;
+                    guardrails = Some(self.parse_guardrails()?);
                 }
                 TokenKind::Eof => {
                     return Err(ParseError::new(
@@ -429,6 +433,98 @@ impl Parser {
                 other => {
                     return Err(ParseError::new(
                         format!("unexpected token in agent body: {other}"),
+                        self.current_span(),
+                    ));
+                }
+            }
+        }
+    }
+
+    fn parse_guardrails(&mut self) -> Result<GuardrailsDef, ParseError> {
+        let start = self.current_span().start;
+        self.expect(&TokenKind::Guardrails)?;
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut sections = Vec::new();
+        let mut seen_names: Vec<String> = Vec::new();
+
+        loop {
+            self.skip_comments();
+            match self.peek().clone() {
+                TokenKind::RBrace => {
+                    let end = self.current_span().end;
+                    self.advance();
+                    return Ok(GuardrailsDef {
+                        sections,
+                        span: Span::new(start, end),
+                    });
+                }
+                TokenKind::Ident(section_name) => {
+                    if seen_names.contains(&section_name) {
+                        return Err(ParseError::new(
+                            format!("duplicate guardrail section '{section_name}'"),
+                            self.current_span(),
+                        ));
+                    }
+                    seen_names.push(section_name.clone());
+                    sections.push(self.parse_guardrail_section()?);
+                }
+                TokenKind::Eof => {
+                    return Err(ParseError::new(
+                        "unexpected end of file in guardrails block",
+                        self.current_span(),
+                    ));
+                }
+                other => {
+                    return Err(ParseError::new(
+                        format!("expected section name in guardrails, got {other}"),
+                        self.current_span(),
+                    ));
+                }
+            }
+        }
+    }
+
+    fn parse_guardrail_section(&mut self) -> Result<GuardrailSection, ParseError> {
+        let start = self.current_span().start;
+        let (name, _) = self.expect_ident()?;
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut rules = Vec::new();
+
+        loop {
+            self.skip_comments();
+            match self.peek().clone() {
+                TokenKind::RBrace => {
+                    let end = self.current_span().end;
+                    self.advance();
+                    return Ok(GuardrailSection {
+                        name,
+                        rules,
+                        span: Span::new(start, end),
+                    });
+                }
+                TokenKind::Ident(key) => {
+                    let rule_start = self.current_span().start;
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    let (value, _) = self.expect_ident()?;
+                    let rule_end = self.current_span().start;
+                    rules.push(GuardrailRule {
+                        key,
+                        value,
+                        span: Span::new(rule_start, rule_end),
+                    });
+                }
+                TokenKind::Eof => {
+                    return Err(ParseError::new(
+                        "unexpected end of file in guardrail section",
+                        self.current_span(),
+                    ));
+                }
+                other => {
+                    return Err(ParseError::new(
+                        format!("expected rule or '}}' in guardrail section, got {other}"),
                         self.current_span(),
                     ));
                 }
@@ -678,7 +774,7 @@ impl Parser {
 
         // optional `up to $<amount>`
         let constraint = if self.peek() == &TokenKind::Up {
-            self.advance(); // consume `up`
+            self.advance();
             self.expect(&TokenKind::To)?;
             let (amount, _) = self.expect_dollar()?;
             Some(Constraint::MonetaryCap {
