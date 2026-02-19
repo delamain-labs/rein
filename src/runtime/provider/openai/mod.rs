@@ -125,6 +125,7 @@ impl OpenAiProvider {
     }
 }
 
+#[async_trait::async_trait]
 impl Provider for OpenAiProvider {
     async fn chat(
         &self,
