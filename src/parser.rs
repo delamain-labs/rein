@@ -74,7 +74,7 @@ impl Parser {
     /// Advance one token, skipping comments.
     fn advance(&mut self) {
         if self.current().kind != TokenKind::Eof {
-            self.last_consumed_end = self.tokens[self.pos].span.end;
+            self.last_consumed_end = self.current().span.end;
             self.pos += 1;
         }
         self.skip_comments();
@@ -424,41 +424,21 @@ agent foo {
     // ── Span accuracy ─────────────────────────────────────────────────────────
 
     #[test]
-    fn capability_span_ends_at_last_consumed_token() {
-        // source: "agent foo { can [ zendesk.read_ticket ] }"
-        //                           ^18                ^37
-        // "zendesk" starts at byte 18, "read_ticket" ends at byte 37.
-        // The span end must be 37 (end of last consumed token), not 38 (start of ']').
+    fn capability_span_simple() {
         let src = "agent foo { can [ zendesk.read_ticket ] }";
         let f = parse_ok(src);
         let cap = &f.agents[0].can[0];
-        assert_eq!(
-            cap.span.start, 18,
-            "span start should be start of 'zendesk'"
-        );
-        assert_eq!(
-            cap.span.end, 37,
-            "span end should be end of 'read_ticket', not start of ']'"
-        );
+        let text = &src[cap.span.start..cap.span.end];
+        assert_eq!(text, "zendesk.read_ticket");
     }
 
     #[test]
-    fn capability_span_with_constraint_ends_at_dollar() {
-        // source: "agent foo { can [ zendesk.refund up to $50 ] }"
-        //                           ^18              ^39   ^42
-        // "zendesk" starts at byte 18, "$50" ends at byte 42.
-        // The span end must be 42 (end of '$50'), not 43 (start of ']').
+    fn capability_span_with_constraint() {
         let src = "agent foo { can [ zendesk.refund up to $50 ] }";
         let f = parse_ok(src);
         let cap = &f.agents[0].can[0];
-        assert_eq!(
-            cap.span.start, 18,
-            "span start should be start of 'zendesk'"
-        );
-        assert_eq!(
-            cap.span.end, 42,
-            "span end should be end of '$50', not start of ']'"
-        );
+        let text = &src[cap.span.start..cap.span.end];
+        assert_eq!(text, "zendesk.refund up to $50");
     }
 
     // ── Error paths ───────────────────────────────────────────────────────────
