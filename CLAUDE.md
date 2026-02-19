@@ -19,10 +19,16 @@ A vendor-neutral control plane for production AI agents. `.rein` files define ag
 - **Idiomatic Rust.** Proper `Result<T, E>`. No `.unwrap()` outside tests.
 - **SOLID principles.** Single responsibility per module. Open for extension.
 - **Small commits.** One logical change per commit.
-- **Commit format:** `feat:`, `fix:`, `docs:`, `test:`, `refactor:`
+- **Commit format:** `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`
 - **All tests must pass** (`cargo test`) before committing.
 - **Run `cargo fmt`** before committing. No formatting diffs allowed.
-- **Run `cargo clippy`** before committing. No warnings allowed.
+- **Run `cargo clippy`** before committing. No warnings allowed (pedantic enabled).
+
+### File Structure Rules
+- **Tests go in separate files.** Never inline `#[cfg(test)] mod tests { ... }` in source files.
+- Use `mod.rs` + `tests.rs` pattern: logic in `mod.rs`, tests in `tests.rs` within a directory.
+- Small modules (< 200 lines with no tests) can stay as flat files (e.g., `ast.rs`, `error.rs`).
+- No file should exceed ~400 lines of logic. If it does, split it.
 
 ### Review Criteria (what reviewers check)
 1. **Does this work?** — Tests pass, logic correct, edge cases handled
@@ -30,113 +36,50 @@ A vendor-neutral control plane for production AI agents. `.rein` files define ag
 3. **Would I merge this into production?** — No shortcuts, no tech debt
 
 ### Project Structure
+```
+src/
+  main.rs              — CLI entry point (clap), thin dispatch
+  lib.rs               — Public API re-exports
+  ast.rs               — AST type definitions
+  error.rs             — Error types with spans and pretty-printing
+  commands/
+    mod.rs             — Command module declarations
+    validate.rs        — `rein validate` command
+  lexer/
+    mod.rs             — Tokenizer for .rein files
+    tests.rs           — Lexer tests
+  parser/
+    mod.rs             — Recursive descent parser → AST
+    tests.rs           — Parser tests
+  validator/
+    mod.rs             — Validation passes
+    tests.rs           — Validator tests
+tests/
+  cli.rs               — Integration tests
+examples/
+  basic.rein           — Simple agent definition
+  multi_agent.rein     — Multiple agents
+  invalid.rein         — Intentionally broken for error testing
+```
+
+### Tech Stack
 - Repo: `delamain-labs/rein` (private)
-- Project board: GitHub Projects on delamain-labs
 - Language: Rust (single binary, no runtime deps)
 - Error reporting: `ariadne` crate
 - CLI: `clap` crate
+- Serialization: `serde` + `serde_json`
+- License: MIT
 
-## Phase 1 Goal (This Session)
-Build `rein validate` — a CLI that parses `.rein` files into a typed AST and validates them.
+## Current State
+- `rein validate` — fully functional parser + validator
+- 99 tests (91 unit + 8 integration), all passing
+- clippy pedantic enabled, zero warnings
+- All Phase 1 backlog issues (#9–#22) resolved
 
-### The `.rein` Language (Subset for Phase 1)
+## Next Phase: `rein run`
+Build the runtime that executes agents within their declared constraints.
 
-```rein
-agent support_triage {
-    model: anthropic
-
-    can [
-        zendesk.read_ticket
-        zendesk.reply_ticket
-        zendesk.refund up to $50
-    ]
-
-    cannot [
-        zendesk.delete_ticket
-        zendesk.admin
-    ]
-
-    budget: $0.03 per ticket
-}
+When completely finished with a task, run:
 ```
-
-#### Grammar rules for Phase 1:
-- `agent <name> { ... }` — top-level agent definition
-- `model: <provider>` — LLM provider (string)
-- `can [ ... ]` — list of allowed tool capabilities
-- `cannot [ ... ]` — list of denied tool capabilities
-- Tool capabilities are `namespace.action` (e.g., `zendesk.read_ticket`)
-- Tool capabilities can have constraints: `up to $<amount>` (monetary cap)
-- `budget: $<amount> per <unit>` — spending limit per invocation unit
-- Comments with `//` and `/* */`
-- Whitespace-insensitive
-
-#### AST types needed:
-- `AgentDef` — name, model, capabilities (can/cannot), budget
-- `Capability` — tool reference (namespace + action) + optional constraint (monetary cap)
-- `Budget` — amount (f64), currency (USD for now), unit (string)
-
-### CLI Interface
+openclaw system event --text "Done: <description>" --mode now
 ```
-rein validate <file.rein>     # Parse + validate, print errors or "Valid ✓"
-rein validate --ast <file.rein>  # Parse + dump AST as JSON
-```
-
-### Error Messages
-Errors should be **human-readable**, with line/column, the offending text, and a suggestion. Example:
-```
-error[E001]: unknown tool namespace 'zendsk'
-  --> agent.rein:5:9
-   |
- 5 |         zendsk.read_ticket
-   |         ^^^^^^ did you mean 'zendesk'?
-   |
-   = note: tool namespaces must be registered before use
-```
-
-(For Phase 1, we won't have a registry — just parse and validate syntax. Semantic validation of tool names comes later.)
-
-### Architecture
-```
-src/
-  main.rs          — CLI entry point (clap)
-  lexer.rs         — Tokenizer for .rein files
-  parser.rs        — Recursive descent parser → AST
-  ast.rs           — AST type definitions
-  validator.rs     — Validation passes (syntax correctness, budget sanity, etc.)
-  error.rs         — Error types with spans and pretty-printing
-```
-
-### Dependencies (keep minimal)
-- `clap` — CLI argument parsing
-- `serde` + `serde_json` — AST serialization for `--ast` flag
-- `miette` or `ariadne` — pretty error reporting with source spans
-- That's it. No other deps.
-
-### Quality Bar
-- `cargo build` produces a single binary
-- `cargo test` has tests for: valid agent parsing, missing fields, malformed budgets, unknown syntax, constraint parsing
-- Error messages are colorful and helpful, not stack traces
-- Code is idiomatic Rust with proper error handling (no unwrap in non-test code)
-
-### Example test files to create:
-- `examples/basic.rein` — the support_triage agent above
-- `examples/multi_agent.rein` — two agents in one file
-- `examples/invalid.rein` — intentionally broken for error testing
-
-## Non-Goals (Do NOT build these yet)
-- No `rein run` (execution comes in Phase 1b)
-- No LLM API calls
-- No workflow syntax
-- No durable execution
-- No Tree-sitter grammar (yet)
-- No LSP
-
-## Style
-- Idiomatic Rust. Proper `Result<T, E>` handling.
-- Good module separation.
-- Tests for every parser rule.
-- Commit after each milestone (lexer done, parser done, validator done, CLI done).
-
-When completely finished, run this command to notify me:
-openclaw system event --text "Done: rein validate CLI — parses .rein files into typed AST with pretty error reporting" --mode now
