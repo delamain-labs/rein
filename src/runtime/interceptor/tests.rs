@@ -1,12 +1,13 @@
 use serde_json::json;
 
 use super::*;
+use crate::ast::ValueExpr;
 use crate::ast::{AgentDef, Capability, Constraint, Span};
 
 fn make_agent(can: Vec<Capability>, cannot: Vec<Capability>) -> AgentDef {
     AgentDef {
         name: "test_agent".to_string(),
-        model: Some("openai".to_string()),
+        model: Some(ValueExpr::Literal("openai".into())),
         can,
         cannot,
         budget: None,

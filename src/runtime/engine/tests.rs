@@ -1,6 +1,7 @@
 use serde_json::json;
 
 use super::*;
+use crate::ast::ValueExpr;
 use crate::ast::{AgentDef, Capability, Constraint, Span};
 use crate::runtime::executor::MockExecutor;
 use crate::runtime::provider::{ChatResponse, MockProvider, ToolCallRequest, ToolDef, Usage};
@@ -8,7 +9,7 @@ use crate::runtime::provider::{ChatResponse, MockProvider, ToolCallRequest, Tool
 fn make_agent(can: Vec<Capability>, cannot: Vec<Capability>, budget_cents: Option<u64>) -> AgentDef {
     AgentDef {
         name: "test".to_string(),
-        model: Some("gpt-4o".to_string()),
+        model: Some(ValueExpr::Literal("gpt-4o".into())),
         can,
         cannot,
         budget: budget_cents.map(|amount| crate::ast::Budget {

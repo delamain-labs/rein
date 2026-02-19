@@ -1,4 +1,5 @@
 use super::*;
+use crate::ast::ValueExpr;
 use crate::parser::parse;
 
 fn validate_src(src: &str) -> Vec<Diagnostic> {
@@ -80,7 +81,7 @@ fn zero_budget_detected() {
     let file = ReinFile {
         agents: vec![AgentDef {
             name: "bot".into(),
-            model: Some("anthropic".into()),
+            model: Some(ValueExpr::Literal("anthropic".into())),
             can: vec![],
             cannot: vec![],
             budget: Some(Budget {

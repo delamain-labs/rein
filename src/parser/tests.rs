@@ -15,7 +15,7 @@ fn parse_err(src: &str) -> ParseError {
 fn parse_model_as_string_literal() {
     let f = parse_ok(r#"agent foo { model: "anthropic/claude-3-sonnet" }"#);
     assert_eq!(
-        f.agents[0].model.as_deref(),
+        f.agents[0].model.as_ref().and_then(|v| v.as_literal()),
         Some("anthropic/claude-3-sonnet")
     );
 }
@@ -23,21 +23,90 @@ fn parse_model_as_string_literal() {
 #[test]
 fn parse_model_string_literal_with_dashes() {
     let f = parse_ok(r#"agent foo { model: "gpt-4o" }"#);
-    assert_eq!(f.agents[0].model.as_deref(), Some("gpt-4o"));
+    assert_eq!(f.agents[0].model.as_ref().and_then(|v| v.as_literal()), Some("gpt-4o"));
 }
 
 #[test]
 fn parse_model_ident_still_works() {
     // Bare identifier must continue to work alongside string literals.
     let f = parse_ok("agent foo { model: anthropic }");
-    assert_eq!(f.agents[0].model.as_deref(), Some("anthropic"));
+    assert_eq!(f.agents[0].model.as_ref().and_then(|v| v.as_literal()), Some("anthropic"));
 }
 
 #[test]
 fn error_model_invalid_value() {
     // A dollar amount is neither an ident nor a string — must error.
     let err = parse_err("agent foo { model: $5 }");
-    assert!(err.message.contains("model name"), "got: {}", err.message);
+    assert!(err.message.contains("expected value"), "got: {}", err.message);
+}
+
+// ── env() function parsing ────────────────────────────────────────────────
+
+#[test]
+fn parse_env_in_model_field() {
+    let f = parse_ok(r#"agent foo { model: env("MODEL_NAME") }"#);
+    match &f.agents[0].model {
+        Some(crate::ast::ValueExpr::EnvRef { var_name, .. }) => {
+            assert_eq!(var_name, "MODEL_NAME");
+        }
+        other => panic!("expected EnvRef, got: {other:?}"),
+    }
+}
+
+#[test]
+fn env_missing_lparen_errors() {
+    let err = parse_err(r#"agent foo { model: env "KEY" }"#);
+    assert!(err.message.contains("("), "got: {}", err.message);
+}
+
+#[test]
+fn env_missing_string_arg_errors() {
+    // env() requires a string literal, not a bare identifier
+    let err = parse_err("agent foo { model: env(KEY) }");
+    assert!(
+        err.message.contains("string argument"),
+        "got: {}",
+        err.message
+    );
+}
+
+#[test]
+fn env_missing_rparen_errors() {
+    let err = parse_err(r#"agent foo { model: env("KEY" }"#);
+    assert!(err.message.contains(")"), "got: {}", err.message);
+}
+
+#[test]
+fn env_resolve_with_present_var() {
+    let expr = crate::ast::ValueExpr::EnvRef {
+        var_name: "MY_KEY".to_string(),
+        span: crate::ast::Span::new(0, 1),
+    };
+    let lookup = |name: &str| {
+        if name == "MY_KEY" { Some("secret_value".to_string()) } else { None }
+    };
+    assert_eq!(expr.resolve_with(lookup).unwrap(), "secret_value");
+}
+
+#[test]
+fn env_resolve_with_missing_var() {
+    let expr = crate::ast::ValueExpr::EnvRef {
+        var_name: "MISSING_KEY".to_string(),
+        span: crate::ast::Span::new(0, 1),
+    };
+    let lookup = |_: &str| None;
+    let err = expr.resolve_with(lookup).unwrap_err();
+    assert!(
+        matches!(err, crate::ast::ResolveError::EnvVarNotSet(ref name) if name == "MISSING_KEY"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn literal_value_resolves_directly() {
+    let expr = crate::ast::ValueExpr::Literal("openai".to_string());
+    let lookup = |_: &str| None; // shouldn't be called
+    assert_eq!(expr.resolve_with(lookup).unwrap(), "openai");
 }
 
 // ── Minimal agent ─────────────────────────────────────────────────────────
@@ -48,7 +117,7 @@ fn parse_minimal_agent() {
     assert_eq!(f.agents.len(), 1);
     let a = &f.agents[0];
     assert_eq!(a.name, "foo");
-    assert_eq!(a.model.as_deref(), Some("anthropic"));
+    assert_eq!(a.model.as_ref().and_then(|v| v.as_literal()), Some("anthropic"));
     assert!(a.can.is_empty());
     assert!(a.cannot.is_empty());
     assert!(a.budget.is_none());
@@ -137,7 +206,7 @@ budget: $0.03 per ticket
     let f = parse_ok(src);
     let a = &f.agents[0];
     assert_eq!(a.name, "support_triage");
-    assert_eq!(a.model.as_deref(), Some("anthropic"));
+    assert_eq!(a.model.as_ref().and_then(|v| v.as_literal()), Some("anthropic"));
     assert_eq!(a.can.len(), 3);
     assert_eq!(a.cannot.len(), 2);
     assert!(a.budget.is_some());
@@ -171,7 +240,7 @@ model: anthropic /* inline */
 }
 "#;
     let f = parse_ok(src);
-    assert_eq!(f.agents[0].model.as_deref(), Some("anthropic"));
+    assert_eq!(f.agents[0].model.as_ref().and_then(|v| v.as_literal()), Some("anthropic"));
 }
 
 // ── Span accuracy ─────────────────────────────────────────────────────────
