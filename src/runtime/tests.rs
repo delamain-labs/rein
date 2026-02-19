@@ -1,5 +1,183 @@
 use super::*;
 
+// ── ToolRegistry / permissions ─────────────────────────────────────────────
+
+mod permissions_tests {
+    use crate::ast::{AgentDef, Capability, Constraint, Span};
+    use crate::runtime::permissions::{MonetaryCap, PermissionDenied, ToolRegistry};
+
+    fn span() -> Span {
+        Span::new(0, 1)
+    }
+
+    fn cap(namespace: &str, action: &str) -> Capability {
+        Capability {
+            namespace: namespace.into(),
+            action: action.into(),
+            constraint: None,
+            span: span(),
+        }
+    }
+
+    fn cap_with_monetary(namespace: &str, action: &str, amount: u64, currency: &str) -> Capability {
+        Capability {
+            namespace: namespace.into(),
+            action: action.into(),
+            constraint: Some(Constraint::MonetaryCap {
+                amount,
+                currency: currency.into(),
+            }),
+            span: span(),
+        }
+    }
+
+    fn agent(can: Vec<Capability>, cannot: Vec<Capability>) -> AgentDef {
+        AgentDef {
+            name: "test_agent".into(),
+            model: None,
+            can,
+            cannot,
+            budget: None,
+            span: span(),
+        }
+    }
+
+    #[test]
+    fn allowed_tool_passes() {
+        let registry =
+            ToolRegistry::from_agent(&agent(vec![cap("zendesk", "read_ticket")], vec![]));
+        assert!(registry.check_permission("zendesk", "read_ticket").is_ok());
+    }
+
+    #[test]
+    fn denied_tool_is_blocked() {
+        let registry =
+            ToolRegistry::from_agent(&agent(vec![], vec![cap("zendesk", "delete_ticket")]));
+        let err = registry
+            .check_permission("zendesk", "delete_ticket")
+            .unwrap_err();
+        assert!(
+            err.reason.contains("cannot"),
+            "expected 'cannot' in reason, got: {}",
+            err.reason
+        );
+    }
+
+    #[test]
+    fn unknown_tool_is_default_denied() {
+        let registry =
+            ToolRegistry::from_agent(&agent(vec![cap("zendesk", "read_ticket")], vec![]));
+        let err = registry
+            .check_permission("zendesk", "delete_ticket")
+            .unwrap_err();
+        assert!(
+            err.reason.contains("default deny"),
+            "expected 'default deny' in reason, got: {}",
+            err.reason
+        );
+    }
+
+    #[test]
+    fn empty_agent_denies_all() {
+        let registry = ToolRegistry::from_agent(&agent(vec![], vec![]));
+        let err = registry.check_permission("any", "tool").unwrap_err();
+        assert!(err.reason.contains("default deny"));
+    }
+
+    #[test]
+    fn monetary_cap_is_tracked() {
+        let registry = ToolRegistry::from_agent(&agent(
+            vec![cap_with_monetary("zendesk", "refund", 5000, "USD")],
+            vec![],
+        ));
+        assert!(registry.check_permission("zendesk", "refund").is_ok());
+        let mc = registry
+            .monetary_cap("zendesk", "refund")
+            .expect("cap present");
+        assert_eq!(mc.amount, 5000);
+        assert_eq!(mc.currency, "USD");
+    }
+
+    #[test]
+    fn unconstrained_tool_has_no_monetary_cap() {
+        let registry =
+            ToolRegistry::from_agent(&agent(vec![cap("zendesk", "read_ticket")], vec![]));
+        assert!(registry.monetary_cap("zendesk", "read_ticket").is_none());
+    }
+
+    #[test]
+    fn cannot_overrides_can_for_same_tool() {
+        let registry = ToolRegistry::from_agent(&agent(
+            vec![cap("zendesk", "read_ticket")],
+            vec![cap("zendesk", "read_ticket")],
+        ));
+        let err = registry
+            .check_permission("zendesk", "read_ticket")
+            .unwrap_err();
+        assert!(err.reason.contains("cannot"));
+    }
+
+    #[test]
+    fn monetary_cap_absent_for_denied_tool() {
+        let registry = ToolRegistry::from_agent(&agent(
+            vec![],
+            vec![cap_with_monetary("stripe", "charge", 1000, "USD")],
+        ));
+        assert!(registry.monetary_cap("stripe", "charge").is_none());
+    }
+
+    #[test]
+    fn multiple_can_tools_all_allowed() {
+        let registry = ToolRegistry::from_agent(&agent(
+            vec![
+                cap("zendesk", "read_ticket"),
+                cap("zendesk", "reply_ticket"),
+                cap("stripe", "read_charge"),
+            ],
+            vec![],
+        ));
+        assert!(registry.check_permission("zendesk", "read_ticket").is_ok());
+        assert!(registry.check_permission("zendesk", "reply_ticket").is_ok());
+        assert!(registry.check_permission("stripe", "read_charge").is_ok());
+        assert!(
+            registry
+                .check_permission("stripe", "delete_charge")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn permission_denied_display_contains_reason() {
+        let denied = PermissionDenied {
+            reason: "test reason".into(),
+        };
+        let s = denied.to_string();
+        assert!(s.contains("test reason"), "got: {s}");
+    }
+
+    #[test]
+    fn permission_denied_implements_error() {
+        fn accepts_error(_: &dyn std::error::Error) {}
+        let denied = PermissionDenied {
+            reason: "boom".into(),
+        };
+        accepts_error(&denied);
+    }
+
+    #[test]
+    fn monetary_cap_partial_eq() {
+        let a = MonetaryCap {
+            amount: 100,
+            currency: "USD".into(),
+        };
+        let b = MonetaryCap {
+            amount: 100,
+            currency: "USD".into(),
+        };
+        assert_eq!(a, b);
+    }
+}
+
 // ── ToolCall serialization ─────────────────────────────────────────────────
 
 #[test]
