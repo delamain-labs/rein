@@ -89,7 +89,7 @@ impl Parser {
             Ok(tok.span)
         } else {
             Err(ParseError::new(
-                format!("expected {:?}, got {:?}", expected, tok.kind),
+                format!("expected {}, got {}", expected, tok.kind),
                 tok.span,
             ))
         }
@@ -112,7 +112,7 @@ impl Parser {
             }
             _ => Err(ParseError::new(
                 format!(
-                    "expected model name (identifier or string literal), got {:?}",
+                    "expected model name (identifier or string literal), got {}",
                     tok.kind
                 ),
                 tok.span,
@@ -131,7 +131,7 @@ impl Parser {
                 Ok((name, tok.span))
             }
             _ => Err(ParseError::new(
-                format!("expected identifier, got {:?}", tok.kind),
+                format!("expected identifier, got {}", tok.kind),
                 tok.span,
             )),
         }
@@ -244,7 +244,7 @@ impl Parser {
                 }
                 other => {
                     return Err(ParseError::new(
-                        format!("unexpected token in agent body: {:?}", other),
+                        format!("unexpected token in agent body: {}", other),
                         self.current_span(),
                     ));
                 }
@@ -311,7 +311,7 @@ impl Parser {
                 Ok((amount, tok.span))
             }
             _ => Err(ParseError::new(
-                format!("expected dollar amount, got {:?}", tok.kind),
+                format!("expected dollar amount, got {}", tok.kind),
                 tok.span,
             )),
         }
