@@ -845,10 +845,16 @@ impl Parser {
         let constraint = if self.peek() == &TokenKind::Up {
             self.advance();
             self.expect(&TokenKind::To)?;
-            let (amount, _) = self.expect_dollar()?;
+            let (amount, symbol, _) = self.expect_currency()?;
+            let currency = match symbol {
+                '€' => "EUR",
+                '£' => "GBP",
+                '¥' => "JPY",
+                _ => "USD",
+            };
             Some(Constraint::MonetaryCap {
                 amount,
-                currency: "USD".to_string(),
+                currency: currency.to_string(),
             })
         } else {
             None
@@ -863,16 +869,16 @@ impl Parser {
         })
     }
 
-    fn expect_dollar(&mut self) -> Result<(u64, Span), ParseError> {
+    fn expect_currency(&mut self) -> Result<(u64, char, Span), ParseError> {
         self.skip_comments();
         let tok = self.current().clone();
         match tok.kind {
-            TokenKind::Dollar(amount) => {
+            TokenKind::Currency { amount, symbol } => {
                 self.advance();
-                Ok((amount, tok.span))
+                Ok((amount, symbol, tok.span))
             }
             _ => Err(ParseError::new(
-                format!("expected dollar amount, got {}", tok.kind),
+                format!("expected currency amount, got {}", tok.kind),
                 tok.span,
             )),
         }
@@ -880,13 +886,19 @@ impl Parser {
 
     fn parse_budget(&mut self) -> Result<Budget, ParseError> {
         let start = self.current_span().start;
-        let (amount, _) = self.expect_dollar()?;
+        let (amount, symbol, _) = self.expect_currency()?;
         self.expect(&TokenKind::Per)?;
         let (unit, _) = self.expect_ident()?;
         let end = self.last_consumed_end;
+        let currency = match symbol {
+            '€' => "EUR",
+            '£' => "GBP",
+            '¥' => "JPY",
+            _ => "USD",
+        };
         Ok(Budget {
             amount,
-            currency: "USD".to_string(),
+            currency: currency.to_string(),
             unit,
             span: Span::new(start, end),
         })

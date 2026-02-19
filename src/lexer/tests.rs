@@ -60,13 +60,25 @@ fn tokenize_agent_header() {
 #[test]
 fn tokenize_dollar_amount() {
     let tokens = non_eof(lex_ok("$0.03"));
-    assert_eq!(kinds(&tokens), vec![&TokenKind::Dollar(3)]);
+    assert_eq!(
+        kinds(&tokens),
+        vec![&TokenKind::Currency {
+            symbol: '$',
+            amount: 3
+        }]
+    );
 }
 
 #[test]
 fn tokenize_dollar_integer() {
     let tokens = non_eof(lex_ok("$50"));
-    assert_eq!(kinds(&tokens), vec![&TokenKind::Dollar(5000)]);
+    assert_eq!(
+        kinds(&tokens),
+        vec![&TokenKind::Currency {
+            symbol: '$',
+            amount: 5000
+        }]
+    );
 }
 
 #[test]
@@ -87,7 +99,14 @@ fn tokenize_up_to_constraint() {
     let tokens = non_eof(lex_ok("up to $50"));
     assert_eq!(
         kinds(&tokens),
-        vec![&TokenKind::Up, &TokenKind::To, &TokenKind::Dollar(5000)]
+        vec![
+            &TokenKind::Up,
+            &TokenKind::To,
+            &TokenKind::Currency {
+                symbol: '$',
+                amount: 5000
+            }
+        ]
     );
 }
 
@@ -154,7 +173,11 @@ budget: $0.03 per ticket
     assert!(tokens.iter().any(|t| t.kind == TokenKind::Model));
     assert!(tokens.iter().any(|t| t.kind == TokenKind::Can));
     assert!(tokens.iter().any(|t| t.kind == TokenKind::Budget));
-    assert!(tokens.iter().any(|t| t.kind == TokenKind::Dollar(3)));
+    assert!(tokens.iter().any(|t| t.kind
+        == TokenKind::Currency {
+            symbol: '$',
+            amount: 3
+        }));
     assert!(tokens.iter().any(|t| t.kind == TokenKind::Per));
 }
 
@@ -339,17 +362,86 @@ fn display_ident() {
 
 #[test]
 fn display_dollar_cents_only() {
-    assert_eq!(TokenKind::Dollar(3).to_string(), "$0.03");
+    assert_eq!(
+        TokenKind::Currency {
+            symbol: '$',
+            amount: 3
+        }
+        .to_string(),
+        "$0.03"
+    );
 }
 
 #[test]
 fn display_dollar_whole() {
-    assert_eq!(TokenKind::Dollar(5000).to_string(), "$50.00");
+    assert_eq!(
+        TokenKind::Currency {
+            symbol: '$',
+            amount: 5000
+        }
+        .to_string(),
+        "$50.00"
+    );
 }
 
 #[test]
 fn display_dollar_mixed() {
-    assert_eq!(TokenKind::Dollar(503).to_string(), "$5.03");
+    assert_eq!(
+        TokenKind::Currency {
+            symbol: '$',
+            amount: 503
+        }
+        .to_string(),
+        "$5.03"
+    );
+}
+
+#[test]
+fn tokenize_euro() {
+    let tokens = non_eof(lex_ok("€10.50"));
+    assert_eq!(
+        tokens[0].kind,
+        TokenKind::Currency {
+            symbol: '€',
+            amount: 1050
+        }
+    );
+}
+
+#[test]
+fn tokenize_pound() {
+    let tokens = non_eof(lex_ok("£5.00"));
+    assert_eq!(
+        tokens[0].kind,
+        TokenKind::Currency {
+            symbol: '£',
+            amount: 500
+        }
+    );
+}
+
+#[test]
+fn tokenize_yen() {
+    let tokens = non_eof(lex_ok("¥100"));
+    assert_eq!(
+        tokens[0].kind,
+        TokenKind::Currency {
+            symbol: '¥',
+            amount: 10000
+        }
+    );
+}
+
+#[test]
+fn display_euro() {
+    assert_eq!(
+        TokenKind::Currency {
+            symbol: '€',
+            amount: 1050
+        }
+        .to_string(),
+        "€10.50"
+    );
 }
 
 #[test]
