@@ -2,83 +2,111 @@ use crate::parser::ParseError;
 use crate::validator::{Diagnostic, Severity};
 use ariadne::{Color, Label, Report, ReportKind, Source};
 
-/// Render a `ParseError` to stderr as a coloured ariadne report.
-pub fn report_parse_error(filename: &str, source: &str, error: &ParseError) {
-    Report::build(ReportKind::Error, filename, error.span.start)
-        .with_code("E000")
-        .with_message("parse error")
+// ── Private helpers ───────────────────────────────────────────────────────────
+
+/// Map a `Severity` to the ariadne `ReportKind` and label colour.
+fn severity_to_kind_and_color(severity: &Severity) -> (ReportKind<'_>, Color) {
+    match severity {
+        Severity::Error => (ReportKind::Error, Color::Red),
+        Severity::Warning => (ReportKind::Warning, Color::Yellow),
+    }
+}
+
+/// Build a finished ariadne `Report` from raw components.
+///
+/// The returned report borrows `filename` for its source-ID, so the caller
+/// must pass `filename` to the output method (`.eprint` / `.write`) as well.
+#[allow(clippy::too_many_arguments)]
+fn build_report<'a>(
+    filename: &'a str,
+    kind: ReportKind<'a>,
+    code: &str,
+    message: &str,
+    label_message: &str,
+    label_color: Color,
+    span_start: usize,
+    span_end: usize,
+) -> Report<'a, (&'a str, std::ops::Range<usize>)> {
+    Report::build(kind, filename, span_start)
+        .with_code(code)
+        .with_message(message)
         .with_label(
-            Label::new((filename, error.span.start..error.span.end))
-                .with_message(&error.message)
-                .with_color(Color::Red),
+            Label::new((filename, span_start..span_end))
+                .with_message(label_message)
+                .with_color(label_color),
         )
         .finish()
-        .eprint((filename, Source::from(source)))
-        .ok();
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+/// Render a `ParseError` to stderr as a coloured ariadne report.
+pub fn report_parse_error(filename: &str, source: &str, error: &ParseError) {
+    build_report(
+        filename,
+        ReportKind::Error,
+        "E000",
+        "parse error",
+        &error.message,
+        Color::Red,
+        error.span.start,
+        error.span.end,
+    )
+    .eprint((filename, Source::from(source)))
+    .ok();
 }
 
 /// Render a `Diagnostic` to stderr as a coloured ariadne report.
 pub fn report_diagnostic(filename: &str, source: &str, diag: &Diagnostic) {
-    let kind = match diag.severity {
-        Severity::Error => ReportKind::Error,
-        Severity::Warning => ReportKind::Warning,
-    };
-    let color = match diag.severity {
-        Severity::Error => Color::Red,
-        Severity::Warning => Color::Yellow,
-    };
-    Report::build(kind, filename, diag.span.start)
-        .with_code(diag.code)
-        .with_message(&diag.message)
-        .with_label(
-            Label::new((filename, diag.span.start..diag.span.end))
-                .with_message(&diag.message)
-                .with_color(color),
-        )
-        .finish()
-        .eprint((filename, Source::from(source)))
-        .ok();
+    let (kind, color) = severity_to_kind_and_color(&diag.severity);
+    build_report(
+        filename,
+        kind,
+        diag.code,
+        &diag.message,
+        &diag.message,
+        color,
+        diag.span.start,
+        diag.span.end,
+    )
+    .eprint((filename, Source::from(source)))
+    .ok();
 }
 
 /// Render a `ParseError` to a `String` (useful for tests / captured output).
 pub fn format_parse_error(filename: &str, source: &str, error: &ParseError) -> String {
     let mut buf = Vec::new();
-    Report::build(ReportKind::Error, filename, error.span.start)
-        .with_code("E000")
-        .with_message("parse error")
-        .with_label(
-            Label::new((filename, error.span.start..error.span.end))
-                .with_message(&error.message)
-                .with_color(Color::Red),
-        )
-        .finish()
-        .write((filename, Source::from(source)), &mut buf)
-        .ok();
+    build_report(
+        filename,
+        ReportKind::Error,
+        "E000",
+        "parse error",
+        &error.message,
+        Color::Red,
+        error.span.start,
+        error.span.end,
+    )
+    .write((filename, Source::from(source)), &mut buf)
+    .ok();
     String::from_utf8_lossy(&buf).into_owned()
 }
 
 /// Render a `Diagnostic` to a `String` (useful for tests / captured output).
 pub fn format_diagnostic(filename: &str, source: &str, diag: &Diagnostic) -> String {
-    let kind = match diag.severity {
-        Severity::Error => ReportKind::Error,
-        Severity::Warning => ReportKind::Warning,
-    };
-    let color = match diag.severity {
-        Severity::Error => Color::Red,
-        Severity::Warning => Color::Yellow,
-    };
+    let (kind, color) = severity_to_kind_and_color(&diag.severity);
     let mut buf = Vec::new();
-    Report::build(kind, filename, diag.span.start)
-        .with_code(diag.code)
-        .with_message(&diag.message)
-        .with_label(
-            Label::new((filename, diag.span.start..diag.span.end))
-                .with_message(&diag.message)
-                .with_color(color),
-        )
-        .finish()
-        .write((filename, Source::from(source)), &mut buf)
-        .ok();
+    build_report(
+        filename,
+        kind,
+        diag.code,
+        &diag.message,
+        &diag.message,
+        color,
+        diag.span.start,
+        diag.span.end,
+    )
+    .write((filename, Source::from(source)), &mut buf)
+    .ok();
     String::from_utf8_lossy(&buf).into_owned()
 }
 
