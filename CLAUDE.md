@@ -43,7 +43,7 @@ src/
   ast.rs               — AST type definitions
   error.rs             — Error types with spans and pretty-printing
   commands/
-    mod.rs             — Command module declarations
+    mod.rs             — Command module declarations + `rein run`
     validate.rs        — `rein validate` command
   lexer/
     mod.rs             — Tokenizer for .rein files
@@ -54,6 +54,19 @@ src/
   validator/
     mod.rs             — Validation passes
     tests.rs           — Validator tests
+  runtime/
+    mod.rs             — Runtime types (ToolCall, ToolResult, RunEvent, RunTrace, RunError)
+    permissions.rs     — Permission engine
+    tests.rs           — Permission engine tests
+    provider/
+      mod.rs           — Provider trait, types, MockProvider
+      tests.rs         — Provider trait tests
+      openai/
+        mod.rs         — OpenAI Chat Completions client
+        tests.rs       — OpenAI tests (wiremock)
+      resolver/
+        mod.rs         — Model field → Provider mapping
+        tests.rs       — Resolver tests
 tests/
   cli.rs               — Integration tests
 examples/
@@ -72,14 +85,47 @@ examples/
 
 ## Current State
 - `rein validate` — fully functional parser + validator
-- 99 tests (91 unit + 8 integration), all passing
+- `rein run` — CLI command wired up (no execution yet)
+- Runtime types, config, tool registry, permissions engine all implemented
+- Provider trait with async-trait, OpenAI client, model resolver all implemented
+- 162 tests (154 unit + 8 integration), all passing
 - clippy pedantic enabled, zero warnings
-- All Phase 1 backlog issues (#9–#22) resolved
+- Phase 1 complete, Phase 2 in progress
 
-## Next Phase: `rein run`
-Build the runtime that executes agents within their declared constraints.
+### Runtime modules (src/runtime/)
+```
+runtime/
+  mod.rs              — Runtime types (ToolCall, ToolResult, RunEvent, RunTrace, RunError)
+  permissions.rs      — Permission engine (default-deny, cannot-overrides-can, monetary caps)
+  tests.rs            — Permission engine tests (21 tests)
+  provider/
+    mod.rs            — Provider trait, types (Message, ChatResponse, ToolDef, etc.), MockProvider
+    tests.rs          — Provider trait tests (10 tests)
+    openai/
+      mod.rs          — OpenAI Chat Completions API client
+      tests.rs        — OpenAI tests with wiremock (7 tests)
+    resolver/
+      mod.rs          — Maps .rein model field to Provider instance
+      tests.rs        — Resolver tests (8 tests)
+```
 
-When completely finished with a task, run:
-```
-openclaw system event --text "Done: <description>" --mode now
-```
+### Dependencies
+- `async-trait` — dyn-compatible async Provider trait
+- `tokio` — async runtime (full features)
+- `reqwest` — HTTP client (json feature)
+- `wiremock` — dev dependency for HTTP mock testing
+
+## Phase 2 Remaining Work
+Issues to implement (in dependency order):
+1. #45: Tool call interceptor — intercept tool calls, check permissions
+2. #46: Monetary constraint enforcement — enforce spend limits per tool
+3. #47: Token counting and cost calculation
+4. #48: Budget enforcement — global budget tracking
+5. #49: Agent execution loop — main loop: LLM → tool calls → results → repeat
+6. #50: Mock tool executor — execute tools in test mode
+7. #51: Run trace output — structured output of what happened
+8. #52: Unit tests for permission enforcement (may already be covered)
+9. #53: Unit tests for budget tracking
+10. #54: Integration test: full agent run
+11. #55: Example .rein files for rein run
+12. #56: Anthropic provider
