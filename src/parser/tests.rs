@@ -705,3 +705,92 @@ fn parse_workflow_mixed_stages_and_steps() {
     assert_eq!(f.workflows[0].stages.len(), 1);
     assert_eq!(f.workflows[0].steps.len(), 1);
 }
+
+// ───── Tool block tests ─────
+
+#[test]
+fn parse_tool_with_endpoint() {
+    let f = parse_ok(r#"tool zendesk { endpoint: "https://api.zendesk.com/v2" }"#);
+    assert_eq!(f.tools.len(), 1);
+    assert_eq!(f.tools[0].name, "zendesk");
+    assert!(f.tools[0].endpoint.is_some());
+}
+
+#[test]
+fn parse_tool_with_all_fields() {
+    let f = parse_ok(
+        r#"tool zendesk {
+            provider: rest_api
+            endpoint: "https://api.zendesk.com/v2"
+            key: env("ZENDESK_KEY")
+        }"#,
+    );
+    assert_eq!(f.tools[0].name, "zendesk");
+    assert!(f.tools[0].provider.is_some());
+    assert!(f.tools[0].endpoint.is_some());
+    assert!(f.tools[0].key.is_some());
+}
+
+#[test]
+fn parse_tool_empty_block() {
+    let f = parse_ok("tool empty_tool {}");
+    assert_eq!(f.tools.len(), 1);
+    assert_eq!(f.tools[0].name, "empty_tool");
+    assert!(f.tools[0].endpoint.is_none());
+}
+
+#[test]
+fn parse_tool_endpoint_env_ref() {
+    let f = parse_ok(r#"tool api { endpoint: env("API_URL") }"#);
+    assert!(f.tools[0].endpoint.is_some());
+}
+
+#[test]
+fn parse_tool_duplicate_endpoint_errors() {
+    let err = parse_err(
+        r#"tool z {
+            endpoint: "a"
+            endpoint: "b"
+        }"#,
+    );
+    assert!(err.message.contains("duplicate"), "got: {}", err.message);
+}
+
+#[test]
+fn parse_tool_duplicate_provider_errors() {
+    let err = parse_err(
+        r#"tool z {
+            provider: rest
+            provider: mcp
+        }"#,
+    );
+    assert!(err.message.contains("duplicate"), "got: {}", err.message);
+}
+
+#[test]
+fn parse_tool_duplicate_key_errors() {
+    let err = parse_err(
+        r#"tool z {
+            key: env("A")
+            key: env("B")
+        }"#,
+    );
+    assert!(err.message.contains("duplicate"), "got: {}", err.message);
+}
+
+#[test]
+fn parse_tool_unknown_field_errors() {
+    let err = parse_err(r#"tool z { foo: bar }"#);
+    assert!(err.message.contains("unexpected"), "got: {}", err.message);
+}
+
+#[test]
+fn parse_multiple_tools() {
+    let f = parse_ok(
+        r#"
+        tool zendesk { endpoint: "https://zendesk.com" }
+        tool shopify { endpoint: "https://shopify.com" }
+    "#,
+    );
+    assert_eq!(f.tools.len(), 2);
+}
