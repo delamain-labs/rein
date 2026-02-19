@@ -49,10 +49,67 @@ pub struct AgentDef {
     pub span: Span,
 }
 
-/// Top-level parsed file — one or more agent definitions.
+// ---------------------------------------------------------------------------
+// Workflow types
+// ---------------------------------------------------------------------------
+
+/// How a workflow stage routes to the next stage.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RouteRule {
+    /// Always go to the next stage in sequence.
+    Next,
+    /// Route based on a condition in the agent's output.
+    Conditional {
+        field: String,
+        equals: String,
+        then_stage: String,
+        else_stage: Option<String>,
+    },
+}
+
+/// A single stage in a workflow pipeline.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Stage {
+    /// Name of this stage (used for routing references).
+    pub name: String,
+    /// Name of the agent to run at this stage.
+    pub agent: String,
+    /// How to route after this stage completes.
+    pub route: RouteRule,
+    pub span: Span,
+}
+
+/// Execution mode for a group of stages.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionMode {
+    Sequential,
+    Parallel,
+}
+
+/// A `workflow <name> { ... }` definition.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowDef {
+    pub name: String,
+    /// What triggers this workflow (e.g. `incoming_ticket`).
+    pub trigger: String,
+    /// Ordered list of stages.
+    pub stages: Vec<Stage>,
+    /// Default execution mode.
+    pub mode: ExecutionMode,
+    pub span: Span,
+}
+
+// ---------------------------------------------------------------------------
+// Top-level file
+// ---------------------------------------------------------------------------
+
+/// Top-level parsed file — agent and workflow definitions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReinFile {
     pub agents: Vec<AgentDef>,
+    pub workflows: Vec<WorkflowDef>,
 }
 
 #[cfg(test)]
@@ -169,6 +226,7 @@ mod tests {
                 budget: None,
                 span: dummy_span(),
             }],
+            workflows: vec![],
         };
         let json = serde_json::to_string(&file).unwrap();
         let decoded: ReinFile = serde_json::from_str(&json).unwrap();
@@ -188,5 +246,95 @@ mod tests {
         let json = serde_json::to_value(&agent).unwrap();
         assert_eq!(json["model"], serde_json::Value::Null);
         assert!(json["can"].as_array().unwrap().is_empty());
+    }
+
+    // ── Workflow types ─────────────────────────────────────────────────
+
+    #[test]
+    fn stage_serializes() {
+        let stage = Stage {
+            name: "triage".to_string(),
+            agent: "support_triage".to_string(),
+            route: RouteRule::Next,
+            span: dummy_span(),
+        };
+        let json = serde_json::to_value(&stage).unwrap();
+        assert_eq!(json["name"], "triage");
+        assert_eq!(json["agent"], "support_triage");
+        assert_eq!(json["route"]["type"], "next");
+    }
+
+    #[test]
+    fn conditional_route_serializes() {
+        let route = RouteRule::Conditional {
+            field: "sentiment".to_string(),
+            equals: "negative".to_string(),
+            then_stage: "escalate".to_string(),
+            else_stage: Some("respond".to_string()),
+        };
+        let json = serde_json::to_value(&route).unwrap();
+        assert_eq!(json["type"], "conditional");
+        assert_eq!(json["field"], "sentiment");
+        assert_eq!(json["then_stage"], "escalate");
+    }
+
+    #[test]
+    fn workflow_def_serializes() {
+        let workflow = WorkflowDef {
+            name: "support_pipeline".to_string(),
+            trigger: "incoming_ticket".to_string(),
+            stages: vec![
+                Stage {
+                    name: "triage".to_string(),
+                    agent: "support_triage".to_string(),
+                    route: RouteRule::Next,
+                    span: dummy_span(),
+                },
+                Stage {
+                    name: "respond".to_string(),
+                    agent: "responder".to_string(),
+                    route: RouteRule::Next,
+                    span: dummy_span(),
+                },
+            ],
+            mode: ExecutionMode::Sequential,
+            span: dummy_span(),
+        };
+        let json = serde_json::to_value(&workflow).unwrap();
+        assert_eq!(json["name"], "support_pipeline");
+        assert_eq!(json["trigger"], "incoming_ticket");
+        assert_eq!(json["stages"].as_array().unwrap().len(), 2);
+        assert_eq!(json["mode"], "sequential");
+    }
+
+    #[test]
+    fn workflow_roundtrips_via_json() {
+        let workflow = WorkflowDef {
+            name: "test".to_string(),
+            trigger: "event".to_string(),
+            stages: vec![],
+            mode: ExecutionMode::Parallel,
+            span: dummy_span(),
+        };
+        let json = serde_json::to_string(&workflow).unwrap();
+        let decoded: WorkflowDef = serde_json::from_str(&json).unwrap();
+        assert_eq!(workflow, decoded);
+    }
+
+    #[test]
+    fn rein_file_with_workflows_roundtrips() {
+        let file = ReinFile {
+            agents: vec![],
+            workflows: vec![WorkflowDef {
+                name: "pipeline".to_string(),
+                trigger: "event".to_string(),
+                stages: vec![],
+                mode: ExecutionMode::Sequential,
+                span: dummy_span(),
+            }],
+        };
+        let json = serde_json::to_string(&file).unwrap();
+        let decoded: ReinFile = serde_json::from_str(&json).unwrap();
+        assert_eq!(file, decoded);
     }
 }

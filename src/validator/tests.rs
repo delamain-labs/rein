@@ -91,6 +91,7 @@ fn zero_budget_detected() {
             }),
             span: Span::new(0, 1),
         }],
+        workflows: vec![],
     };
     let diags = validate(&file);
     let errs = errors(&diags);

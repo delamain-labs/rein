@@ -146,7 +146,7 @@ impl Parser {
             agents.push(self.parse_agent()?);
             self.skip_comments();
         }
-        Ok(ReinFile { agents })
+        Ok(ReinFile { agents, workflows: Vec::new() })
     }
 
     fn parse_agent(&mut self) -> Result<AgentDef, ParseError> {
