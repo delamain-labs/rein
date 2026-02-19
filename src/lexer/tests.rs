@@ -370,3 +370,44 @@ fn display_comment() {
 fn display_eof() {
     assert_eq!(TokenKind::Eof.to_string(), "end of file");
 }
+
+// ── Hash (#) line comment tests ──────────────────────────────────────────
+
+#[test]
+fn tokenize_hash_comment() {
+    let tokens = non_eof(lex_ok("# this is a comment"));
+    assert_eq!(kinds(&tokens), vec![&TokenKind::Comment]);
+}
+
+#[test]
+fn hash_comment_inline_after_code() {
+    let tokens = non_eof(lex_ok("agent foo # a comment"));
+    assert_eq!(
+        kinds(&tokens),
+        vec![&TokenKind::Agent, &TokenKind::Ident("foo".into()), &TokenKind::Comment]
+    );
+}
+
+#[test]
+fn hash_comment_mixed_with_slash_comments() {
+    let src = "# hash comment\n// slash comment\n/* block */";
+    let tokens = non_eof(lex_ok(src));
+    assert_eq!(
+        kinds(&tokens),
+        vec![&TokenKind::Comment, &TokenKind::Comment, &TokenKind::Comment]
+    );
+}
+
+#[test]
+fn hash_comment_empty() {
+    let tokens = non_eof(lex_ok("#"));
+    assert_eq!(kinds(&tokens), vec![&TokenKind::Comment]);
+}
+
+#[test]
+fn hash_comment_at_start_of_file_with_code() {
+    let src = "# Rein config\nagent foo { model: openai }";
+    let tokens = non_eof(lex_ok(src));
+    assert_eq!(tokens[0].kind, TokenKind::Comment);
+    assert_eq!(tokens[1].kind, TokenKind::Agent);
+}
