@@ -1,4 +1,4 @@
-use crate::ast::{AgentDef, ReinFile, Span};
+use crate::ast::{AgentDef, Constraint, ReinFile, Span};
 
 /// Severity of a diagnostic.
 #[derive(Debug, Clone, PartialEq)]
@@ -48,6 +48,7 @@ pub fn validate(file: &ReinFile) -> Vec<Diagnostic> {
     for agent in &file.agents {
         check_can_cannot_overlap(agent, &mut diags);
         check_budget_positive(agent, &mut diags);
+        check_constraint_amounts(agent, &mut diags);
         check_model_present(agent, &mut diags);
     }
     diags
@@ -108,6 +109,24 @@ fn check_budget_positive(agent: &AgentDef, diags: &mut Vec<Diagnostic>) {
             ),
             budget.span.clone(),
         ));
+    }
+}
+
+/// E004: monetary constraint amount must be positive.
+fn check_constraint_amounts(agent: &AgentDef, diags: &mut Vec<Diagnostic>) {
+    for cap in agent.can.iter().chain(agent.cannot.iter()) {
+        if let Some(Constraint::MonetaryCap { amount, .. }) = &cap.constraint {
+            if *amount == 0 {
+                diags.push(Diagnostic::error(
+                    "E004",
+                    format!(
+                        "constraint amount must be positive in agent '{}'",
+                        agent.name
+                    ),
+                    cap.span.clone(),
+                ));
+            }
+        }
     }
 }
 
@@ -250,6 +269,27 @@ agent foo {
         let src = "agent foo { model: anthropic }";
         let diags = validate_src(src);
         assert!(warnings(&diags).is_empty());
+    }
+
+    // ── Constraint amount validation ────────────────────────────────────────────
+
+    #[test]
+    fn zero_constraint_amount_produces_error() {
+        let src = "agent foo { can [ billing.refund up to $0 ] }";
+        let diags = validate_src(src);
+        let errs = errors(&diags);
+        assert!(
+            errs.iter().any(|d| d.code == "E004"),
+            "expected E004, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn positive_constraint_amount_no_error() {
+        let src = "agent foo { can [ billing.refund up to $50 ] }";
+        let diags = validate_src(src);
+        assert!(!diags.iter().any(|d| d.code == "E004"));
     }
 
     // ── Multiple errors at once ───────────────────────────────────────────────
