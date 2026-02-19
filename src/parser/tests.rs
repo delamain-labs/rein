@@ -365,10 +365,46 @@ fn error_duplicate_budget() {
 }
 
 #[test]
-fn error_budget_missing_dollar() {
+fn parse_budget_euro() {
+    let f = parse_ok("agent bot { model: openai budget: €0.05 per request }");
+    let b = f.agents[0].budget.as_ref().unwrap();
+    assert_eq!(b.amount, 5);
+    assert_eq!(b.currency, "EUR");
+}
+
+#[test]
+fn parse_budget_pound() {
+    let f = parse_ok("agent bot { model: openai budget: £1.00 per ticket }");
+    let b = f.agents[0].budget.as_ref().unwrap();
+    assert_eq!(b.amount, 100);
+    assert_eq!(b.currency, "GBP");
+}
+
+#[test]
+fn parse_budget_yen() {
+    let f = parse_ok("agent bot { model: openai budget: ¥500 per run }");
+    let b = f.agents[0].budget.as_ref().unwrap();
+    assert_eq!(b.amount, 50000);
+    assert_eq!(b.currency, "JPY");
+}
+
+#[test]
+fn parse_capability_constraint_euro() {
+    let f = parse_ok("agent bot { model: openai can [stripe.refund up to €100] }");
+    let cap = &f.agents[0].can[0];
+    if let Some(crate::ast::Constraint::MonetaryCap { amount, currency }) = &cap.constraint {
+        assert_eq!(*amount, 10000);
+        assert_eq!(currency, "EUR");
+    } else {
+        panic!("expected MonetaryCap");
+    }
+}
+
+#[test]
+fn error_budget_missing_currency() {
     let err = parse_err("agent foo { budget: notadollar per ticket }");
     assert!(
-        err.message.to_lowercase().contains("dollar") || err.message.contains('$'),
+        err.message.contains("currency") || err.message.contains('$'),
         "got: {}",
         err.message
     );

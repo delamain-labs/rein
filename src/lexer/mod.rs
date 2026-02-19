@@ -35,7 +35,11 @@ pub enum TokenKind {
     // Literals
     Ident(String),
     StringLiteral(String),
-    Dollar(u64),
+    /// A monetary amount with currency symbol and value in minor units (cents).
+    Currency {
+        symbol: char,
+        amount: u64,
+    },
     // Trivia
     Comment,
     Eof,
@@ -72,7 +76,9 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Endpoint => write!(f, "endpoint"),
             TokenKind::Guardrails => write!(f, "guardrails"),
             TokenKind::Ident(s) => write!(f, "{s}"),
-            TokenKind::Dollar(n) => write!(f, "${}.{:02}", n / 100, n % 100),
+            TokenKind::Currency { symbol, amount } => {
+                write!(f, "{symbol}{}.{:02}", amount / 100, amount % 100)
+            }
             TokenKind::StringLiteral(s) => write!(f, "\"{s}\""),
             TokenKind::Comment => write!(f, "comment"),
             TokenKind::Eof => write!(f, "end of file"),
@@ -197,16 +203,14 @@ impl<'a> Lexer<'a> {
         Token::new(kind, start, end)
     }
 
-    fn read_dollar(&mut self, start: usize) -> Result<Token, LexError> {
-        // already consumed '$' at start; pos is now one past '$'
-
-        // The character immediately after '$' must be an ASCII digit.
+    fn read_currency(&mut self, symbol: char, start: usize) -> Result<Token, LexError> {
+        // Already consumed currency symbol at start; pos is now past it.
         match self.peek() {
             Some(b'0'..=b'9') => {}
             Some(ch) => {
                 return Err(LexError {
                     message: format!(
-                        "invalid dollar amount: expected a number after '$', found '{}'",
+                        "invalid currency amount: expected a number after '{symbol}', found '{}'",
                         ch as char
                     ),
                     span: Span::new(start, self.pos + 1),
@@ -214,9 +218,9 @@ impl<'a> Lexer<'a> {
             }
             None => {
                 return Err(LexError {
-                    message:
-                        "invalid dollar amount: expected a number after '$', found end of input"
-                            .to_string(),
+                    message: format!(
+                        "invalid currency amount: expected a number after '{symbol}', found end of input"
+                    ),
                     span: Span::new(start, self.pos),
                 });
             }
@@ -224,22 +228,19 @@ impl<'a> Lexer<'a> {
 
         let num_start = self.pos;
 
-        // Consume the integer part.
         while matches!(self.peek(), Some(b'0'..=b'9')) {
             self.advance();
         }
 
-        // Optional decimal part.
         if self.peek() == Some(b'.') {
-            self.advance(); // consume '.'
+            self.advance();
 
-            // A digit must immediately follow the decimal point.
             match self.peek() {
                 Some(b'0'..=b'9') => {}
                 Some(ch) => {
                     return Err(LexError {
                         message: format!(
-                            "invalid dollar amount: expected digit after decimal point, found '{}'",
+                            "invalid currency amount: expected digit after decimal point, found '{}'",
                             ch as char
                         ),
                         span: Span::new(start, self.pos + 1),
@@ -247,22 +248,20 @@ impl<'a> Lexer<'a> {
                 }
                 None => {
                     return Err(LexError {
-                        message: "invalid dollar amount: expected digit after decimal point, found end of input"
+                        message: "invalid currency amount: expected digit after decimal point, found end of input"
                             .to_string(),
                         span: Span::new(start, self.pos),
                     });
                 }
             }
 
-            // Consume the fractional digits.
             while matches!(self.peek(), Some(b'0'..=b'9')) {
                 self.advance();
             }
 
-            // A second decimal point is never valid.
             if self.peek() == Some(b'.') {
                 return Err(LexError {
-                    message: "invalid dollar amount: too many decimal points".to_string(),
+                    message: "invalid currency amount: too many decimal points".to_string(),
                     span: Span::new(start, self.pos + 1),
                 });
             }
@@ -270,10 +269,17 @@ impl<'a> Lexer<'a> {
 
         let num_str = std::str::from_utf8(&self.src[num_start..self.pos]).unwrap();
         let cents = parse_cents(num_str).map_err(|()| LexError {
-            message: format!("invalid dollar amount: '${num_str}'"),
+            message: format!("invalid currency amount: '{symbol}{num_str}'"),
             span: Span::new(start, self.pos),
         })?;
-        Ok(Token::new(TokenKind::Dollar(cents), start, self.pos))
+        Ok(Token::new(
+            TokenKind::Currency {
+                symbol,
+                amount: cents,
+            },
+            start,
+            self.pos,
+        ))
     }
 
     fn read_string(&mut self, start: usize) -> Result<Token, LexError> {
@@ -344,7 +350,7 @@ impl<'a> Lexer<'a> {
                 Some(b'.') => tokens.push(Token::new(TokenKind::Dot, start, self.pos)),
                 Some(b',') => tokens.push(Token::new(TokenKind::Comma, start, self.pos)),
                 Some(b'"') => tokens.push(self.read_string(start)?),
-                Some(b'$') => tokens.push(self.read_dollar(start)?),
+                Some(b'$') => tokens.push(self.read_currency('$', start)?),
                 Some(b'#') => {
                     tokens.push(self.skip_line_comment(start));
                 }
@@ -358,6 +364,25 @@ impl<'a> Lexer<'a> {
                 }
                 Some(ch) if ch.is_ascii_alphabetic() || ch == b'_' => {
                     tokens.push(self.read_ident(start));
+                }
+                // Multi-byte currency symbols: £ (C2 A3), ¥ (C2 A5), € (E2 82 AC)
+                Some(0xC2) if matches!(self.peek(), Some(0xA3 | 0xA5)) => {
+                    let sym = if self.src[self.pos] == 0xA3 {
+                        '£'
+                    } else {
+                        '¥'
+                    };
+                    self.advance(); // consume second byte
+                    tokens.push(self.read_currency(sym, start)?);
+                }
+                Some(0xE2)
+                    if self.pos + 1 < self.src.len()
+                        && self.src[self.pos] == 0x82
+                        && self.src[self.pos + 1] == 0xAC =>
+                {
+                    self.advance(); // consume 0x82
+                    self.advance(); // consume 0xAC
+                    tokens.push(self.read_currency('€', start)?);
                 }
                 Some(ch) => {
                     return Err(LexError {
