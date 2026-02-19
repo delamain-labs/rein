@@ -2,6 +2,7 @@ use super::*;
 use crate::ast::{ExecutionMode, RouteRule, Span, Stage, WorkflowDef};
 use crate::runtime::executor::MockExecutor;
 use crate::runtime::provider::{ChatResponse, MockProvider, Usage};
+use tempfile::NamedTempFile;
 
 fn simple_response(content: &str) -> ChatResponse {
     ChatResponse {
@@ -445,4 +446,299 @@ async fn conditional_no_else_ends_workflow() {
 
     assert_eq!(result.stage_results.len(), 1);
     assert_eq!(result.stage_results[0].stage_name, "checker");
+}
+
+// ── Resumable workflow tests ─────────────────────────────────────────────
+
+#[tokio::test]
+async fn resumable_fresh_run_no_checkpoint() {
+    let file = parse_file(
+        r"
+        agent a { model: openai }
+        agent b { model: openai }
+    ",
+    );
+    let workflow = make_workflow("pipe", "event", &["a", "b"]);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    provider.push_response(simple_response("output_a"));
+    provider.push_response(simple_response("output_b"));
+
+    let tmp = NamedTempFile::new().unwrap();
+    let state_path = tmp.path().to_path_buf();
+    drop(tmp); // no checkpoint — path now points to a nonexistent file
+
+    let result = run_sequential_resumable(
+        &workflow,
+        &file,
+        &provider,
+        &executor,
+        &[],
+        &RunConfig::default(),
+        &state_path,
+    )
+    .await
+    .expect("should succeed");
+
+    assert_eq!(result.stage_results.len(), 2);
+    assert_eq!(result.final_output, "output_b");
+    assert!(
+        !state_path.exists(),
+        "state file should be cleaned up on success"
+    );
+}
+
+#[tokio::test]
+async fn resumable_resumes_after_first_stage() {
+    let file = parse_file(
+        r"
+        agent a { model: openai }
+        agent b { model: openai }
+    ",
+    );
+    let workflow = make_workflow("pipe", "event", &["a", "b"]);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // Only stage b gets a response — if stage a runs it would consume this
+    // response and stage b would fail with an empty queue.
+    provider.push_response(simple_response("output_b"));
+
+    let tmp = NamedTempFile::new().unwrap();
+    let state_path = tmp.path().to_path_buf();
+    persistence::save_state(
+        &persistence::WorkflowState {
+            workflow_name: "pipe".to_string(),
+            completed_stages: vec![persistence::CompletedStage {
+                stage_name: "a".to_string(),
+                agent_name: "a".to_string(),
+                output: "output_a".to_string(),
+                cost_cents: 5,
+                tokens: 100,
+            }],
+            next_input: "output_a".to_string(),
+        },
+        &state_path,
+    )
+    .unwrap();
+
+    let result = run_sequential_resumable(
+        &workflow,
+        &file,
+        &provider,
+        &executor,
+        &[],
+        &RunConfig::default(),
+        &state_path,
+    )
+    .await
+    .expect("should succeed");
+
+    assert_eq!(result.stage_results.len(), 2);
+    assert_eq!(result.stage_results[0].stage_name, "a");
+    assert_eq!(result.stage_results[0].output, "output_a");
+    assert_eq!(result.stage_results[1].stage_name, "b");
+    assert_eq!(result.stage_results[1].output, "output_b");
+    assert_eq!(result.final_output, "output_b");
+    assert!(
+        !state_path.exists(),
+        "state file should be cleaned up on success"
+    );
+}
+
+#[tokio::test]
+async fn resumable_resumes_mid_pipeline() {
+    let file = parse_file(
+        r"
+        agent a { model: openai }
+        agent b { model: openai }
+        agent c { model: openai }
+        agent d { model: openai }
+    ",
+    );
+    let workflow = make_workflow("pipe", "event", &["a", "b", "c", "d"]);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // Only c and d get responses — a and b are replayed from the checkpoint.
+    provider.push_response(simple_response("output_c"));
+    provider.push_response(simple_response("output_d"));
+
+    let tmp = NamedTempFile::new().unwrap();
+    let state_path = tmp.path().to_path_buf();
+    persistence::save_state(
+        &persistence::WorkflowState {
+            workflow_name: "pipe".to_string(),
+            completed_stages: vec![
+                persistence::CompletedStage {
+                    stage_name: "a".to_string(),
+                    agent_name: "a".to_string(),
+                    output: "output_a".to_string(),
+                    cost_cents: 3,
+                    tokens: 50,
+                },
+                persistence::CompletedStage {
+                    stage_name: "b".to_string(),
+                    agent_name: "b".to_string(),
+                    output: "output_b".to_string(),
+                    cost_cents: 4,
+                    tokens: 60,
+                },
+            ],
+            next_input: "output_b".to_string(),
+        },
+        &state_path,
+    )
+    .unwrap();
+
+    let result = run_sequential_resumable(
+        &workflow,
+        &file,
+        &provider,
+        &executor,
+        &[],
+        &RunConfig::default(),
+        &state_path,
+    )
+    .await
+    .expect("should succeed");
+
+    assert_eq!(result.stage_results.len(), 4);
+    assert_eq!(result.stage_results[0].stage_name, "a");
+    assert_eq!(result.stage_results[1].stage_name, "b");
+    assert_eq!(result.stage_results[2].stage_name, "c");
+    assert_eq!(result.stage_results[3].stage_name, "d");
+    assert_eq!(result.final_output, "output_d");
+    assert!(!state_path.exists());
+}
+
+#[tokio::test]
+async fn resumable_different_workflow_name_restarts_fresh() {
+    let file = parse_file(
+        r"
+        agent a { model: openai }
+        agent b { model: openai }
+    ",
+    );
+    let workflow = make_workflow("workflow_b", "event", &["a", "b"]);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // Both stages must run — the checkpoint is for a different workflow.
+    provider.push_response(simple_response("output_a"));
+    provider.push_response(simple_response("output_b"));
+
+    let tmp = NamedTempFile::new().unwrap();
+    let state_path = tmp.path().to_path_buf();
+    persistence::save_state(
+        &persistence::WorkflowState {
+            workflow_name: "workflow_a".to_string(),
+            completed_stages: vec![persistence::CompletedStage {
+                stage_name: "a".to_string(),
+                agent_name: "a".to_string(),
+                output: "stale_output".to_string(),
+                cost_cents: 1,
+                tokens: 10,
+            }],
+            next_input: "stale_output".to_string(),
+        },
+        &state_path,
+    )
+    .unwrap();
+
+    let result = run_sequential_resumable(
+        &workflow,
+        &file,
+        &provider,
+        &executor,
+        &[],
+        &RunConfig::default(),
+        &state_path,
+    )
+    .await
+    .expect("should succeed");
+
+    assert_eq!(result.stage_results.len(), 2);
+    assert_eq!(result.stage_results[0].output, "output_a");
+    assert_eq!(result.final_output, "output_b");
+}
+
+#[tokio::test]
+async fn resumable_conditional_routing_on_resume() {
+    let (file, workflow) = make_conditional_workflow();
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // Triage is in the checkpoint; only escalate and respond need responses.
+    provider.push_response(simple_response("Escalated to manager."));
+    provider.push_response(simple_response("Final response after escalation."));
+
+    let tmp = NamedTempFile::new().unwrap();
+    let state_path = tmp.path().to_path_buf();
+    // Checkpoint: triage completed with a "priority: high" output.
+    // find_resume_start must replay this condition and route to escalate.
+    persistence::save_state(
+        &persistence::WorkflowState {
+            workflow_name: "support".to_string(),
+            completed_stages: vec![persistence::CompletedStage {
+                stage_name: "triage".to_string(),
+                agent_name: "triage".to_string(),
+                output: "Priority: high. Urgent billing issue.".to_string(),
+                cost_cents: 5,
+                tokens: 100,
+            }],
+            next_input: "Priority: high. Urgent billing issue.".to_string(),
+        },
+        &state_path,
+    )
+    .unwrap();
+
+    let result = run_sequential_resumable(
+        &workflow,
+        &file,
+        &provider,
+        &executor,
+        &[],
+        &RunConfig::default(),
+        &state_path,
+    )
+    .await
+    .expect("should succeed");
+
+    // triage (checkpoint) → escalate (condition matched) → respond (Next)
+    assert_eq!(result.stage_results.len(), 3);
+    assert_eq!(result.stage_results[0].stage_name, "triage");
+    assert_eq!(result.stage_results[1].stage_name, "escalate");
+    assert_eq!(result.stage_results[2].stage_name, "respond");
+    assert_eq!(result.final_output, "Final response after escalation.");
+}
+
+#[tokio::test]
+async fn resumable_corrupt_checkpoint_returns_persistence_error() {
+    let file = parse_file("agent a { model: openai }");
+    let workflow = make_workflow("pipe", "event", &["a"]);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    let tmp = NamedTempFile::new().unwrap();
+    let state_path = tmp.path().to_path_buf();
+    std::fs::write(&state_path, "not valid json {{{").unwrap();
+
+    let err = run_sequential_resumable(
+        &workflow,
+        &file,
+        &provider,
+        &executor,
+        &[],
+        &RunConfig::default(),
+        &state_path,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+        matches!(err, WorkflowError::PersistenceFailure(_)),
+        "expected PersistenceFailure, got: {err}"
+    );
 }

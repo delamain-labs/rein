@@ -5,6 +5,8 @@ use super::executor::ToolExecutor;
 use super::permissions::ToolRegistry;
 use super::provider::{Provider, ToolDef};
 
+pub mod persistence;
+
 #[cfg(test)]
 mod tests;
 
@@ -43,6 +45,8 @@ pub enum WorkflowError {
     },
     /// A route references a stage that doesn't exist.
     StageNotFound(String),
+    /// State persistence failed (save/load/clear).
+    PersistenceFailure(String),
 }
 
 impl std::fmt::Display for WorkflowError {
@@ -53,6 +57,7 @@ impl std::fmt::Display for WorkflowError {
                 write!(f, "stage '{stage}' failed: {error:?}")
             }
             Self::StageNotFound(name) => write!(f, "route target stage not found: {name}"),
+            Self::PersistenceFailure(msg) => write!(f, "state persistence failed: {msg}"),
         }
     }
 }
@@ -218,6 +223,185 @@ pub async fn run_sequential(
             }
         };
     }
+
+    let final_output = stage_results
+        .last()
+        .map(|r| r.output.clone())
+        .unwrap_or_default();
+
+    Ok(build_result(stage_results, final_output))
+}
+
+/// Build initial execution state from a prior checkpoint, or return a fresh
+/// state if none exists (or the checkpoint is for a different workflow).
+///
+/// Returns `(stage_results, current_input, skip_stages)`.
+fn build_resume_context(
+    checkpoint: Option<&persistence::WorkflowState>,
+    workflow: &WorkflowDef,
+) -> (Vec<StageResult>, String, std::collections::HashSet<String>) {
+    let default_input = format!("Trigger: {}", workflow.trigger);
+    if let Some(state) = checkpoint.filter(|s| s.workflow_name == workflow.name) {
+        let prior_results = state
+            .completed_stages
+            .iter()
+            .map(|cs| StageResult {
+                stage_name: cs.stage_name.clone(),
+                agent_name: cs.agent_name.clone(),
+                output: cs.output.clone(),
+                cost_cents: cs.cost_cents,
+                tokens: cs.tokens,
+            })
+            .collect();
+        let skip = state
+            .completed_stages
+            .iter()
+            .map(|cs| cs.stage_name.clone())
+            .collect();
+        return (prior_results, state.next_input.clone(), skip);
+    }
+    (Vec::new(), default_input, std::collections::HashSet::new())
+}
+
+/// Determine the stage to (re)start from given a checkpoint.
+///
+/// If no stages have been skipped, execution starts from the first stage.
+/// Otherwise the last completed stage's route decides the next one.
+fn find_resume_start<'a>(
+    workflow: &'a WorkflowDef,
+    checkpoint: Option<&persistence::WorkflowState>,
+    skip_stages: &std::collections::HashSet<String>,
+) -> Option<&'a Stage> {
+    if skip_stages.is_empty() {
+        return workflow.stages.first();
+    }
+    let Some(last_cs) = checkpoint.and_then(|s| s.completed_stages.last()) else {
+        return workflow.stages.first();
+    };
+    let last_stage = find_stage(workflow, &last_cs.stage_name)?;
+    match &last_stage.route {
+        RouteRule::Next => {
+            let idx = workflow
+                .stages
+                .iter()
+                .position(|s| s.name == last_stage.name)?;
+            workflow.stages.get(idx + 1)
+        }
+        RouteRule::Conditional {
+            field,
+            equals,
+            then_stage,
+            else_stage,
+        } => {
+            let output = last_cs.output.as_str();
+            if condition_matches(output, field, equals) {
+                find_stage(workflow, then_stage)
+            } else {
+                else_stage
+                    .as_ref()
+                    .and_then(|name| find_stage(workflow, name))
+            }
+        }
+    }
+}
+
+/// Execute a workflow sequentially with checkpoint persistence.
+///
+/// After each stage completes, state is saved to `state_path` as JSON.
+/// If a previous state file exists for this workflow, execution resumes
+/// from the last completed stage. On successful completion the state file
+/// is removed.
+///
+/// # Errors
+/// Returns `WorkflowError` if an agent is missing, a stage fails, a route
+/// references a nonexistent stage, or state persistence fails.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_sequential_resumable(
+    workflow: &WorkflowDef,
+    file: &ReinFile,
+    provider: &dyn Provider,
+    executor: &dyn ToolExecutor,
+    tool_defs: &[ToolDef],
+    config: &RunConfig,
+    state_path: &std::path::Path,
+) -> Result<WorkflowResult, WorkflowError> {
+    use persistence::{CompletedStage, WorkflowState, clear_state, load_state, save_state};
+
+    let checkpoint =
+        load_state(state_path).map_err(|e| WorkflowError::PersistenceFailure(e.to_string()))?;
+
+    let (mut stage_results, mut current_input, skip_stages) =
+        build_resume_context(checkpoint.as_ref(), workflow);
+    let mut visited: std::collections::HashSet<String> = skip_stages.iter().cloned().collect();
+    let mut current_stage = find_resume_start(workflow, checkpoint.as_ref(), &skip_stages);
+
+    while let Some(stage) = current_stage {
+        if !visited.insert(stage.name.clone()) {
+            break;
+        }
+
+        let result = run_stage(
+            &stage.name,
+            &stage.agent,
+            &current_input,
+            file,
+            provider,
+            executor,
+            tool_defs,
+            config,
+        )
+        .await?;
+
+        current_input.clone_from(&result.output);
+        let output = result.output.clone();
+        stage_results.push(result);
+
+        let state = WorkflowState {
+            workflow_name: workflow.name.clone(),
+            completed_stages: stage_results
+                .iter()
+                .map(|r| CompletedStage {
+                    stage_name: r.stage_name.clone(),
+                    agent_name: r.agent_name.clone(),
+                    output: r.output.clone(),
+                    cost_cents: r.cost_cents,
+                    tokens: r.tokens,
+                })
+                .collect(),
+            next_input: current_input.clone(),
+        };
+        save_state(&state, state_path)
+            .map_err(|e| WorkflowError::PersistenceFailure(e.to_string()))?;
+
+        current_stage = match &stage.route {
+            RouteRule::Next => {
+                let idx = workflow.stages.iter().position(|s| s.name == stage.name);
+                idx.and_then(|i| workflow.stages.get(i + 1))
+            }
+            RouteRule::Conditional {
+                field,
+                equals,
+                then_stage,
+                else_stage,
+            } => {
+                if condition_matches(&output, field, equals) {
+                    Some(
+                        find_stage(workflow, then_stage)
+                            .ok_or_else(|| WorkflowError::StageNotFound(then_stage.clone()))?,
+                    )
+                } else if let Some(else_name) = else_stage {
+                    Some(
+                        find_stage(workflow, else_name)
+                            .ok_or_else(|| WorkflowError::StageNotFound(else_name.clone()))?,
+                    )
+                } else {
+                    None
+                }
+            }
+        };
+    }
+
+    clear_state(state_path).map_err(|e| WorkflowError::PersistenceFailure(e.to_string()))?;
 
     let final_output = stage_results
         .last()

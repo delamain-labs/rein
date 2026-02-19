@@ -37,4 +37,5 @@ must_use_candidate = "allow"
 module_name_repetitions = "allow"
 
 [dev-dependencies]
+tempfile = "3.25.0"
 wiremock = "0.6.5"
