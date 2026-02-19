@@ -4,7 +4,7 @@ pub fn run_validate(path: &std::path::Path, dump_ast: bool) -> i32 {
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("error: cannot read '{}': {}", filename, e);
+            eprintln!("error: cannot read '{filename}': {e}");
             return 1;
         }
     };
@@ -19,9 +19,9 @@ pub fn run_validate(path: &std::path::Path, dump_ast: bool) -> i32 {
 
     if dump_ast {
         match serde_json::to_string_pretty(&file) {
-            Ok(json) => println!("{}", json),
+            Ok(json) => println!("{json}"),
             Err(e) => {
-                eprintln!("error: failed to serialise AST: {}", e);
+                eprintln!("error: failed to serialise AST: {e}");
                 return 1;
             }
         }
@@ -29,7 +29,7 @@ pub fn run_validate(path: &std::path::Path, dump_ast: bool) -> i32 {
     }
 
     let diags = rein::validator::validate(&file);
-    let has_errors = diags.iter().any(|d| d.is_error());
+    let has_errors = diags.iter().any(rein::validator::Diagnostic::is_error);
 
     for diag in &diags {
         rein::error::report_diagnostic(&filename, &source, diag);

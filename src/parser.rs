@@ -191,7 +191,7 @@ impl Parser {
                 TokenKind::Model => {
                     if seen_model {
                         return Err(ParseError::new(
-                            format!("duplicate field 'model' in agent '{}'", name),
+                            format!("duplicate field 'model' in agent '{name}'"),
                             self.current_span(),
                         ));
                     }
@@ -205,7 +205,7 @@ impl Parser {
                 TokenKind::Can => {
                     if seen_can {
                         return Err(ParseError::new(
-                            format!("duplicate field 'can' in agent '{}'", name),
+                            format!("duplicate field 'can' in agent '{name}'"),
                             self.current_span(),
                         ));
                     }
@@ -216,7 +216,7 @@ impl Parser {
                 TokenKind::Cannot => {
                     if seen_cannot {
                         return Err(ParseError::new(
-                            format!("duplicate field 'cannot' in agent '{}'", name),
+                            format!("duplicate field 'cannot' in agent '{name}'"),
                             self.current_span(),
                         ));
                     }
@@ -227,7 +227,7 @@ impl Parser {
                 TokenKind::Budget => {
                     if seen_budget {
                         return Err(ParseError::new(
-                            format!("duplicate field 'budget' in agent '{}'", name),
+                            format!("duplicate field 'budget' in agent '{name}'"),
                             self.current_span(),
                         ));
                     }
@@ -244,7 +244,7 @@ impl Parser {
                 }
                 other => {
                     return Err(ParseError::new(
-                        format!("unexpected token in agent body: {}", other),
+                        format!("unexpected token in agent body: {other}"),
                         self.current_span(),
                     ));
                 }

@@ -2,6 +2,12 @@
 name = "rein"
 version = "0.1.0"
 edition = "2024"
+description = "A declarative language and runtime for AI agent orchestration"
+license = "MIT"
+repository = "https://github.com/delamain-labs/rein"
+readme = "README.md"
+keywords = ["ai", "agents", "orchestration", "policy", "dsl"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "rein"
@@ -16,3 +22,12 @@ clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ariadne = "0.4"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Allow these pedantic lints that are too noisy
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+module_name_repetitions = "allow"

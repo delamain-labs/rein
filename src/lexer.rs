@@ -95,7 +95,7 @@ fn parse_cents(s: &str) -> Result<u64, ()> {
     // Normalise fractional part to exactly 2 digits (truncate beyond cent).
     let cents_str = match frac_str.len() {
         0 => "00".to_string(),
-        1 => format!("{}0", frac_str),
+        1 => format!("{frac_str}0"),
         _ => frac_str[..2].to_string(),
     };
     let cents: u64 = cents_str.parse().map_err(|_| ())?;
@@ -133,10 +133,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn skip_whitespace(&mut self) {
-        while matches!(
-            self.peek(),
-            Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'\r')
-        ) {
+        while matches!(self.peek(), Some(b' ' | b'\t' | b'\n' | b'\r')) {
             self.advance();
         }
     }
@@ -144,7 +141,7 @@ impl<'a> Lexer<'a> {
     fn read_ident(&mut self, start: usize) -> Token {
         while matches!(
             self.peek(),
-            Some(b'a'..=b'z') | Some(b'A'..=b'Z') | Some(b'0'..=b'9') | Some(b'_')
+            Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_')
         ) {
             self.advance();
         }
@@ -236,8 +233,8 @@ impl<'a> Lexer<'a> {
         }
 
         let num_str = std::str::from_utf8(&self.src[num_start..self.pos]).unwrap();
-        let cents = parse_cents(num_str).map_err(|_| LexError {
-            message: format!("invalid dollar amount: '${}'", num_str),
+        let cents = parse_cents(num_str).map_err(|()| LexError {
+            message: format!("invalid dollar amount: '${num_str}'"),
             span: Span::new(start, self.pos),
         })?;
         Ok(Token::new(TokenKind::Dollar(cents), start, self.pos))
