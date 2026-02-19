@@ -1,4 +1,4 @@
-use crate::ast::{ExecutionMode, ReinFile, WorkflowDef};
+use crate::ast::{ExecutionMode, ReinFile, RouteRule, Stage, WorkflowDef};
 
 use super::engine::{AgentEngine, RunConfig};
 use super::executor::ToolExecutor;
@@ -41,6 +41,8 @@ pub enum WorkflowError {
         stage: String,
         error: super::RunError,
     },
+    /// A route references a stage that doesn't exist.
+    StageNotFound(String),
 }
 
 impl std::fmt::Display for WorkflowError {
@@ -50,6 +52,7 @@ impl std::fmt::Display for WorkflowError {
             Self::StageFailed { stage, error } => {
                 write!(f, "stage '{stage}' failed: {error:?}")
             }
+            Self::StageNotFound(name) => write!(f, "route target stage not found: {name}"),
         }
     }
 }
@@ -75,7 +78,13 @@ async fn run_stage(
         .ok_or_else(|| WorkflowError::AgentNotFound(agent_name.to_string()))?;
 
     let registry = ToolRegistry::from_agent(agent);
-    let engine = AgentEngine::new(provider, executor, &registry, tool_defs.to_vec(), config.clone());
+    let engine = AgentEngine::new(
+        provider,
+        executor,
+        &registry,
+        tool_defs.to_vec(),
+        config.clone(),
+    );
 
     let result = engine
         .run(input)
@@ -106,10 +115,47 @@ fn build_result(stage_results: Vec<StageResult>, final_output: String) -> Workfl
     }
 }
 
-/// Execute a workflow sequentially: each stage's output becomes the next stage's input.
+/// Check whether a conditional route matches the agent output.
+///
+/// Looks for `field: value` or `field=value` patterns in the output text.
+fn condition_matches(output: &str, field: &str, equals: &str) -> bool {
+    let lower = output.to_lowercase();
+    let field_lower = field.to_lowercase();
+    let equals_lower = equals.to_lowercase();
+
+    for line in lower.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix(&field_lower) {
+            let rest = rest.trim_start();
+            if rest
+                .strip_prefix(':')
+                .is_some_and(|val| val.trim().starts_with(&equals_lower))
+            {
+                return true;
+            }
+            if rest
+                .strip_prefix('=')
+                .is_some_and(|val| val.trim().starts_with(&equals_lower))
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Find a stage by name within a workflow.
+fn find_stage<'a>(workflow: &'a WorkflowDef, name: &str) -> Option<&'a Stage> {
+    workflow.stages.iter().find(|s| s.name == name)
+}
+
+/// Execute a workflow sequentially: each stage's output becomes the next
+/// stage's input. Respects [`RouteRule::Conditional`] for branching to named
+/// stages.
 ///
 /// # Errors
-/// Returns `WorkflowError` if an agent is missing or a stage fails.
+/// Returns `WorkflowError` if an agent is missing, a stage fails, or a route
+/// references a nonexistent stage.
 pub async fn run_sequential(
     workflow: &WorkflowDef,
     file: &ReinFile,
@@ -120,15 +166,57 @@ pub async fn run_sequential(
 ) -> Result<WorkflowResult, WorkflowError> {
     let mut stage_results = Vec::new();
     let mut current_input = format!("Trigger: {}", workflow.trigger);
+    let mut visited = std::collections::HashSet::new();
 
-    for stage in &workflow.stages {
+    let mut current_stage: Option<&Stage> = workflow.stages.first();
+
+    while let Some(stage) = current_stage {
+        if !visited.insert(stage.name.clone()) {
+            break; // circular routing protection
+        }
+
         let result = run_stage(
-            &stage.name, &stage.agent, &current_input,
-            file, provider, executor, tool_defs, config,
-        ).await?;
+            &stage.name,
+            &stage.agent,
+            &current_input,
+            file,
+            provider,
+            executor,
+            tool_defs,
+            config,
+        )
+        .await?;
 
         current_input.clone_from(&result.output);
+        let output = result.output.clone();
         stage_results.push(result);
+
+        current_stage = match &stage.route {
+            RouteRule::Next => {
+                let idx = workflow.stages.iter().position(|s| s.name == stage.name);
+                idx.and_then(|i| workflow.stages.get(i + 1))
+            }
+            RouteRule::Conditional {
+                field,
+                equals,
+                then_stage,
+                else_stage,
+            } => {
+                if condition_matches(&output, field, equals) {
+                    Some(
+                        find_stage(workflow, then_stage)
+                            .ok_or_else(|| WorkflowError::StageNotFound(then_stage.clone()))?,
+                    )
+                } else if let Some(else_name) = else_stage {
+                    Some(
+                        find_stage(workflow, else_name)
+                            .ok_or_else(|| WorkflowError::StageNotFound(else_name.clone()))?,
+                    )
+                } else {
+                    None
+                }
+            }
+        };
     }
 
     let final_output = stage_results
@@ -158,9 +246,16 @@ pub async fn run_parallel(
     // Fan-out: each stage gets the trigger input (not chained)
     for stage in &workflow.stages {
         let result = run_stage(
-            &stage.name, &stage.agent, &trigger_input,
-            file, provider, executor, tool_defs, config,
-        ).await?;
+            &stage.name,
+            &stage.agent,
+            &trigger_input,
+            file,
+            provider,
+            executor,
+            tool_defs,
+            config,
+        )
+        .await?;
         stage_results.push(result);
     }
 
