@@ -49,6 +49,7 @@ pub fn validate(file: &ReinFile) -> Vec<Diagnostic> {
         check_can_cannot_overlap(agent, &mut diags);
         check_budget_positive(agent, &mut diags);
         check_constraint_amounts(agent, &mut diags);
+        check_duplicate_capabilities(agent, &mut diags);
         check_model_present(agent, &mut diags);
     }
     diags
@@ -126,6 +127,28 @@ fn check_constraint_amounts(agent: &AgentDef, diags: &mut Vec<Diagnostic>) {
                 ),
                 cap.span.clone(),
             ));
+        }
+    }
+}
+
+/// W003: duplicate capabilities within the same list.
+fn check_duplicate_capabilities(agent: &AgentDef, diags: &mut Vec<Diagnostic>) {
+    use std::collections::HashSet;
+
+    for (label, caps) in [("can", &agent.can), ("cannot", &agent.cannot)] {
+        let mut seen = HashSet::new();
+        for cap in caps {
+            let key = (cap.namespace.as_str(), cap.action.as_str());
+            if !seen.insert(key) {
+                diags.push(Diagnostic::warning(
+                    "W003",
+                    format!(
+                        "duplicate capability '{}.{}' in {} list of agent '{}'",
+                        cap.namespace, cap.action, label, agent.name
+                    ),
+                    cap.span.clone(),
+                ));
+            }
         }
     }
 }
@@ -290,6 +313,34 @@ agent foo {
         let src = "agent foo { can [ billing.refund up to $50 ] }";
         let diags = validate_src(src);
         assert!(!diags.iter().any(|d| d.code == "E004"));
+    }
+
+    // ── Duplicate capabilities ─────────────────────────────────────────────────
+
+    #[test]
+    fn duplicate_capability_produces_warning() {
+        let src = "agent foo { can [ zendesk.read_ticket zendesk.read_ticket ] }";
+        let diags = validate_src(src);
+        let warns = warnings(&diags);
+        assert!(
+            warns.iter().any(|d| d.code == "W003"),
+            "expected W003, got: {:?}",
+            warns
+        );
+    }
+
+    #[test]
+    fn no_duplicate_capability_no_warning() {
+        let src = "agent foo { can [ zendesk.read_ticket zendesk.refund ] }";
+        let diags = validate_src(src);
+        assert!(!diags.iter().any(|d| d.code == "W003"));
+    }
+
+    #[test]
+    fn duplicate_in_cannot_list() {
+        let src = "agent foo { cannot [ stripe.charge stripe.charge ] }";
+        let diags = validate_src(src);
+        assert!(diags.iter().any(|d| d.code == "W003"));
     }
 
     // ── Multiple errors at once ───────────────────────────────────────────────
