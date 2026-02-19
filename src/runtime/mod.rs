@@ -4,6 +4,7 @@ pub mod executor;
 pub mod interceptor;
 pub mod permissions;
 pub mod provider;
+pub mod workflow;
 
 use serde::{Deserialize, Serialize};
 
