@@ -496,3 +496,106 @@ fn run_error_serializes_as_snake_case() {
     let v: serde_json::Value = serde_json::to_value(RunError::ConfigError).expect("serialize");
     assert_eq!(v, "config_error");
 }
+
+// ── RunTrace output ────────────────────────────────────────────────────────
+
+#[test]
+fn trace_to_json_produces_valid_json() {
+    let trace = RunTrace {
+        events: vec![
+            RunEvent::LlmCall {
+                model: "gpt-4o".into(),
+                input_tokens: 100,
+                output_tokens: 50,
+                cost_cents: 1,
+            },
+            RunEvent::RunComplete {
+                total_cost_cents: 1,
+                total_tokens: 150,
+            },
+        ],
+    };
+    let json = trace.to_json().expect("should serialize");
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    assert!(parsed["events"].is_array());
+    assert_eq!(parsed["events"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn trace_summary_contains_turns() {
+    let trace = RunTrace {
+        events: vec![
+            RunEvent::LlmCall {
+                model: "gpt-4o".into(),
+                input_tokens: 100,
+                output_tokens: 50,
+                cost_cents: 1,
+            },
+            RunEvent::ToolCallAttempt {
+                tool: ToolCall {
+                    namespace: "zendesk".into(),
+                    action: "read_ticket".into(),
+                    arguments: serde_json::Value::Null,
+                },
+                allowed: true,
+                reason: None,
+            },
+            RunEvent::ToolCallResult {
+                tool: ToolCall {
+                    namespace: "zendesk".into(),
+                    action: "read_ticket".into(),
+                    arguments: serde_json::Value::Null,
+                },
+                result: ToolResult {
+                    success: true,
+                    output: "ticket data".into(),
+                },
+            },
+            RunEvent::RunComplete {
+                total_cost_cents: 1,
+                total_tokens: 150,
+            },
+        ],
+    };
+    let summary = trace.summary();
+    assert!(summary.contains("turn 1"), "summary: {summary}");
+    assert!(summary.contains("zendesk.read_ticket"), "summary: {summary}");
+    assert!(summary.contains("Done"), "summary: {summary}");
+}
+
+#[test]
+fn trace_summary_shows_denied_tools() {
+    let trace = RunTrace {
+        events: vec![
+            RunEvent::LlmCall {
+                model: "gpt-4o".into(),
+                input_tokens: 50,
+                output_tokens: 25,
+                cost_cents: 1,
+            },
+            RunEvent::ToolCallAttempt {
+                tool: ToolCall {
+                    namespace: "stripe".into(),
+                    action: "charge".into(),
+                    arguments: serde_json::Value::Null,
+                },
+                allowed: false,
+                reason: Some("not in can list".into()),
+            },
+            RunEvent::RunComplete {
+                total_cost_cents: 1,
+                total_tokens: 75,
+            },
+        ],
+    };
+    let summary = trace.summary();
+    assert!(summary.contains("✗"), "should show denied marker");
+    assert!(summary.contains("not in can list"), "summary: {summary}");
+}
+
+#[test]
+fn trace_summary_empty_trace() {
+    let trace = RunTrace { events: vec![] };
+    let summary = trace.summary();
+    assert!(summary.is_empty());
+}
