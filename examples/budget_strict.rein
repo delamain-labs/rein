@@ -1,0 +1,16 @@
+// Agent with a very strict budget — useful for testing budget enforcement.
+
+agent penny_pincher {
+    model: openai
+
+    can [
+        search.web
+        search.images
+    ]
+
+    cannot [
+        search.purchase
+    ]
+
+    budget: $0.01 per query
+}
