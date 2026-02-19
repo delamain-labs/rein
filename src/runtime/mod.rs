@@ -1,4 +1,5 @@
 pub mod permissions;
+pub mod provider;
 
 use serde::{Deserialize, Serialize};
 
