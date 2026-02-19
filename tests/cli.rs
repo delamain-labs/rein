@@ -108,6 +108,23 @@ fn ast_flag_multi_agent_contains_both_names() {
     assert!(stdout.contains("billing_bot"), "missing billing_bot");
 }
 
+#[test]
+fn ast_flag_invalid_file_exits_one() {
+    let status = Command::new(rein_bin())
+        .args([
+            "validate",
+            "--ast",
+            example("invalid.rein").to_str().unwrap(),
+        ])
+        .status()
+        .expect("failed to spawn rein");
+    assert_eq!(
+        status.code(),
+        Some(1),
+        "expected exit 1 for --ast on invalid.rein"
+    );
+}
+
 // ── error paths ───────────────────────────────────────────────────────────────
 
 #[test]
