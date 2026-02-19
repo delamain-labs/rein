@@ -458,3 +458,59 @@ fn parse_multiple_workflows() {
     assert_eq!(file.workflows[0].name, "w1");
     assert_eq!(file.workflows[1].name, "w2");
 }
+
+// ── Provider block tests ──────────────────────────────────────────────────
+
+#[test]
+fn parse_provider_basic() {
+    let f = parse_ok(r#"provider anthropic { model: "claude-haiku" key: env("ANTHROPIC_KEY") }"#);
+    assert_eq!(f.providers.len(), 1);
+    assert_eq!(f.providers[0].name, "anthropic");
+    assert_eq!(
+        f.providers[0].model.as_ref().and_then(|v| v.as_literal()),
+        Some("claude-haiku")
+    );
+    match &f.providers[0].key {
+        Some(crate::ast::ValueExpr::EnvRef { var_name, .. }) => {
+            assert_eq!(var_name, "ANTHROPIC_KEY");
+        }
+        other => panic!("expected EnvRef, got: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_provider_model_only() {
+    let f = parse_ok(r#"provider openai { model: "gpt-4o" }"#);
+    assert_eq!(f.providers[0].name, "openai");
+    assert!(f.providers[0].key.is_none());
+}
+
+#[test]
+fn parse_multiple_providers() {
+    let src = r#"
+        provider anthropic { model: "claude-haiku" key: env("A_KEY") }
+        provider openai { model: "gpt-4o" key: env("O_KEY") }
+        agent test { model: openai }
+    "#;
+    let f = parse_ok(src);
+    assert_eq!(f.providers.len(), 2);
+    assert_eq!(f.agents.len(), 1);
+}
+
+#[test]
+fn parse_provider_duplicate_model_errors() {
+    let err = parse_err("provider x { model: a model: b }");
+    assert!(err.message.contains("duplicate"), "got: {}", err.message);
+}
+
+#[test]
+fn parse_provider_duplicate_key_errors() {
+    let err = parse_err(r#"provider x { key: env("A") key: env("B") }"#);
+    assert!(err.message.contains("duplicate"), "got: {}", err.message);
+}
+
+#[test]
+fn parse_provider_unknown_field_errors() {
+    let err = parse_err("provider x { model: a budget: $5 }");
+    assert!(err.message.contains("unexpected"), "got: {}", err.message);
+}

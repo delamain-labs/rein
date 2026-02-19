@@ -1,6 +1,6 @@
 use crate::ast::{
-    AgentDef, Budget, Capability, Constraint, ExecutionMode, ReinFile, RouteRule, Span, Stage,
-    ValueExpr, WorkflowDef,
+    AgentDef, Budget, Capability, Constraint, ExecutionMode, ProviderDef, ReinFile, RouteRule,
+    Span, Stage, ValueExpr, WorkflowDef,
 };
 use crate::lexer::{Token, TokenKind, tokenize};
 
@@ -172,22 +172,90 @@ impl Parser {
 
     pub fn parse_file(&mut self) -> Result<ReinFile, ParseError> {
         self.skip_comments();
+        let mut providers = Vec::new();
         let mut agents = Vec::new();
         let mut workflows = Vec::new();
         while self.peek() != &TokenKind::Eof {
             match self.peek() {
+                TokenKind::Provider => providers.push(self.parse_provider()?),
                 TokenKind::Agent => agents.push(self.parse_agent()?),
                 TokenKind::Workflow => workflows.push(self.parse_workflow()?),
                 other => {
                     return Err(ParseError::new(
-                        format!("expected 'agent' or 'workflow', got {other}"),
+                        format!("expected 'provider', 'agent', or 'workflow', got {other}"),
                         self.current_span(),
                     ));
                 }
             }
             self.skip_comments();
         }
-        Ok(ReinFile { agents, workflows })
+        Ok(ReinFile {
+            providers,
+            agents,
+            workflows,
+        })
+    }
+
+    fn parse_provider(&mut self) -> Result<ProviderDef, ParseError> {
+        self.skip_comments();
+        let start = self.current_span().start;
+
+        self.expect(&TokenKind::Provider)?;
+        let (name, _) = self.expect_ident()?;
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut model: Option<ValueExpr> = None;
+        let mut key: Option<ValueExpr> = None;
+        let mut seen_model = false;
+        let mut seen_key = false;
+
+        loop {
+            self.skip_comments();
+            match self.peek().clone() {
+                TokenKind::RBrace => {
+                    let end = self.current_span().end;
+                    self.advance();
+                    return Ok(ProviderDef {
+                        name,
+                        model,
+                        key,
+                        span: Span::new(start, end),
+                    });
+                }
+                TokenKind::Model => {
+                    if seen_model {
+                        return Err(ParseError::new(
+                            format!("duplicate field 'model' in provider '{name}'"),
+                            self.current_span(),
+                        ));
+                    }
+                    seen_model = true;
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    model = Some(self.parse_value_expr()?);
+                }
+                TokenKind::Key => {
+                    if seen_key {
+                        return Err(ParseError::new(
+                            format!("duplicate field 'key' in provider '{name}'"),
+                            self.current_span(),
+                        ));
+                    }
+                    seen_key = true;
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    key = Some(self.parse_value_expr()?);
+                }
+                other => {
+                    return Err(ParseError::new(
+                        format!(
+                            "unexpected field in provider '{name}': {other}"
+                        ),
+                        self.current_span(),
+                    ));
+                }
+            }
+        }
     }
 
     fn parse_agent(&mut self) -> Result<AgentDef, ParseError> {

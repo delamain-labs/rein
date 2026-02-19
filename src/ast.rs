@@ -118,6 +118,21 @@ pub struct AgentDef {
 }
 
 // ---------------------------------------------------------------------------
+// Provider types
+// ---------------------------------------------------------------------------
+
+/// A `provider <name> { ... }` definition.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderDef {
+    pub name: String,
+    /// The default model for this provider (e.g. `claude-haiku`, `gpt-4o`).
+    pub model: Option<ValueExpr>,
+    /// API key or credential reference (e.g. `env("ANTHROPIC_KEY")`).
+    pub key: Option<ValueExpr>,
+    pub span: Span,
+}
+
+// ---------------------------------------------------------------------------
 // Workflow types
 // ---------------------------------------------------------------------------
 
@@ -173,9 +188,10 @@ pub struct WorkflowDef {
 // Top-level file
 // ---------------------------------------------------------------------------
 
-/// Top-level parsed file — agent and workflow definitions.
+/// Top-level parsed file — provider, agent, and workflow definitions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReinFile {
+    pub providers: Vec<ProviderDef>,
     pub agents: Vec<AgentDef>,
     pub workflows: Vec<WorkflowDef>,
 }
@@ -286,6 +302,7 @@ mod tests {
     #[test]
     fn rein_file_roundtrips_via_json() {
         let file = ReinFile {
+            providers: vec![],
             agents: vec![AgentDef {
                 name: "bot".to_string(),
                 model: None,
@@ -392,6 +409,7 @@ mod tests {
     #[test]
     fn rein_file_with_workflows_roundtrips() {
         let file = ReinFile {
+            providers: vec![],
             agents: vec![],
             workflows: vec![WorkflowDef {
                 name: "pipeline".to_string(),
