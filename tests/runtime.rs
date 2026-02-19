@@ -1,7 +1,6 @@
 /// Integration tests for the full agent runtime pipeline.
 ///
 /// Tests the flow: parse .rein → build engine → run with mocks → verify trace.
-
 use serde_json::json;
 
 use rein::runtime::engine::{AgentEngine, RunConfig};
@@ -14,7 +13,10 @@ fn simple_response(content: &str) -> ChatResponse {
     ChatResponse {
         content: content.to_string(),
         tool_calls: vec![],
-        usage: Usage { input_tokens: 100, output_tokens: 50 },
+        usage: Usage {
+            input_tokens: 100,
+            output_tokens: 50,
+        },
         model: "gpt-4o".to_string(),
     }
 }
@@ -27,7 +29,10 @@ fn tool_call_response(name: &str, args: serde_json::Value) -> ChatResponse {
             name: name.to_string(),
             arguments: args,
         }],
-        usage: Usage { input_tokens: 100, output_tokens: 50 },
+        usage: Usage {
+            input_tokens: 100,
+            output_tokens: 50,
+        },
         model: "gpt-4o".to_string(),
     }
 }
@@ -61,7 +66,10 @@ async fn full_pipeline_simple_response() {
         &executor,
         &registry,
         vec![],
-        RunConfig { budget_cents: 100, ..RunConfig::default() },
+        RunConfig {
+            budget_cents: 100,
+            ..RunConfig::default()
+        },
     );
 
     let result = engine.run("Hi").await.expect("should succeed");
@@ -91,7 +99,11 @@ async fn full_pipeline_tool_call_allowed() {
 
     provider.push_response(tool_call_response("zendesk.read_ticket", json!({"id": 42})));
     provider.push_response(simple_response("Ticket 42 is about billing."));
-    executor.on_call("zendesk", "read_ticket", r#"{"id": 42, "subject": "Billing"}"#);
+    executor.on_call(
+        "zendesk",
+        "read_ticket",
+        r#"{"id": 42, "subject": "Billing"}"#,
+    );
 
     let engine = AgentEngine::new(
         &provider,
@@ -105,13 +117,19 @@ async fn full_pipeline_tool_call_allowed() {
         RunConfig::default(),
     );
 
-    let result = engine.run("What's ticket 42?").await.expect("should succeed");
+    let result = engine
+        .run("What's ticket 42?")
+        .await
+        .expect("should succeed");
     assert_eq!(result.response, "Ticket 42 is about billing.");
 
     // Verify tool was allowed in trace
-    let allowed: Vec<_> = result.trace.events.iter().filter(|e| {
-        matches!(e, RunEvent::ToolCallAttempt { allowed: true, .. })
-    }).collect();
+    let allowed: Vec<_> = result
+        .trace
+        .events
+        .iter()
+        .filter(|e| matches!(e, RunEvent::ToolCallAttempt { allowed: true, .. }))
+        .collect();
     assert_eq!(allowed.len(), 1);
 }
 
@@ -140,13 +158,19 @@ async fn full_pipeline_tool_call_denied() {
         RunConfig::default(),
     );
 
-    let result = engine.run("Delete ticket 42").await.expect("should succeed");
+    let result = engine
+        .run("Delete ticket 42")
+        .await
+        .expect("should succeed");
     assert_eq!(result.response, "I cannot delete tickets.");
 
     // Verify tool was denied in trace
-    let denied: Vec<_> = result.trace.events.iter().filter(|e| {
-        matches!(e, RunEvent::ToolCallAttempt { allowed: false, .. })
-    }).collect();
+    let denied: Vec<_> = result
+        .trace
+        .events
+        .iter()
+        .filter(|e| matches!(e, RunEvent::ToolCallAttempt { allowed: false, .. }))
+        .collect();
     assert_eq!(denied.len(), 1);
 }
 
@@ -168,7 +192,10 @@ async fn full_pipeline_budget_exceeded() {
     provider.push_response(ChatResponse {
         content: String::new(),
         tool_calls: vec![],
-        usage: Usage { input_tokens: 100_000, output_tokens: 50_000 },
+        usage: Usage {
+            input_tokens: 100_000,
+            output_tokens: 50_000,
+        },
         model: "gpt-4o".to_string(),
     });
 
@@ -177,7 +204,10 @@ async fn full_pipeline_budget_exceeded() {
         &executor,
         &registry,
         vec![],
-        RunConfig { budget_cents: 1, ..RunConfig::default() },
+        RunConfig {
+            budget_cents: 1,
+            ..RunConfig::default()
+        },
     );
 
     let err = engine.run("Hi").await.unwrap_err();
@@ -230,12 +260,16 @@ fn make_workflow(name: &str, trigger: &str, agents: &[&str]) -> WorkflowDef {
     WorkflowDef {
         name: name.to_string(),
         trigger: trigger.to_string(),
-        stages: agents.iter().map(|a| Stage {
-            name: (*a).to_string(),
-            agent: (*a).to_string(),
-            route: RouteRule::Next,
-            span: Span::new(0, 1),
-        }).collect(),
+        stages: agents
+            .iter()
+            .map(|a| Stage {
+                name: (*a).to_string(),
+                agent: (*a).to_string(),
+                route: RouteRule::Next,
+                span: Span::new(0, 1),
+            })
+            .collect(),
+        steps: vec![],
         mode: ExecutionMode::Sequential,
         span: Span::new(0, 1),
     }
@@ -253,11 +287,20 @@ async fn integration_sequential_workflow() {
     let executor = MockExecutor::new();
 
     provider.push_response(simple_response("Category: billing. Priority: high."));
-    provider.push_response(simple_response("Dear customer, we've resolved your billing issue."));
+    provider.push_response(simple_response(
+        "Dear customer, we've resolved your billing issue.",
+    ));
 
-    let result = run_sequential(&workflow, &file, &provider, &executor, &[], &RunConfig::default())
-        .await
-        .expect("ok");
+    let result = run_sequential(
+        &workflow,
+        &file,
+        &provider,
+        &executor,
+        &[],
+        &RunConfig::default(),
+    )
+    .await
+    .expect("ok");
 
     assert_eq!(result.stage_results.len(), 2);
     assert_eq!(result.stage_results[0].agent_name, "classifier");
@@ -280,9 +323,16 @@ async fn integration_parallel_workflow() {
     provider.push_response(simple_response("Sentiment: positive"));
     provider.push_response(simple_response("Summary: quarterly results are up"));
 
-    let result = run_parallel(&workflow, &file, &provider, &executor, &[], &RunConfig::default())
-        .await
-        .expect("ok");
+    let result = run_parallel(
+        &workflow,
+        &file,
+        &provider,
+        &executor,
+        &[],
+        &RunConfig::default(),
+    )
+    .await
+    .expect("ok");
 
     assert_eq!(result.stage_results.len(), 2);
     assert!(result.final_output.contains("Sentiment"));

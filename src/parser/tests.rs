@@ -23,21 +23,31 @@ fn parse_model_as_string_literal() {
 #[test]
 fn parse_model_string_literal_with_dashes() {
     let f = parse_ok(r#"agent foo { model: "gpt-4o" }"#);
-    assert_eq!(f.agents[0].model.as_ref().and_then(|v| v.as_literal()), Some("gpt-4o"));
+    assert_eq!(
+        f.agents[0].model.as_ref().and_then(|v| v.as_literal()),
+        Some("gpt-4o")
+    );
 }
 
 #[test]
 fn parse_model_ident_still_works() {
     // Bare identifier must continue to work alongside string literals.
     let f = parse_ok("agent foo { model: anthropic }");
-    assert_eq!(f.agents[0].model.as_ref().and_then(|v| v.as_literal()), Some("anthropic"));
+    assert_eq!(
+        f.agents[0].model.as_ref().and_then(|v| v.as_literal()),
+        Some("anthropic")
+    );
 }
 
 #[test]
 fn error_model_invalid_value() {
     // A dollar amount is neither an ident nor a string — must error.
     let err = parse_err("agent foo { model: $5 }");
-    assert!(err.message.contains("expected value"), "got: {}", err.message);
+    assert!(
+        err.message.contains("expected value"),
+        "got: {}",
+        err.message
+    );
 }
 
 // ── env() function parsing ────────────────────────────────────────────────
@@ -83,7 +93,11 @@ fn env_resolve_with_present_var() {
         span: crate::ast::Span::new(0, 1),
     };
     let lookup = |name: &str| {
-        if name == "MY_KEY" { Some("secret_value".to_string()) } else { None }
+        if name == "MY_KEY" {
+            Some("secret_value".to_string())
+        } else {
+            None
+        }
     };
     assert_eq!(expr.resolve_with(lookup).unwrap(), "secret_value");
 }
@@ -117,7 +131,10 @@ fn parse_minimal_agent() {
     assert_eq!(f.agents.len(), 1);
     let a = &f.agents[0];
     assert_eq!(a.name, "foo");
-    assert_eq!(a.model.as_ref().and_then(|v| v.as_literal()), Some("anthropic"));
+    assert_eq!(
+        a.model.as_ref().and_then(|v| v.as_literal()),
+        Some("anthropic")
+    );
     assert!(a.can.is_empty());
     assert!(a.cannot.is_empty());
     assert!(a.budget.is_none());
@@ -206,7 +223,10 @@ budget: $0.03 per ticket
     let f = parse_ok(src);
     let a = &f.agents[0];
     assert_eq!(a.name, "support_triage");
-    assert_eq!(a.model.as_ref().and_then(|v| v.as_literal()), Some("anthropic"));
+    assert_eq!(
+        a.model.as_ref().and_then(|v| v.as_literal()),
+        Some("anthropic")
+    );
     assert_eq!(a.can.len(), 3);
     assert_eq!(a.cannot.len(), 2);
     assert!(a.budget.is_some());
@@ -240,7 +260,10 @@ model: anthropic /* inline */
 }
 "#;
     let f = parse_ok(src);
-    assert_eq!(f.agents[0].model.as_ref().and_then(|v| v.as_literal()), Some("anthropic"));
+    assert_eq!(
+        f.agents[0].model.as_ref().and_then(|v| v.as_literal()),
+        Some("anthropic")
+    );
 }
 
 // ── Span accuracy ─────────────────────────────────────────────────────────
@@ -355,13 +378,15 @@ fn error_budget_missing_dollar() {
 
 #[test]
 fn parse_simple_workflow() {
-    let file = parse_ok(r#"
+    let file = parse_ok(
+        r#"
         agent triage { model: openai can [ zendesk.read_ticket ] }
         workflow pipeline {
             trigger: incoming_ticket
             stages: [triage]
         }
-    "#);
+    "#,
+    );
     assert_eq!(file.workflows.len(), 1);
     let wf = &file.workflows[0];
     assert_eq!(wf.name, "pipeline");
@@ -372,7 +397,8 @@ fn parse_simple_workflow() {
 
 #[test]
 fn parse_workflow_multiple_stages() {
-    let file = parse_ok(r#"
+    let file = parse_ok(
+        r#"
         agent a { model: openai }
         agent b { model: openai }
         agent c { model: openai }
@@ -380,7 +406,8 @@ fn parse_workflow_multiple_stages() {
             trigger: event
             stages: [a, b, c]
         }
-    "#);
+    "#,
+    );
     assert_eq!(file.workflows[0].stages.len(), 3);
     assert_eq!(file.workflows[0].stages[0].agent, "a");
     assert_eq!(file.workflows[0].stages[1].agent, "b");
@@ -389,71 +416,87 @@ fn parse_workflow_multiple_stages() {
 
 #[test]
 fn parse_workflow_stages_without_commas() {
-    let file = parse_ok(r#"
+    let file = parse_ok(
+        r#"
         agent a { model: openai }
         agent b { model: openai }
         workflow pipe {
             trigger: event
             stages: [a b]
         }
-    "#);
+    "#,
+    );
     assert_eq!(file.workflows[0].stages.len(), 2);
 }
 
 #[test]
 fn parse_workflow_missing_trigger_errors() {
-    let err = parse_err(r#"
+    let err = parse_err(
+        r#"
         workflow pipe {
             stages: [a]
         }
-    "#);
+    "#,
+    );
     assert!(err.message.contains("trigger"), "err: {}", err.message);
 }
 
 #[test]
 fn parse_workflow_empty_stages_errors() {
-    let err = parse_err(r#"
+    let err = parse_err(
+        r#"
         workflow pipe {
             trigger: event
             stages: []
         }
-    "#);
-    assert!(err.message.contains("at least one stage"), "err: {}", err.message);
+    "#,
+    );
+    assert!(
+        err.message.contains("at least one stage"),
+        "err: {}",
+        err.message
+    );
 }
 
 #[test]
 fn parse_workflow_duplicate_trigger_errors() {
-    let err = parse_err(r#"
+    let err = parse_err(
+        r#"
         workflow pipe {
             trigger: a
             trigger: b
             stages: [x]
         }
-    "#);
+    "#,
+    );
     assert!(err.message.contains("duplicate"), "err: {}", err.message);
 }
 
 #[test]
 fn parse_file_with_agents_and_workflows() {
-    let file = parse_ok(r#"
+    let file = parse_ok(
+        r#"
         agent triage { model: openai can [ zendesk.read_ticket ] }
         agent responder { model: anthropic can [ zendesk.reply_ticket ] }
         workflow pipeline {
             trigger: ticket
             stages: [triage, responder]
         }
-    "#);
+    "#,
+    );
     assert_eq!(file.agents.len(), 2);
     assert_eq!(file.workflows.len(), 1);
 }
 
 #[test]
 fn parse_multiple_workflows() {
-    let file = parse_ok(r#"
+    let file = parse_ok(
+        r#"
         agent a { model: openai }
         workflow w1 { trigger: e1 stages: [a] }
         workflow w2 { trigger: e2 stages: [a] }
-    "#);
+    "#,
+    );
     assert_eq!(file.workflows.len(), 2);
     assert_eq!(file.workflows[0].name, "w1");
     assert_eq!(file.workflows[1].name, "w2");
@@ -513,4 +556,152 @@ fn parse_provider_duplicate_key_errors() {
 fn parse_provider_unknown_field_errors() {
     let err = parse_err("provider x { model: a budget: $5 }");
     assert!(err.message.contains("unexpected"), "got: {}", err.message);
+}
+
+// ── Step block tests ──────────────────────────────────────────────────────
+
+#[test]
+fn parse_workflow_with_step_blocks() {
+    let src = r#"
+        agent triage { model: openai }
+        workflow support {
+            trigger: ticket
+            step classify {
+                agent: triage
+                goal: "Classify this ticket"
+            }
+        }
+    "#;
+    let f = parse_ok(src);
+    assert_eq!(f.workflows[0].steps.len(), 1);
+    assert_eq!(f.workflows[0].steps[0].name, "classify");
+    assert_eq!(f.workflows[0].steps[0].agent, "triage");
+    assert_eq!(
+        f.workflows[0].steps[0].goal.as_deref(),
+        Some("Classify this ticket")
+    );
+}
+
+#[test]
+fn parse_workflow_with_multiple_steps() {
+    let src = r#"
+        agent a { model: openai }
+        agent b { model: openai }
+        workflow pipe {
+            trigger: event
+            step first {
+                agent: a
+                goal: "Do step one"
+            }
+            step second {
+                agent: b
+                goal: "Do step two"
+            }
+        }
+    "#;
+    let f = parse_ok(src);
+    assert_eq!(f.workflows[0].steps.len(), 2);
+    assert_eq!(f.workflows[0].steps[0].name, "first");
+    assert_eq!(f.workflows[0].steps[1].name, "second");
+}
+
+#[test]
+fn parse_step_without_goal() {
+    let src = r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step s1 {
+                agent: a
+            }
+        }
+    "#;
+    let f = parse_ok(src);
+    assert!(f.workflows[0].steps[0].goal.is_none());
+}
+
+#[test]
+fn parse_step_missing_agent_errors() {
+    let err = parse_err(
+        r#"
+        workflow w {
+            trigger: event
+            step s1 {
+                goal: "Do something"
+            }
+        }
+    "#,
+    );
+    assert!(err.message.contains("missing"), "got: {}", err.message);
+}
+
+#[test]
+fn parse_step_duplicate_agent_errors() {
+    let err = parse_err(
+        r#"
+        workflow w {
+            trigger: event
+            step s1 {
+                agent: a
+                agent: b
+            }
+        }
+    "#,
+    );
+    assert!(err.message.contains("duplicate"), "got: {}", err.message);
+}
+
+#[test]
+fn parse_step_duplicate_goal_errors() {
+    let err = parse_err(
+        r#"
+        workflow w {
+            trigger: event
+            step s1 {
+                agent: a
+                goal: "first"
+                goal: "second"
+            }
+        }
+    "#,
+    );
+    assert!(err.message.contains("duplicate"), "got: {}", err.message);
+}
+
+#[test]
+fn parse_step_goal_env_ref_errors() {
+    let err = parse_err(
+        r#"
+        workflow w {
+            trigger: event
+            step s1 {
+                agent: a
+                goal: env("SECRET")
+            }
+        }
+    "#,
+    );
+    assert!(
+        err.message.contains("goal must be a string literal"),
+        "got: {}",
+        err.message
+    );
+}
+
+#[test]
+fn parse_workflow_mixed_stages_and_steps() {
+    let src = r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            stages: [a]
+            step extra {
+                agent: a
+                goal: "Extra processing"
+            }
+        }
+    "#;
+    let f = parse_ok(src);
+    assert_eq!(f.workflows[0].stages.len(), 1);
+    assert_eq!(f.workflows[0].steps.len(), 1);
 }

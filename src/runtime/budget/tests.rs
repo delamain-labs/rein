@@ -7,7 +7,10 @@ use crate::runtime::provider::Usage;
 
 #[test]
 fn gpt4o_cost_calculation() {
-    let usage = Usage { input_tokens: 1000, output_tokens: 500 };
+    let usage = Usage {
+        input_tokens: 1000,
+        output_tokens: 500,
+    };
     let cost = calculate_cost("gpt-4o", &usage);
     // input: 1000 * 250 / 1M = 0.25 cents
     // output: 500 * 1000 / 1M = 0.5 cents
@@ -17,7 +20,10 @@ fn gpt4o_cost_calculation() {
 
 #[test]
 fn gpt4o_mini_is_cheaper() {
-    let usage = Usage { input_tokens: 100_000, output_tokens: 50_000 };
+    let usage = Usage {
+        input_tokens: 100_000,
+        output_tokens: 50_000,
+    };
     let gpt4o_cost = calculate_cost("gpt-4o", &usage);
     let mini_cost = calculate_cost("gpt-4o-mini", &usage);
     assert!(mini_cost < gpt4o_cost, "mini={mini_cost}, 4o={gpt4o_cost}");
@@ -25,7 +31,10 @@ fn gpt4o_mini_is_cheaper() {
 
 #[test]
 fn gpt35_pricing() {
-    let usage = Usage { input_tokens: 10_000, output_tokens: 5_000 };
+    let usage = Usage {
+        input_tokens: 10_000,
+        output_tokens: 5_000,
+    };
     let cost = calculate_cost("gpt-3.5-turbo", &usage);
     // input: 10000 * 50 / 1M = 0.5 cents
     // output: 5000 * 150 / 1M = 0.75 cents
@@ -35,7 +44,10 @@ fn gpt35_pricing() {
 
 #[test]
 fn unknown_model_uses_default() {
-    let usage = Usage { input_tokens: 1000, output_tokens: 1000 };
+    let usage = Usage {
+        input_tokens: 1000,
+        output_tokens: 1000,
+    };
     let cost = calculate_cost("some-unknown-model", &usage);
     // default: 500 input, 1500 output per M
     // 1000*500 + 1000*1500 = 2_000_000 / 1M = 2 cents
@@ -44,14 +56,20 @@ fn unknown_model_uses_default() {
 
 #[test]
 fn zero_tokens_costs_zero() {
-    let usage = Usage { input_tokens: 0, output_tokens: 0 };
+    let usage = Usage {
+        input_tokens: 0,
+        output_tokens: 0,
+    };
     let cost = calculate_cost("gpt-4o", &usage);
     assert_eq!(cost, 0);
 }
 
 #[test]
 fn large_token_count() {
-    let usage = Usage { input_tokens: 100_000, output_tokens: 50_000 };
+    let usage = Usage {
+        input_tokens: 100_000,
+        output_tokens: 50_000,
+    };
     let cost = calculate_cost("gpt-4o", &usage);
     // input: 100000 * 250 = 25_000_000 / 1M = 25 cents
     // output: 50000 * 1000 = 50_000_000 / 1M = 50 cents
@@ -61,7 +79,10 @@ fn large_token_count() {
 
 #[test]
 fn claude_pricing() {
-    let usage = Usage { input_tokens: 1_000_000, output_tokens: 0 };
+    let usage = Usage {
+        input_tokens: 1_000_000,
+        output_tokens: 0,
+    };
     let cost = calculate_cost("claude-sonnet-4-20250514", &usage);
     // 1M * 300 / 1M = 300 cents exactly
     assert_eq!(cost, 300);

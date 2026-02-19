@@ -1,7 +1,9 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-use super::{ChatResponse, Message, Provider, ProviderError, Role, ToolCallRequest, ToolDef, Usage};
+use super::{
+    ChatResponse, Message, Provider, ProviderError, Role, ToolCallRequest, ToolDef, Usage,
+};
 
 #[cfg(test)]
 mod tests;
@@ -210,7 +212,10 @@ impl Provider for AnthropicProvider {
             let body_msg = serde_json::from_str::<AnthropicError>(&text)
                 .map(|e| e.error.message)
                 .unwrap_or(text);
-            return Err(ProviderError::Api { status, body: body_msg });
+            return Err(ProviderError::Api {
+                status,
+                body: body_msg,
+            });
         }
 
         let anthro: AnthropicResponse = response
@@ -230,7 +235,11 @@ impl Provider for AnthropicProvider {
                     text_content.push_str(&text);
                 }
                 ResponseContent::ToolUse { id, name, input } => {
-                    tool_calls.push(ToolCallRequest { id, name, arguments: input });
+                    tool_calls.push(ToolCallRequest {
+                        id,
+                        name,
+                        arguments: input,
+                    });
                 }
             }
         }

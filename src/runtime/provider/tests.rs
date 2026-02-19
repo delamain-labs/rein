@@ -47,11 +47,17 @@ async fn mock_provider_returns_queued_response() {
     mock.push_response(ChatResponse {
         content: "Hello!".to_string(),
         tool_calls: vec![],
-        usage: Usage { input_tokens: 10, output_tokens: 5 },
+        usage: Usage {
+            input_tokens: 10,
+            output_tokens: 5,
+        },
         model: "mock-1".to_string(),
     });
 
-    let resp = mock.chat(&[Message::user("Hi")], &[]).await.expect("should succeed");
+    let resp = mock
+        .chat(&[Message::user("Hi")], &[])
+        .await
+        .expect("should succeed");
     assert_eq!(resp.content, "Hello!");
     assert_eq!(resp.usage.input_tokens, 10);
     assert_eq!(resp.model, "mock-1");
@@ -105,13 +111,26 @@ fn mock_provider_name() {
 
 #[test]
 fn provider_error_display() {
-    assert_eq!(ProviderError::Network("timeout".into()).to_string(), "network error: timeout");
     assert_eq!(
-        ProviderError::Api { status: 429, body: "slow down".into() }.to_string(),
+        ProviderError::Network("timeout".into()).to_string(),
+        "network error: timeout"
+    );
+    assert_eq!(
+        ProviderError::Api {
+            status: 429,
+            body: "slow down".into()
+        }
+        .to_string(),
         "API error (429): slow down"
     );
-    assert_eq!(ProviderError::Parse("bad json".into()).to_string(), "parse error: bad json");
-    assert_eq!(ProviderError::Auth("invalid key".into()).to_string(), "auth error: invalid key");
+    assert_eq!(
+        ProviderError::Parse("bad json".into()).to_string(),
+        "parse error: bad json"
+    );
+    assert_eq!(
+        ProviderError::Auth("invalid key".into()).to_string(),
+        "auth error: invalid key"
+    );
     assert_eq!(ProviderError::RateLimited.to_string(), "rate limited");
 }
 
@@ -119,14 +138,15 @@ fn provider_error_display() {
 fn chat_response_with_tool_calls() {
     let resp = ChatResponse {
         content: String::new(),
-        tool_calls: vec![
-            ToolCallRequest {
-                id: "call-1".to_string(),
-                name: "read_file".to_string(),
-                arguments: serde_json::json!({"path": "/tmp/test"}),
-            },
-        ],
-        usage: Usage { input_tokens: 100, output_tokens: 50 },
+        tool_calls: vec![ToolCallRequest {
+            id: "call-1".to_string(),
+            name: "read_file".to_string(),
+            arguments: serde_json::json!({"path": "/tmp/test"}),
+        }],
+        usage: Usage {
+            input_tokens: 100,
+            output_tokens: 50,
+        },
         model: "gpt-4".to_string(),
     };
     assert!(resp.content.is_empty());

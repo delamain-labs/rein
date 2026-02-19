@@ -54,7 +54,8 @@ fn resolve_with_specific_model() {
 
 #[test]
 fn resolve_anthropic_specific_model() {
-    let provider = resolve("anthropic/claude-opus-4-20250514", &anthropic_config()).expect("should resolve");
+    let provider =
+        resolve("anthropic/claude-opus-4-20250514", &anthropic_config()).expect("should resolve");
     assert_eq!(provider.name(), "anthropic");
 }
 
@@ -66,8 +67,13 @@ fn resolve_case_insensitive() {
 
 #[test]
 fn resolve_unknown_provider() {
-    let err = resolve("llama-local", &full_config()).err().expect("should fail");
-    assert_eq!(err, ResolveError::UnknownProvider("llama-local".to_string()));
+    let err = resolve("llama-local", &full_config())
+        .err()
+        .expect("should fail");
+    assert_eq!(
+        err,
+        ResolveError::UnknownProvider("llama-local".to_string())
+    );
 }
 
 #[test]

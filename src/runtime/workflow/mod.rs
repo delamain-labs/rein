@@ -142,11 +142,9 @@ fn condition_matches(output: &str, field: &str, equals: &str) -> bool {
                 // Exact match: the value equals our target, or is followed
                 // by a non-alphanumeric character (e.g. "high." or "high,")
                 if val == equals_lower
-                    || val
-                        .strip_prefix(equals_lower.as_str())
-                        .is_some_and(|rest| {
-                            rest.starts_with(|c: char| !c.is_alphanumeric() && c != '_')
-                        })
+                    || val.strip_prefix(equals_lower.as_str()).is_some_and(|rest| {
+                        rest.starts_with(|c: char| !c.is_alphanumeric() && c != '_')
+                    })
                 {
                     return true;
                 }
@@ -172,10 +170,7 @@ fn resolve_next_stage<'a>(
 ) -> Result<Option<&'a Stage>, WorkflowError> {
     match &current.route {
         RouteRule::Next => {
-            let idx = workflow
-                .stages
-                .iter()
-                .position(|s| s.name == current.name);
+            let idx = workflow.stages.iter().position(|s| s.name == current.name);
             Ok(idx.and_then(|i| workflow.stages.get(i + 1)))
         }
         RouteRule::Conditional {
@@ -185,15 +180,13 @@ fn resolve_next_stage<'a>(
             else_stage,
         } => {
             if condition_matches(output, field, equals) {
-                Ok(Some(
-                    find_stage(workflow, then_stage)
-                        .ok_or_else(|| WorkflowError::StageNotFound(then_stage.clone()))?,
-                ))
+                Ok(Some(find_stage(workflow, then_stage).ok_or_else(|| {
+                    WorkflowError::StageNotFound(then_stage.clone())
+                })?))
             } else if let Some(else_name) = else_stage {
-                Ok(Some(
-                    find_stage(workflow, else_name)
-                        .ok_or_else(|| WorkflowError::StageNotFound(else_name.clone()))?,
-                ))
+                Ok(Some(find_stage(workflow, else_name).ok_or_else(|| {
+                    WorkflowError::StageNotFound(else_name.clone())
+                })?))
             } else {
                 Ok(None)
             }
@@ -331,7 +324,8 @@ pub async fn run_sequential_resumable(
 
     let (mut stage_results, mut current_input, skip_stages) =
         build_resume_context(checkpoint.as_ref(), workflow);
-    let mut visited: std::collections::HashSet<&str> = skip_stages.iter().map(String::as_str).collect();
+    let mut visited: std::collections::HashSet<&str> =
+        skip_stages.iter().map(String::as_str).collect();
     let mut current_stage = find_resume_start(workflow, checkpoint.as_ref(), &skip_stages)?;
 
     while let Some(stage) = current_stage {

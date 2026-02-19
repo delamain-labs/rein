@@ -35,22 +35,38 @@ pub struct Message {
 impl Message {
     #[must_use]
     pub fn system(content: impl Into<String>) -> Self {
-        Self { role: Role::System, content: content.into(), tool_call_id: None }
+        Self {
+            role: Role::System,
+            content: content.into(),
+            tool_call_id: None,
+        }
     }
 
     #[must_use]
     pub fn user(content: impl Into<String>) -> Self {
-        Self { role: Role::User, content: content.into(), tool_call_id: None }
+        Self {
+            role: Role::User,
+            content: content.into(),
+            tool_call_id: None,
+        }
     }
 
     #[must_use]
     pub fn assistant(content: impl Into<String>) -> Self {
-        Self { role: Role::Assistant, content: content.into(), tool_call_id: None }
+        Self {
+            role: Role::Assistant,
+            content: content.into(),
+            tool_call_id: None,
+        }
     }
 
     #[must_use]
     pub fn tool(call_id: impl Into<String>, content: impl Into<String>) -> Self {
-        Self { role: Role::Tool, content: content.into(), tool_call_id: Some(call_id.into()) }
+        Self {
+            role: Role::Tool,
+            content: content.into(),
+            tool_call_id: Some(call_id.into()),
+        }
     }
 }
 
@@ -160,12 +176,18 @@ impl MockProvider {
 
     /// Queue a successful response.
     pub fn push_response(&self, response: ChatResponse) {
-        self.responses.lock().expect("lock poisoned").push(Ok(response));
+        self.responses
+            .lock()
+            .expect("lock poisoned")
+            .push(Ok(response));
     }
 
     /// Queue an error response.
     pub fn push_error(&self, msg: impl Into<String>) {
-        self.responses.lock().expect("lock poisoned").push(Err(msg.into()));
+        self.responses
+            .lock()
+            .expect("lock poisoned")
+            .push(Err(msg.into()));
     }
 }
 

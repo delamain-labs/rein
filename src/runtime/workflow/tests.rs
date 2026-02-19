@@ -33,6 +33,7 @@ fn make_workflow(name: &str, trigger: &str, stage_agents: &[&str]) -> WorkflowDe
                 span: Span::new(0, 1),
             })
             .collect(),
+        steps: vec![],
         mode: ExecutionMode::Sequential,
         span: Span::new(0, 1),
     }
@@ -331,6 +332,7 @@ fn make_conditional_workflow() -> (ReinFile, WorkflowDef) {
                 span: Span::new(0, 1),
             },
         ],
+        steps: vec![],
         mode: ExecutionMode::Sequential,
         span: Span::new(0, 1),
     };
@@ -424,6 +426,7 @@ async fn conditional_no_else_ends_workflow() {
                 span: Span::new(0, 1),
             },
         ],
+        steps: vec![],
         mode: ExecutionMode::Sequential,
         span: Span::new(0, 1),
     };
@@ -751,7 +754,11 @@ async fn condition_match_rejects_prefix_false_positive() {
     assert!(condition_matches("priority: high", "priority", "high"));
     assert!(condition_matches("priority: high.", "priority", "high"));
     assert!(!condition_matches("priority: higher", "priority", "high"));
-    assert!(!condition_matches("priority: highlights", "priority", "high"));
+    assert!(!condition_matches(
+        "priority: highlights",
+        "priority",
+        "high"
+    ));
 }
 
 #[tokio::test]
@@ -776,6 +783,7 @@ async fn conditional_route_to_nonexistent_stage_errors() {
             },
             span: Span::new(0, 1),
         }],
+        steps: vec![],
         mode: ExecutionMode::Sequential,
         span: Span::new(0, 1),
     };
@@ -838,6 +846,7 @@ async fn circular_route_returns_error() {
                 span: Span::new(0, 1),
             },
         ],
+        steps: vec![],
         mode: ExecutionMode::Sequential,
         span: Span::new(0, 1),
     };

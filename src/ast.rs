@@ -53,8 +53,9 @@ impl ValueExpr {
     {
         match self {
             Self::Literal(s) => Ok(s.clone()),
-            Self::EnvRef { var_name, .. } => env_lookup(var_name)
-                .ok_or_else(|| ResolveError::EnvVarNotSet(var_name.clone())),
+            Self::EnvRef { var_name, .. } => {
+                env_lookup(var_name).ok_or_else(|| ResolveError::EnvVarNotSet(var_name.clone()))
+            }
         }
     }
 
@@ -171,6 +172,17 @@ pub enum ExecutionMode {
     Parallel,
 }
 
+/// A `step <name> { agent: <name> goal: <text> }` definition within a workflow.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StepDef {
+    pub name: String,
+    /// The agent to execute for this step.
+    pub agent: String,
+    /// Natural language goal describing what the step should accomplish.
+    pub goal: Option<String>,
+    pub span: Span,
+}
+
 /// A `workflow <name> { ... }` definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkflowDef {
@@ -179,6 +191,8 @@ pub struct WorkflowDef {
     pub trigger: String,
     /// Ordered list of stages.
     pub stages: Vec<Stage>,
+    /// Named step blocks (`step <name> { ... }`).
+    pub steps: Vec<StepDef>,
     /// Default execution mode.
     pub mode: ExecutionMode,
     pub span: Span,
@@ -382,6 +396,7 @@ mod tests {
                     span: dummy_span(),
                 },
             ],
+            steps: vec![],
             mode: ExecutionMode::Sequential,
             span: dummy_span(),
         };
@@ -398,6 +413,7 @@ mod tests {
             name: "test".to_string(),
             trigger: "event".to_string(),
             stages: vec![],
+            steps: vec![],
             mode: ExecutionMode::Parallel,
             span: dummy_span(),
         };
@@ -415,6 +431,7 @@ mod tests {
                 name: "pipeline".to_string(),
                 trigger: "event".to_string(),
                 stages: vec![],
+                steps: vec![],
                 mode: ExecutionMode::Sequential,
                 span: dummy_span(),
             }],

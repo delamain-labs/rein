@@ -1,7 +1,9 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-use super::{ChatResponse, Message, Provider, ProviderError, Role, ToolCallRequest, ToolDef, Usage};
+use super::{
+    ChatResponse, Message, Provider, ProviderError, Role, ToolCallRequest, ToolDef, Usage,
+};
 
 #[cfg(test)]
 mod tests;
@@ -106,7 +108,11 @@ impl OpenAiProvider {
     /// * `model` - Model identifier (e.g. `gpt-4o`)
     /// * `base_url` - Optional base URL override (for proxies / compatible APIs)
     #[must_use]
-    pub fn new(api_key: impl Into<String>, model: impl Into<String>, base_url: Option<String>) -> Self {
+    pub fn new(
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+        base_url: Option<String>,
+    ) -> Self {
         Self {
             client: Client::new(),
             api_key: api_key.into(),
@@ -186,7 +192,10 @@ impl Provider for OpenAiProvider {
             let body_msg = serde_json::from_str::<OaiErrorResponse>(&text)
                 .map(|e| e.error.message)
                 .unwrap_or(text);
-            return Err(ProviderError::Api { status, body: body_msg });
+            return Err(ProviderError::Api {
+                status,
+                body: body_msg,
+            });
         }
 
         let oai: OaiResponse = response

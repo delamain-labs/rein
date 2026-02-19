@@ -1,5 +1,5 @@
-use super::permissions::ToolRegistry;
 use super::ToolCall;
+use super::permissions::ToolRegistry;
 
 #[cfg(test)]
 mod tests;
@@ -43,10 +43,16 @@ impl<'a> ToolInterceptor<'a> {
     /// Returns `Allowed` or `CappedAt` for permitted calls, `Denied` otherwise.
     #[must_use]
     pub fn intercept(&self, tool_call: &ToolCall) -> InterceptResult {
-        match self.registry.check_permission(&tool_call.namespace, &tool_call.action) {
+        match self
+            .registry
+            .check_permission(&tool_call.namespace, &tool_call.action)
+        {
             Ok(()) => {
                 // Check for monetary cap
-                if let Some(cap) = self.registry.monetary_cap(&tool_call.namespace, &tool_call.action) {
+                if let Some(cap) = self
+                    .registry
+                    .monetary_cap(&tool_call.namespace, &tool_call.action)
+                {
                     InterceptResult::CappedAt {
                         max_cents: cap.amount,
                         currency: cap.currency.clone(),

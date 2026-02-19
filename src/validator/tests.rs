@@ -196,40 +196,50 @@ agent dup { }
 
 #[test]
 fn workflow_valid_stages_no_errors() {
-    let diags = validate_src(r#"
+    let diags = validate_src(
+        r#"
         agent triage { model: openai }
         agent responder { model: openai }
         workflow pipe {
             trigger: event
             stages: [triage, responder]
         }
-    "#);
+    "#,
+    );
     let errs = errors(&diags);
     assert!(errs.is_empty(), "unexpected errors: {errs:?}");
 }
 
 #[test]
 fn workflow_unknown_agent_errors() {
-    let diags = validate_src(r#"
+    let diags = validate_src(
+        r#"
         agent triage { model: openai }
         workflow pipe {
             trigger: event
             stages: [triage, nonexistent]
         }
-    "#);
+    "#,
+    );
     let errs = errors(&diags);
     assert_eq!(errs.len(), 1);
-    assert!(errs[0].message.contains("nonexistent"), "msg: {}", errs[0].message);
+    assert!(
+        errs[0].message.contains("nonexistent"),
+        "msg: {}",
+        errs[0].message
+    );
     assert_eq!(errs[0].code, "E006");
 }
 
 #[test]
 fn workflow_duplicate_names_errors() {
-    let diags = validate_src(r#"
+    let diags = validate_src(
+        r#"
         agent a { model: openai }
         workflow pipe { trigger: e1 stages: [a] }
         workflow pipe { trigger: e2 stages: [a] }
-    "#);
+    "#,
+    );
     let errs = errors(&diags);
     assert_eq!(errs.len(), 1);
     assert_eq!(errs[0].code, "E005");
@@ -237,13 +247,15 @@ fn workflow_duplicate_names_errors() {
 
 #[test]
 fn workflow_duplicate_stages_warns() {
-    let diags = validate_src(r#"
+    let diags = validate_src(
+        r#"
         agent a { model: openai }
         workflow pipe {
             trigger: event
             stages: [a, a]
         }
-    "#);
+    "#,
+    );
     let warns = warnings(&diags);
     assert_eq!(warns.len(), 1);
     assert_eq!(warns[0].code, "W004");
@@ -253,10 +265,12 @@ fn workflow_duplicate_stages_warns() {
 
 #[test]
 fn duplicate_provider_names_error() {
-    let diags = validate_src(r#"
+    let diags = validate_src(
+        r#"
         provider openai { model: "gpt-4o" key: env("K1") }
         provider openai { model: "gpt-4o-mini" key: env("K2") }
-    "#);
+    "#,
+    );
     let errors: Vec<_> = diags.iter().filter(|d| d.code == "E007").collect();
     assert_eq!(errors.len(), 1);
 }
@@ -273,4 +287,73 @@ fn provider_with_key_no_warning() {
     let diags = validate_src(r#"provider openai { model: openai key: env("K") }"#);
     let warns: Vec<_> = diags.iter().filter(|d| d.code == "W005").collect();
     assert_eq!(warns.len(), 0);
+}
+
+// ── Step validation tests ─────────────────────────────────────────────────
+
+#[test]
+fn step_references_unknown_agent_errors() {
+    let diags = validate_src(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step s1 {
+                agent: nonexistent
+            }
+        }
+    "#,
+    );
+    let errors: Vec<_> = diags.iter().filter(|d| d.code == "E008").collect();
+    assert_eq!(errors.len(), 1);
+}
+
+#[test]
+fn step_references_valid_agent_ok() {
+    let diags = validate_src(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step s1 {
+                agent: a
+            }
+        }
+    "#,
+    );
+    let errors: Vec<_> = diags.iter().filter(|d| d.code == "E008").collect();
+    assert_eq!(errors.len(), 0);
+}
+
+#[test]
+fn duplicate_step_names_error() {
+    let diags = validate_src(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step s1 { agent: a }
+            step s1 { agent: a }
+        }
+    "#,
+    );
+    let errors: Vec<_> = diags.iter().filter(|d| d.code == "E009").collect();
+    assert_eq!(errors.len(), 1);
+}
+
+#[test]
+fn step_stage_name_collision_errors() {
+    let diags = validate_src(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            stages: [a]
+            step a { agent: a }
+        }
+    "#,
+    );
+    let errors: Vec<_> = diags.iter().filter(|d| d.code == "E010").collect();
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].message.contains("collides with stage"));
 }

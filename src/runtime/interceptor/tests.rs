@@ -88,10 +88,7 @@ fn unknown_tool_is_denied_by_default() {
 
 #[test]
 fn capped_tool_returns_capped_at() {
-    let agent = make_agent(
-        vec![cap_with_money("zendesk", "refund", 5000)],
-        vec![],
-    );
+    let agent = make_agent(vec![cap_with_money("zendesk", "refund", 5000)], vec![]);
     let registry = ToolRegistry::from_agent(&agent);
     let interceptor = ToolInterceptor::new(&registry);
 
@@ -135,7 +132,10 @@ fn multiple_tools_mixed_permissions() {
     );
     assert!(matches!(
         interceptor.intercept(&tool_call("zendesk", "refund")),
-        InterceptResult::CappedAt { max_cents: 5000, .. }
+        InterceptResult::CappedAt {
+            max_cents: 5000,
+            ..
+        }
     ));
     assert!(matches!(
         interceptor.intercept(&tool_call("zendesk", "delete_ticket")),

@@ -1,6 +1,6 @@
+use super::Provider;
 use super::anthropic::AnthropicProvider;
 use super::openai::OpenAiProvider;
-use super::Provider;
 
 #[cfg(test)]
 mod tests;
@@ -50,13 +50,41 @@ struct ModelMapping {
 }
 
 const MAPPINGS: &[ModelMapping] = &[
-    ModelMapping { prefix: "openai", backend: Backend::OpenAi, default_model: "gpt-4o" },
-    ModelMapping { prefix: "gpt-4o-mini", backend: Backend::OpenAi, default_model: "gpt-4o-mini" },
-    ModelMapping { prefix: "gpt-4o", backend: Backend::OpenAi, default_model: "gpt-4o" },
-    ModelMapping { prefix: "gpt-4", backend: Backend::OpenAi, default_model: "gpt-4" },
-    ModelMapping { prefix: "gpt-3.5", backend: Backend::OpenAi, default_model: "gpt-3.5-turbo" },
-    ModelMapping { prefix: "anthropic", backend: Backend::Anthropic, default_model: "claude-sonnet-4-20250514" },
-    ModelMapping { prefix: "claude", backend: Backend::Anthropic, default_model: "claude-sonnet-4-20250514" },
+    ModelMapping {
+        prefix: "openai",
+        backend: Backend::OpenAi,
+        default_model: "gpt-4o",
+    },
+    ModelMapping {
+        prefix: "gpt-4o-mini",
+        backend: Backend::OpenAi,
+        default_model: "gpt-4o-mini",
+    },
+    ModelMapping {
+        prefix: "gpt-4o",
+        backend: Backend::OpenAi,
+        default_model: "gpt-4o",
+    },
+    ModelMapping {
+        prefix: "gpt-4",
+        backend: Backend::OpenAi,
+        default_model: "gpt-4",
+    },
+    ModelMapping {
+        prefix: "gpt-3.5",
+        backend: Backend::OpenAi,
+        default_model: "gpt-3.5-turbo",
+    },
+    ModelMapping {
+        prefix: "anthropic",
+        backend: Backend::Anthropic,
+        default_model: "claude-sonnet-4-20250514",
+    },
+    ModelMapping {
+        prefix: "claude",
+        backend: Backend::Anthropic,
+        default_model: "claude-sonnet-4-20250514",
+    },
 ];
 
 /// Resolve a `.rein` model field into a boxed `Provider`.
@@ -93,7 +121,12 @@ pub fn resolve(
                 .as_deref()
                 .ok_or_else(|| ResolveError::MissingApiKey("anthropic".to_string()))?;
             let url = config.anthropic_base_url.clone();
-            Ok(Box::new(AnthropicProvider::new(api_key, actual_model, url, None)))
+            Ok(Box::new(AnthropicProvider::new(
+                api_key,
+                actual_model,
+                url,
+                None,
+            )))
         }
     }
 }

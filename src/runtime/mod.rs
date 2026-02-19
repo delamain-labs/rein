@@ -75,13 +75,22 @@ impl RunTrace {
 
         for event in &self.events {
             match event {
-                RunEvent::LlmCall { model, input_tokens, output_tokens, cost_cents } => {
+                RunEvent::LlmCall {
+                    model,
+                    input_tokens,
+                    output_tokens,
+                    cost_cents,
+                } => {
                     turn += 1;
                     lines.push(format!(
                         "[turn {turn}] LLM call ({model}): {input_tokens} in / {output_tokens} out, {cost_cents}¢"
                     ));
                 }
-                RunEvent::ToolCallAttempt { tool, allowed, reason } => {
+                RunEvent::ToolCallAttempt {
+                    tool,
+                    allowed,
+                    reason,
+                } => {
                     let status = if *allowed { "✓" } else { "✗" };
                     let tool_name = format!("{}.{}", tool.namespace, tool.action);
                     let suffix = reason.as_ref().map_or(String::new(), |r| format!(" ({r})"));
@@ -93,10 +102,16 @@ impl RunTrace {
                     let preview: String = result.output.chars().take(80).collect();
                     lines.push(format!("  → {tool_name} [{status}]: {preview}"));
                 }
-                RunEvent::BudgetUpdate { spent_cents, limit_cents } => {
+                RunEvent::BudgetUpdate {
+                    spent_cents,
+                    limit_cents,
+                } => {
                     lines.push(format!("  budget: {spent_cents}¢ / {limit_cents}¢"));
                 }
-                RunEvent::RunComplete { total_cost_cents, total_tokens } => {
+                RunEvent::RunComplete {
+                    total_cost_cents,
+                    total_tokens,
+                } => {
                     lines.push(format!(
                         "Done. {total_tokens} tokens, {total_cost_cents}¢ total."
                     ));

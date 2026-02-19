@@ -63,23 +63,29 @@ impl MockExecutor {
 
     /// Register a successful response for a tool.
     pub fn on_call(&self, namespace: &str, action: &str, output: impl Into<String>) {
-        self.handlers.lock().expect("lock poisoned").push(MockHandler {
-            namespace: namespace.to_string(),
-            action: action.to_string(),
-            response: Ok(ToolOutput {
-                success: true,
-                output: output.into(),
-            }),
-        });
+        self.handlers
+            .lock()
+            .expect("lock poisoned")
+            .push(MockHandler {
+                namespace: namespace.to_string(),
+                action: action.to_string(),
+                response: Ok(ToolOutput {
+                    success: true,
+                    output: output.into(),
+                }),
+            });
     }
 
     /// Register a failure response for a tool.
     pub fn on_call_fail(&self, namespace: &str, action: &str, error: impl Into<String>) {
-        self.handlers.lock().expect("lock poisoned").push(MockHandler {
-            namespace: namespace.to_string(),
-            action: action.to_string(),
-            response: Err(error.into()),
-        });
+        self.handlers
+            .lock()
+            .expect("lock poisoned")
+            .push(MockHandler {
+                namespace: namespace.to_string(),
+                action: action.to_string(),
+                response: Err(error.into()),
+            });
     }
 }
 

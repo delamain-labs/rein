@@ -559,7 +559,10 @@ fn trace_summary_contains_turns() {
     };
     let summary = trace.summary();
     assert!(summary.contains("turn 1"), "summary: {summary}");
-    assert!(summary.contains("zendesk.read_ticket"), "summary: {summary}");
+    assert!(
+        summary.contains("zendesk.read_ticket"),
+        "summary: {summary}"
+    );
     assert!(summary.contains("Done"), "summary: {summary}");
 }
 

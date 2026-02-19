@@ -60,6 +60,9 @@ pub fn validate(file: &ReinFile) -> Vec<Diagnostic> {
     for workflow in &file.workflows {
         check_workflow_stages_reference_agents(file, workflow, &mut diags);
         check_duplicate_stages(workflow, &mut diags);
+        check_workflow_steps_reference_agents(file, workflow, &mut diags);
+        check_duplicate_step_names(workflow, &mut diags);
+        check_step_stage_name_collisions(workflow, &mut diags);
     }
     diags
 }
@@ -230,6 +233,71 @@ fn check_model_present(agent: &AgentDef, diags: &mut Vec<Diagnostic>) {
             format!("agent '{}' has no `model` field", agent.name),
             agent.span.clone(),
         ));
+    }
+}
+
+/// E008: step references an agent that doesn't exist.
+fn check_workflow_steps_reference_agents(
+    file: &ReinFile,
+    workflow: &crate::ast::WorkflowDef,
+    diags: &mut Vec<Diagnostic>,
+) {
+    for step in &workflow.steps {
+        if !file.agents.iter().any(|a| a.name == step.agent) {
+            diags.push(Diagnostic::error(
+                "E008",
+                format!(
+                    "step '{}' in workflow '{}' references unknown agent '{}'",
+                    step.name, workflow.name, step.agent
+                ),
+                step.span.clone(),
+            ));
+        }
+    }
+}
+
+/// E009: duplicate step names within a workflow.
+fn check_duplicate_step_names(workflow: &crate::ast::WorkflowDef, diags: &mut Vec<Diagnostic>) {
+    use std::collections::HashMap;
+    let mut seen: HashMap<&str, &crate::ast::StepDef> = HashMap::new();
+    for step in &workflow.steps {
+        if let Some(first) = seen.get(step.name.as_str()) {
+            diags.push(Diagnostic::error(
+                "E009",
+                format!(
+                    "duplicate step name '{}' in workflow '{}': first defined at {}",
+                    step.name, workflow.name, first.span.start
+                ),
+                step.span.clone(),
+            ));
+        } else {
+            seen.insert(&step.name, step);
+        }
+    }
+}
+
+/// E010: step name collides with a stage name in the same workflow.
+fn check_step_stage_name_collisions(
+    workflow: &crate::ast::WorkflowDef,
+    diags: &mut Vec<Diagnostic>,
+) {
+    use std::collections::HashMap;
+    let stage_names: HashMap<&str, &crate::ast::Stage> = workflow
+        .stages
+        .iter()
+        .map(|s| (s.name.as_str(), s))
+        .collect();
+    for step in &workflow.steps {
+        if let Some(stage) = stage_names.get(step.name.as_str()) {
+            diags.push(Diagnostic::error(
+                "E010",
+                format!(
+                    "step '{}' in workflow '{}' collides with stage of the same name at {}",
+                    step.name, workflow.name, stage.span.start
+                ),
+                step.span.clone(),
+            ));
+        }
     }
 }
 
