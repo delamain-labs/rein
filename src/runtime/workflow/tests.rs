@@ -133,3 +133,75 @@ async fn stage_failure_returns_error() {
 
     assert!(matches!(err, WorkflowError::StageFailed { .. }));
 }
+
+// ── Parallel workflow tests ──────────────────────────────────────────────
+
+#[tokio::test]
+async fn parallel_workflow_runs_all_stages() {
+    let file = parse_file(r#"
+        agent a { model: openai }
+        agent b { model: openai }
+    "#);
+    let mut workflow = make_workflow("pipe", "event", &["a", "b"]);
+    workflow.mode = ExecutionMode::Parallel;
+
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    provider.push_response(simple_response("output_a"));
+    provider.push_response(simple_response("output_b"));
+
+    let result = run_parallel(&workflow, &file, &provider, &executor, &[], &RunConfig::default())
+        .await
+        .expect("should succeed");
+
+    assert_eq!(result.stage_results.len(), 2);
+    assert_eq!(result.stage_results[0].output, "output_a");
+    assert_eq!(result.stage_results[1].output, "output_b");
+    assert!(result.final_output.contains("output_a"));
+    assert!(result.final_output.contains("output_b"));
+}
+
+#[tokio::test]
+async fn parallel_unknown_agent_errors() {
+    let file = parse_file("agent a { model: openai }");
+    let mut workflow = make_workflow("pipe", "event", &["a", "missing"]);
+    workflow.mode = ExecutionMode::Parallel;
+
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // Queue response for agent "a" so it doesn't fail first
+    provider.push_response(simple_response("ok"));
+
+    let err = run_parallel(&workflow, &file, &provider, &executor, &[], &RunConfig::default())
+        .await
+        .unwrap_err();
+
+    assert!(err.to_string().contains("missing"), "err: {err}");
+}
+
+#[tokio::test]
+async fn run_workflow_dispatches_by_mode() {
+    let file = parse_file("agent a { model: openai }");
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // Sequential
+    let mut seq = make_workflow("seq", "event", &["a"]);
+    seq.mode = ExecutionMode::Sequential;
+    provider.push_response(simple_response("sequential"));
+    let r1 = run_workflow(&seq, &file, &provider, &executor, &[], &RunConfig::default())
+        .await
+        .expect("ok");
+    assert_eq!(r1.final_output, "sequential");
+
+    // Parallel
+    let mut par = make_workflow("par", "event", &["a"]);
+    par.mode = ExecutionMode::Parallel;
+    provider.push_response(simple_response("parallel"));
+    let r2 = run_workflow(&par, &file, &provider, &executor, &[], &RunConfig::default())
+        .await
+        .expect("ok");
+    assert!(r2.final_output.contains("parallel"));
+}
