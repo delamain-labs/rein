@@ -1,24 +1,17 @@
+use super::anthropic::AnthropicProvider;
 use super::openai::OpenAiProvider;
 use super::Provider;
 
 #[cfg(test)]
 mod tests;
 
-/// Known provider prefixes and their default models.
-const PROVIDER_DEFAULTS: &[(&str, &str, &str)] = &[
-    // (prefix, base_url, default_model)
-    ("openai", "https://api.openai.com/v1", "gpt-4o"),
-    ("anthropic", "https://api.openai.com/v1", "claude-sonnet-4-20250514"),
-    ("gpt-4o", "https://api.openai.com/v1", "gpt-4o"),
-    ("gpt-4", "https://api.openai.com/v1", "gpt-4"),
-    ("gpt-3.5", "https://api.openai.com/v1", "gpt-3.5-turbo"),
-];
-
 /// Configuration for resolving model fields to providers.
 #[derive(Debug, Clone, Default)]
 pub struct ProviderConfig {
     pub openai_api_key: Option<String>,
     pub openai_base_url: Option<String>,
+    pub anthropic_api_key: Option<String>,
+    pub anthropic_base_url: Option<String>,
 }
 
 /// Errors from model resolution.
@@ -43,8 +36,30 @@ impl std::fmt::Display for ResolveError {
 
 impl std::error::Error for ResolveError {}
 
-/// Resolve a `.rein` model field (e.g. `"openai"`, `"gpt-4o"`, `"anthropic"`)
-/// into a boxed `Provider`.
+/// Which backend a model field maps to.
+enum Backend {
+    OpenAi,
+    Anthropic,
+}
+
+/// Known model prefixes.
+struct ModelMapping {
+    prefix: &'static str,
+    backend: Backend,
+    default_model: &'static str,
+}
+
+const MAPPINGS: &[ModelMapping] = &[
+    ModelMapping { prefix: "openai", backend: Backend::OpenAi, default_model: "gpt-4o" },
+    ModelMapping { prefix: "gpt-4o-mini", backend: Backend::OpenAi, default_model: "gpt-4o-mini" },
+    ModelMapping { prefix: "gpt-4o", backend: Backend::OpenAi, default_model: "gpt-4o" },
+    ModelMapping { prefix: "gpt-4", backend: Backend::OpenAi, default_model: "gpt-4" },
+    ModelMapping { prefix: "gpt-3.5", backend: Backend::OpenAi, default_model: "gpt-3.5-turbo" },
+    ModelMapping { prefix: "anthropic", backend: Backend::Anthropic, default_model: "claude-sonnet-4-20250514" },
+    ModelMapping { prefix: "claude", backend: Backend::Anthropic, default_model: "claude-sonnet-4-20250514" },
+];
+
+/// Resolve a `.rein` model field into a boxed `Provider`.
 ///
 /// # Errors
 /// Returns `ResolveError` if the model is unknown or the API key is missing.
@@ -54,29 +69,31 @@ pub fn resolve(
 ) -> Result<Box<dyn Provider>, ResolveError> {
     let normalized = model_field.to_lowercase();
 
-    // Check for exact or prefix match
-    let (_prefix, base_url, model_name) = PROVIDER_DEFAULTS
+    let mapping = MAPPINGS
         .iter()
-        .find(|(prefix, _, _)| normalized == *prefix || normalized.starts_with(&format!("{prefix}/")))
+        .find(|m| normalized == m.prefix || normalized.starts_with(&format!("{}/", m.prefix)))
         .ok_or_else(|| ResolveError::UnknownProvider(model_field.to_string()))?;
 
-    // If the model field contains a slash, treat the part after as the specific model
-    let actual_model = if let Some(idx) = model_field.find('/') {
-        &model_field[idx + 1..]
-    } else {
-        model_name
-    };
+    let actual_model = model_field
+        .find('/')
+        .map_or(mapping.default_model, |i| &model_field[i + 1..]);
 
-    // All known providers currently use the OpenAI-compatible API
-    let api_key = config
-        .openai_api_key
-        .as_deref()
-        .ok_or_else(|| ResolveError::MissingApiKey("openai".to_string()))?;
-
-    let url = config
-        .openai_base_url
-        .clone()
-        .unwrap_or_else(|| (*base_url).to_string());
-
-    Ok(Box::new(OpenAiProvider::new(api_key, actual_model, Some(url))))
+    match mapping.backend {
+        Backend::OpenAi => {
+            let api_key = config
+                .openai_api_key
+                .as_deref()
+                .ok_or_else(|| ResolveError::MissingApiKey("openai".to_string()))?;
+            let url = config.openai_base_url.clone();
+            Ok(Box::new(OpenAiProvider::new(api_key, actual_model, url)))
+        }
+        Backend::Anthropic => {
+            let api_key = config
+                .anthropic_api_key
+                .as_deref()
+                .ok_or_else(|| ResolveError::MissingApiKey("anthropic".to_string()))?;
+            let url = config.anthropic_base_url.clone();
+            Ok(Box::new(AnthropicProvider::new(api_key, actual_model, url, None)))
+        }
+    }
 }

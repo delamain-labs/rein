@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+pub mod anthropic;
 pub mod openai;
 pub mod resolver;
 
