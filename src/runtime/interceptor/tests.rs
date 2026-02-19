@@ -11,6 +11,7 @@ fn make_agent(can: Vec<Capability>, cannot: Vec<Capability>) -> AgentDef {
         can,
         cannot,
         budget: None,
+        guardrails: None,
         span: Span { start: 0, end: 10 },
     }
 }

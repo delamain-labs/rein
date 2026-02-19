@@ -706,6 +706,96 @@ fn parse_workflow_mixed_stages_and_steps() {
     assert_eq!(f.workflows[0].steps.len(), 1);
 }
 
+// ───── Guardrails tests ─────
+
+#[test]
+fn parse_agent_with_guardrails() {
+    let f = parse_ok(
+        r#"agent bot {
+            model: openai
+            guardrails {
+                output_filter {
+                    pii_detection: redact
+                    toxicity: block
+                }
+            }
+        }"#,
+    );
+    let g = f.agents[0].guardrails.as_ref().unwrap();
+    assert_eq!(g.sections.len(), 1);
+    assert_eq!(g.sections[0].name, "output_filter");
+    assert_eq!(g.sections[0].rules.len(), 2);
+    assert_eq!(g.sections[0].rules[0].key, "pii_detection");
+    assert_eq!(g.sections[0].rules[0].value, "redact");
+    assert_eq!(g.sections[0].rules[1].key, "toxicity");
+    assert_eq!(g.sections[0].rules[1].value, "block");
+}
+
+#[test]
+fn parse_agent_guardrails_multiple_sections() {
+    let f = parse_ok(
+        r#"agent bot {
+            model: openai
+            guardrails {
+                output_filter {
+                    pii_detection: redact
+                }
+                escalation {
+                    low_confidence: escalate
+                }
+            }
+        }"#,
+    );
+    let g = f.agents[0].guardrails.as_ref().unwrap();
+    assert_eq!(g.sections.len(), 2);
+    assert_eq!(g.sections[0].name, "output_filter");
+    assert_eq!(g.sections[1].name, "escalation");
+}
+
+#[test]
+fn parse_agent_guardrails_empty() {
+    let f = parse_ok(
+        r#"agent bot {
+            model: openai
+            guardrails {}
+        }"#,
+    );
+    let g = f.agents[0].guardrails.as_ref().unwrap();
+    assert!(g.sections.is_empty());
+}
+
+#[test]
+fn parse_agent_duplicate_guardrails_errors() {
+    let err = parse_err(
+        r#"agent bot {
+            model: openai
+            guardrails {}
+            guardrails {}
+        }"#,
+    );
+    assert!(err.message.contains("duplicate"), "got: {}", err.message);
+}
+
+#[test]
+fn parse_guardrails_duplicate_section_errors() {
+    let err = parse_err(
+        r#"agent bot {
+            model: openai
+            guardrails {
+                output_filter { pii: redact }
+                output_filter { toxicity: block }
+            }
+        }"#,
+    );
+    assert!(err.message.contains("duplicate"), "got: {}", err.message);
+}
+
+#[test]
+fn parse_agent_no_guardrails() {
+    let f = parse_ok("agent bot { model: openai }");
+    assert!(f.agents[0].guardrails.is_none());
+}
+
 // ───── Tool block tests ─────
 
 #[test]

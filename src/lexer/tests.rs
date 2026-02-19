@@ -421,6 +421,13 @@ fn hash_comment_at_start_of_file_with_code() {
 }
 
 #[test]
+fn guardrails_keyword() {
+    let src = "guardrails { }";
+    let tokens = non_eof(lex_ok(src));
+    assert_eq!(tokens[0].kind, TokenKind::Guardrails);
+}
+
+#[test]
 fn tool_and_endpoint_keywords() {
     let src = "tool zendesk { endpoint: \"https://api.zendesk.com\" }";
     let tokens = non_eof(lex_ok(src));

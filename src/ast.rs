@@ -115,6 +115,34 @@ pub struct AgentDef {
     pub can: Vec<Capability>,
     pub cannot: Vec<Capability>,
     pub budget: Option<Budget>,
+    pub guardrails: Option<GuardrailsDef>,
+    pub span: Span,
+}
+
+// ---------------------------------------------------------------------------
+// Guardrails types
+// ---------------------------------------------------------------------------
+
+/// A `guardrails { ... }` block containing named sections.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GuardrailsDef {
+    pub sections: Vec<GuardrailSection>,
+    pub span: Span,
+}
+
+/// A named section within guardrails, e.g. `output_filter { pii_detection: redact }`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GuardrailSection {
+    pub name: String,
+    pub rules: Vec<GuardrailRule>,
+    pub span: Span,
+}
+
+/// A key-value rule within a guardrail section, e.g. `pii_detection: redact`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GuardrailRule {
+    pub key: String,
+    pub value: String,
     pub span: Span,
 }
 
@@ -321,6 +349,7 @@ mod tests {
                 unit: "ticket".to_string(),
                 span: dummy_span(),
             }),
+            guardrails: None,
             span: dummy_span(),
         };
         let json = serde_json::to_value(&agent).unwrap();
@@ -342,6 +371,7 @@ mod tests {
                 can: vec![],
                 cannot: vec![],
                 budget: None,
+                guardrails: None,
                 span: dummy_span(),
             }],
             workflows: vec![],
@@ -359,6 +389,7 @@ mod tests {
             can: vec![],
             cannot: vec![],
             budget: None,
+            guardrails: None,
             span: dummy_span(),
         };
         let json = serde_json::to_value(&agent).unwrap();

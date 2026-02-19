@@ -38,6 +38,7 @@ mod permissions_tests {
             can,
             cannot,
             budget: None,
+            guardrails: None,
             span: span(),
         }
     }
