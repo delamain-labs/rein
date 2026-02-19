@@ -75,18 +75,22 @@ fn check_duplicate_agent_names(file: &ReinFile, diags: &mut Vec<Diagnostic>) {
 
 /// E002: same tool appears in both `can` and `cannot`.
 fn check_can_cannot_overlap(agent: &AgentDef, diags: &mut Vec<Diagnostic>) {
+    use std::collections::HashSet;
+    let allowed: HashSet<(&str, &str)> = agent
+        .can
+        .iter()
+        .map(|c| (c.namespace.as_str(), c.action.as_str()))
+        .collect();
     for denied in &agent.cannot {
-        for allowed in &agent.can {
-            if allowed.namespace == denied.namespace && allowed.action == denied.action {
-                diags.push(Diagnostic::error(
-                    "E002",
-                    format!(
-                        "capability '{}.{}' appears in both `can` and `cannot` in agent '{}'",
-                        denied.namespace, denied.action, agent.name
-                    ),
-                    denied.span.clone(),
-                ));
-            }
+        if allowed.contains(&(denied.namespace.as_str(), denied.action.as_str())) {
+            diags.push(Diagnostic::error(
+                "E002",
+                format!(
+                    "capability '{}.{}' appears in both `can` and `cannot` in agent '{}'",
+                    denied.namespace, denied.action, agent.name
+                ),
+                denied.span.clone(),
+            ));
         }
     }
 }
@@ -104,7 +108,6 @@ fn check_budget_positive(agent: &AgentDef, diags: &mut Vec<Diagnostic>) {
             ),
             budget.span.clone(),
         ));
-
     }
 }
 
