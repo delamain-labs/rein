@@ -1,0 +1,18 @@
+// A minimal agent for testing `rein run`.
+// Uses OpenAI's GPT-4o with a tight budget.
+
+agent assistant {
+    model: openai
+
+    can [
+        fs.read_file
+        fs.list_dir
+    ]
+
+    cannot [
+        fs.write_file
+        fs.delete_file
+    ]
+
+    budget: $0.10 per request
+}
