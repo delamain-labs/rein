@@ -1,130 +1,198 @@
 # Rein Roadmap
 
-Every ticket needed to go from `rein validate` to production-ready AI agent orchestration platform.
+From proof-of-life to the vendor-neutral control plane for production AI agents.
+
+**Strategy:** Spec gaps first (make the runtime match what the docs promise), then observability, then developer experience. Phase 6 (Cloud) is on hold until open source adoption happens. DX is weighted heavily throughout — it's how open source wins.
 
 ---
 
-## Phase 2: `rein run` — MVP Runtime
+## Completed
 
-The proof of life. An agent executes within .rein constraints.
+### Phase 1: Parser & Validator ✅
+14 issues, 14 PRs merged. Lexer, parser, validator, CLI `rein validate`, error reporting.
 
-### 2.1 Foundation
+### Phase 2: `rein run` — MVP Runtime ✅
+20 issues, 15 PRs merged. Agent execution engine, OpenAI + Anthropic providers, tool permission enforcement (default-deny), budget tracking, cost calculation, run traces.
 
-| # | Title | Description | Priority | Deps | Size |
-|---|-------|-------------|----------|------|------|
-| 2.1.1 | Add async runtime and HTTP client deps | Add `tokio`, `reqwest`, and `dotenv` to Cargo.toml. Set up async main. | P0 | — | S |
-| 2.1.2 | Define runtime config and environment | Load `.env` for API keys. Create `src/config.rs` for runtime configuration (API key, model defaults, timeouts). | P0 | — | S |
-| 2.1.3 | Create `rein run` CLI command | Add `run` subcommand to clap CLI. Takes a `.rein` file path. Parses and validates before executing. Create `src/commands/run.rs`. | P0 | 2.1.1 | S |
-| 2.1.4 | Define runtime types | Create `src/runtime/mod.rs` with core types: `AgentRuntime`, `ToolCall`, `ToolResult`, `RunTrace`, `RunError`. | P0 | — | M |
+### Phase 3: Workflows ✅
+8 issues, 7 PRs merged. Sequential + parallel execution, conditional routing with `RouteRule`, workflow state persistence with crash recovery, circular route detection.
 
-### 2.2 LLM Integration
-
-| # | Title | Description | Priority | Deps | Size |
-|---|-------|-------------|----------|------|------|
-| 2.2.1 | OpenAI API client | Create `src/providers/openai.rs`. Implement chat completion with function calling. Handle streaming and non-streaming responses. | P0 | 2.1.1, 2.1.2 | M |
-| 2.2.2 | Provider trait abstraction | Define `src/providers/mod.rs` with `LlmProvider` trait (send message, define tools, parse tool calls). OpenAI implements it. | P0 | 2.2.1 | M |
-| 2.2.3 | Map .rein model field to provider | Resolve `model: "gpt-4o"` or `model: anthropic` to the correct provider and model string. | P1 | 2.2.2 | S |
-
-### 2.3 Permission Enforcement
-
-| # | Title | Description | Priority | Deps | Size |
-|---|-------|-------------|----------|------|------|
-| 2.3.1 | Tool registry from .rein capabilities | Convert `can`/`cannot` lists into a runtime tool registry. `can` items become available tools. `cannot` items are explicitly blocked. | P0 | 2.1.4 | M |
-| 2.3.2 | Tool call interceptor | Before executing any tool call from the LLM, check it against the permission registry. Block unauthorized calls with a clear error message back to the LLM. | P0 | 2.3.1 | M |
-| 2.3.3 | Monetary constraint enforcement | For capabilities with `up to $X`, track spending per capability and block when the limit is reached. | P0 | 2.3.2 | M |
-
-### 2.4 Budget Tracking
-
-| # | Title | Description | Priority | Deps | Size |
-|---|-------|-------------|----------|------|------|
-| 2.4.1 | Token counting and cost calculation | Track input/output tokens per LLM call. Calculate cost based on model pricing (hardcoded table initially). | P0 | 2.2.1 | M |
-| 2.4.2 | Budget enforcement | Track cumulative cost per budget unit. When `budget: $0.03 per ticket` is exceeded, halt execution with a budget-exceeded error. | P0 | 2.4.1 | M |
-
-### 2.5 Execution Loop
-
-| # | Title | Description | Priority | Deps | Size |
-|---|-------|-------------|----------|------|------|
-| 2.5.1 | Agent execution loop | Core loop: send message to LLM → receive response → if tool call, check permissions, execute, send result back → repeat until done or budget exceeded. | P0 | 2.2.2, 2.3.2, 2.4.2 | L |
-| 2.5.2 | Mock tool executor | For proof-of-life, implement mock tool execution (tools return canned responses). Real tool execution comes later. | P0 | 2.5.1 | S |
-| 2.5.3 | Run trace output | Print a structured trace of the run: each LLM call, tool call decisions (allowed/blocked), tokens used, cost, final result. | P0 | 2.5.1 | M |
-
-### 2.6 Testing & Polish
-
-| # | Title | Description | Priority | Deps | Size |
-|---|-------|-------------|----------|------|------|
-| 2.6.1 | Unit tests for permission enforcement | Test that allowed tools pass, blocked tools are rejected, monetary caps are enforced. | P0 | 2.3.2 | M |
-| 2.6.2 | Unit tests for budget tracking | Test token counting, cost calculation, budget exceeded halting. | P0 | 2.4.2 | M |
-| 2.6.3 | Integration test: full agent run | End-to-end test with mocked LLM responses: agent runs, makes tool calls, respects permissions, stays within budget. | P0 | 2.5.1 | L |
-| 2.6.4 | Example .rein files for `rein run` | Create example files demonstrating runtime features: basic agent, budget-limited agent, permission-restricted agent. | P1 | 2.5.1 | S |
-| 2.6.5 | Anthropic provider | Add `src/providers/anthropic.rs` implementing the `LlmProvider` trait for Claude models. | P1 | 2.2.2 | M |
+**Current state:** 256 tests, zero clippy warnings, master clean.
 
 ---
 
-## Phase 3: Workflows — Multi-Agent Orchestration
+## Phase S: Spec Alignment — Make the Runtime Match the Docs
 
-| # | Title | Description | Priority | Deps | Size |
-|---|-------|-------------|----------|------|------|
-| 3.1 | Workflow syntax in .rein DSL | Extend the lexer/parser to support `workflow <name> { trigger: ... stages: [...] }` blocks. | P0 | Phase 2 | L |
-| 3.2 | Workflow AST types | Define `WorkflowDef`, `Stage`, `Trigger`, `Route` types in ast.rs. | P0 | 3.1 | M |
-| 3.3 | Workflow validator | Validate workflow definitions: stages reference existing agents, no circular dependencies, triggers are valid. | P0 | 3.2 | M |
-| 3.4 | Sequential workflow executor | Execute workflows as a chain: trigger → agent1 → agent2 → ... Pass output of each stage as input to the next. | P0 | 3.2, Phase 2 | L |
-| 3.5 | Conditional routing | Support `route: { if <condition> then <stage> else <stage> }` in workflows. Route based on agent output. | P1 | 3.4 | M |
-| 3.6 | Parallel execution | Support `parallel: [stage_a, stage_b]` to run multiple agents concurrently and merge results. | P1 | 3.4 | L |
-| 3.7 | Workflow state persistence | Save workflow state to disk (JSON) so a crashed workflow can resume from the last completed stage. | P1 | 3.4 | L |
-| 3.8 | Workflow integration tests | End-to-end tests for sequential, conditional, and parallel workflows with mocked agents. | P0 | 3.4 | M |
+The docs site defines a rich DSL. The runtime supports ~10% of it. This phase closes every gap between what the docs promise and what `rein` actually does. **This is the highest priority work.**
+
+### S.0: Core DSL (P0 — Must have for any public release)
+
+| Issue | Title | Description | Size |
+|-------|-------|-------------|------|
+| #112 | `#` line comments | Docs use `#`, lexer only supports `//` and `/* */` | S |
+| #113 | `env()` function | `key: env("ANTHROPIC_KEY")` — function call syntax + runtime resolution | M |
+| #114 | `provider` block | `provider anthropic { model: claude-sonnet, key: env(...) }` | M |
+| #115 | `step` block syntax | Named steps with `agent`, `goal`, `output`, `input`, `when`, `approve` | L |
+| #116 | `tool` block definitions | `tool zendesk { provider: rest_api, auth: oauth2(...), capabilities {...} }` | L |
+| #117 | `guardrails` block | Spending tiers, output filters (PII, toxicity), rate limits, escalation rules | XL |
+
+### S.1: Language Features (P1 — Important for usable product)
+
+| Issue | Title | Description | Size |
+|-------|-------|-------------|------|
+| #118 | Type system | `type Ticket { category: one of [...], confidence: percent }`, built-in types, arrays, ranges | L |
+| #119 | Import system | `import { agent } from "./file.rein"`, glob imports, registry imports | L |
+| #120 | `defaults` block | Project-level defaults inherited by all agents | M |
+| #121 | `archetype`/`from` templates | `archetype base { ... }` + `agent x from base { ... }` | M |
+| #122 | Progressive trust system | `policy { tier supervised { promote when accuracy > 95% } }` | XL |
+| #123 | Eval blocks | `eval { dataset: ./evals/data.yaml, assert accuracy > 90%, on failure: block deploy }` | L |
+| #124 | Memory system | Three-tier: working (in-memory), session (sqlite), knowledge (postgres) | XL |
+| #125 | `route on` block syntax | `route on classify.category { billing → step handle_billing {...} }` | M |
+| #126 | Inline `parallel` blocks | `parallel { step a {...} step b {...} }` within workflows | M |
+| #127 | Retry policies | `on failure: retry 3 exponential then escalate`, `on timeout 30s: ...` | M |
+| #128 | `when` expressions | `step escalate { when: confidence < 70% or refund > $50 }` | M |
+| #129 | `auto resolve when` | `auto resolve when { confidence > 90%, action is one of [...] }` | M |
+| #130 | Schedule triggers | `schedule: daily at 2am`, `schedule: every 6 hours` | M |
+| #131 | `for each` iteration | `step rewrite { agent: copywriter, for each: underperformers }` | M |
+| #132 | Typed step I/O | `step x { output: items: Product[] }`, `step y { input: items }` | L |
+| #133 | Multi-currency | `€`, `£`, `¥` tokens in lexer, currency field in AST | S |
+| #134 | `escalate` keyword | `escalate to human via slack(#refunds)` | M |
+| #135 | `rein.toml` config | `[project]`, `[runtime]`, `[registry]`, `[deploy]`, `[observability]` sections | M |
+| #136 | Environment overrides | `rein.env.dev`, `rein.env.staging`, `rein.env.production` | M |
+| #137 | Secrets management | `secrets { key: vault("secret/rein/key") }` — vault, aws, gcp, keychain, env backends | L |
+| #138 | Persistent audit trail | Immutable log, query interface, SOC2/CSV export | L |
+| #139 | Human approval workflows | `approve: human via slack(#approvals) timeout 4h`, collaborate modes | L |
+| #140 | Harden durable execution | Execution IDs, tool call deduplication, idempotent retries | L |
+| #141 | Agent sandbox isolation | Process-level sandboxes per agent, no env/fs/network leakage | L |
+| #142 | Prompt injection defense | Input sanitization, structural separation, output validation, dual-agent verify | L |
+| #143 | Rich trigger expressions | `trigger: new ticket in zendesk` as string/expression | S |
+| #144 | `one of` union type | `category: one of [billing, technical, general]` in type defs | S |
+
+### S.2: Extended Features (P2 — Production scale, later)
+
+| Issue | Title | Size |
+|-------|-------|------|
+| #145 | Consensus blocks (multi-agent verification) | L |
+| #146 | Scenario blocks (declarative testing) | M |
+| #147 | Observe blocks (declarative observability) | L |
+| #148 | Fleet blocks (agent group management) | L |
+| #149 | Channel blocks (async agent messaging) | L |
+| #150 | Pipe expressions (`\|` transforms) | L |
+| #151 | Circuit breaker | M |
+| #152 | Streaming output with per-chunk guardrails | L |
+| #153 | `send to` notification steps | M |
+| #154 | Inline step shorthand syntax | S |
+| #155 | Fallback step for retry exhaustion | S |
+| #156 | `rein.lock` for tool version pinning | M |
+| #157 | REST API server | XL |
+| #158 | MCP server | XL |
+| #159 | Namespace-based multi-tenancy | XL |
+| #160 | RBAC with roles | L |
+| #161 | SSO integration (OIDC/SAML) | L |
+| #162 | API key management | M |
+| #163 | Webhook configuration | M |
+| #164 | Event streaming (Kafka, Pub/Sub, EventBridge) | L |
+| #165 | Data residency enforcement | L |
+| #166 | Blue-green and canary deployment | L |
+| #167 | `within()` cost/latency constraints | M |
+| #168 | Python/Node SDK with `@govern` decorator | L |
+| #169 | Observability exports (OTLP, Datadog, Prometheus) | L |
+| #170 | Alerting system | L |
+| #171 | Tool registry client | L |
 
 ---
 
 ## Phase 4: Observability
 
-| # | Title | Description | Priority | Deps | Size |
-|---|-------|-------------|----------|------|------|
-| 4.1 | Structured trace format | Define a JSON trace format for runs: timestamps, decisions, tool calls, tokens, costs. Write to file or stdout. | P0 | 2.5.3 | M |
-| 4.2 | OpenTelemetry integration | Export traces as OpenTelemetry spans. Add `opentelemetry` crate. Enable with `--otel` flag or env var. | P1 | 4.1 | L |
-| 4.3 | Cost aggregation | CLI command `rein cost` that reads trace files and shows cost breakdown by agent, workflow, time period. | P1 | 4.1 | M |
-| 4.4 | `rein dashboard` — local web UI | Serve a local web dashboard showing recent runs, costs, and traces. Use `axum` for the server, minimal HTML/JS frontend. | P2 | 4.1 | XL |
-| 4.5 | Alerting on budget thresholds | Configurable alerts when agents approach budget limits (80%, 90%, 100%). Output to stderr or webhook. | P2 | 2.4.2 | M |
+Tracing, cost analysis, and monitoring. Builds on the runtime's existing `RunTrace`.
+
+| Issue | Title | Priority | Size |
+|-------|-------|----------|------|
+| #92 | Structured trace format (JSON, timestamps, decisions) | P0 | M |
+| #93 | OpenTelemetry integration | P1 | L |
+| #94 | `rein cost` CLI command | P1 | M |
+| #95 | Local web dashboard (`rein dashboard`) | P2 | XL |
+| #96 | Alerting on budget thresholds | P2 | M |
 
 ---
 
-## Phase 5: Developer Experience
+## Phase 5: Developer Experience ⭐
 
-| # | Title | Description | Priority | Deps | Size |
-|---|-------|-------------|----------|------|------|
-| 5.1 | `rein init` command | Scaffold a new Rein project: create directory structure, example .rein files, .env template, README. | P1 | — | S |
-| 5.2 | `rein fmt` command | Auto-format .rein files to canonical style. Consistent indentation, spacing, ordering. | P1 | — | M |
-| 5.3 | Tree-sitter grammar | Write a Tree-sitter grammar for .rein files. Enables syntax highlighting in any editor. | P2 | — | L |
-| 5.4 | LSP server | Language Server Protocol implementation for .rein files: autocomplete, diagnostics, hover docs, go-to-definition. | P2 | 5.3 | XL |
-| 5.5 | VSCode extension | Package the LSP + Tree-sitter into a VSCode extension. Publish to marketplace. | P2 | 5.4 | M |
-| 5.6 | AI assistant skill files | Create SKILL.md / rules files for Claude Code, Cursor, Copilot, Windsurf that teach them .rein syntax. | P1 | — | S |
-| 5.7 | `rein deploy` command | Deploy agents/workflows to Rein Cloud (Phase 6). Reads .rein files + config, pushes to API. | P2 | Phase 6 | M |
+**This is how open source wins.** The first five minutes with Rein must be flawless.
+
+| Issue | Title | Priority | Size |
+|-------|-------|----------|------|
+| #97 | `rein init` — scaffold a project | P1 | S |
+| #98 | `rein fmt` — auto-format .rein files | P1 | M |
+| #99 | Tree-sitter grammar for .rein | P2 | L |
+| #100 | LSP server (autocomplete, diagnostics, hover) | P2 | XL |
+| #101 | VSCode extension | P2 | M |
+| #102 | AI assistant skill files (Claude, Cursor, Copilot) | P1 | S |
+| #103 | `rein deploy` command | P2 | M |
+
+**Additional DX gaps identified:**
+- Error messages that teach (the docs promise this — verify every error path)
+- `rein validate` with `--fix` suggestions
+- `rein explain <file>` — human-readable summary of what a .rein file does
+- Getting started tutorial that works end-to-end
 
 ---
 
-## Phase 6: Rein Cloud — The Money
+## Phase 6: Rein Cloud — ON HOLD
 
-| # | Title | Description | Priority | Deps | Size |
-|---|-------|-------------|----------|------|------|
-| 6.1 | Cloud API design | Design the Rein Cloud REST API: deploy, status, logs, cost, manage. OpenAPI spec. | P0 | Phase 2 | M |
-| 6.2 | Cloud backend service | Build the hosted backend: receives .rein deployments, runs agents in isolated containers, tracks usage. | P0 | 6.1 | XL |
-| 6.3 | Usage-based billing | Meter agent runs, token usage, tool calls. Integrate with Stripe for billing. | P0 | 6.2 | XL |
-| 6.4 | Multi-tenant isolation | Process isolation per customer. Agents run in sandboxed environments with no cross-tenant access. | P0 | 6.2 | XL |
-| 6.5 | Team management & SSO | Multi-user accounts, role-based access, SSO via SAML/OIDC for enterprise customers. | P1 | 6.2 | L |
-| 6.6 | Compliance & audit reports | Generate compliance reports: who deployed what, which agents ran, what tools were accessed, spending. PDF/CSV export. | P1 | 4.1, 6.2 | L |
-| 6.7 | Cloud dashboard | Web dashboard for Rein Cloud: deploy, monitor, manage agents and workflows. React or similar. | P1 | 6.2 | XL |
-| 6.8 | Rein Studio — Visual Editor | Drag-and-drop editor for building .rein files visually. Generates valid .rein syntax. | P2 | 6.7 | XL |
+**Not starting until open source adoption happens.** The cloud is the monetization layer: governance, compliance, team management, and persistent execution that you can't get from a CLI. But it only matters when people are using the CLI.
+
+| Issue | Title | Priority | Size |
+|-------|-------|----------|------|
+| #104 | Cloud API design (OpenAPI spec) | P0 | M |
+| #105 | Cloud backend service | P0 | XL |
+| #106 | Usage-based billing (Stripe) | P0 | XL |
+| #107 | Multi-tenant isolation | P0 | XL |
+| #108 | Team management & SSO | P1 | L |
+| #109 | Compliance & audit reports | P1 | L |
+| #110 | Cloud dashboard | P1 | XL |
+| #111 | Rein Studio — Visual Editor | P2 | XL |
+
+---
+
+## Tech Debt (Phase 3 cleanup)
+
+| Issue | Title | Size |
+|-------|-------|------|
+| #88 | Extensible condition matching (regex, JSON path) | M |
+| #89 | Version field in WorkflowState | S |
+| #90 | Extract WorkflowContext struct | S |
+| #91 | Move find_stage to WorkflowDef method | S |
+
+---
+
+## Execution Order
+
+```
+1. Phase S.0 (Core DSL P0s)     — 6 issues  — runtime parses the full base language
+2. Phase S.1 (Language P1s)      — 23 issues — runtime supports the important features
+3. Phase 4 (Observability)       — 5 issues  — traces, costs, monitoring
+4. Phase 5 (DX) ⭐               — 7+ issues — first-five-minutes experience
+5. Phase S.2 (Extended P2s)      — 27 issues — production scale features
+6. Phase 6 (Cloud)               — ON HOLD   — after open source traction
+```
+
+DX work (Phase 5) interleaves with everything. `rein init` and skill files can ship as soon as the core DSL stabilizes. Error messages improve continuously.
 
 ---
 
 ## Summary
 
-| Phase | Tickets | P0s | Est. Total |
-|-------|---------|-----|------------|
-| Phase 2: `rein run` | 19 | 14 | 1-2 weeks |
-| Phase 3: Workflows | 8 | 4 | 2-3 weeks |
-| Phase 4: Observability | 5 | 1 | 1-2 weeks |
-| Phase 5: Dev Experience | 7 | 0 | Ongoing |
-| Phase 6: Rein Cloud | 8 | 4 | 2-3 months |
-| **Total** | **47** | **23** | — |
+| Phase | Issues | Status |
+|-------|--------|--------|
+| Phase 1: Parser/Validator | 14 | ✅ Complete |
+| Phase 2: Runtime MVP | 20 | ✅ Complete |
+| Phase 3: Workflows | 8 | ✅ Complete |
+| Phase S: Spec Alignment | 60 | 🔴 Not started |
+| Phase 4: Observability | 5 | 🔴 Not started |
+| Phase 5: Dev Experience | 7+ | 🔴 Not started |
+| Phase 6: Cloud | 8 | ⏸️ On hold |
+| Tech Debt | 4 | 🟡 Backlog |
+| **Total open** | **84** | — |
 
-Phase 2 is the gate. Everything depends on agents actually running.
+256 tests. Zero clippy warnings. The foundation is solid. Now we build the full language.
