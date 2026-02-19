@@ -21,6 +21,7 @@ pub enum TokenKind {
     Dot,
     // Literals
     Ident(String),
+    StringLiteral(String),
     Dollar(u64),
     // Trivia
     Comment,
@@ -216,6 +217,24 @@ impl<'a> Lexer<'a> {
         Ok(Token::new(TokenKind::Dollar(cents), start, self.pos))
     }
 
+    fn read_string(&mut self, start: usize) -> Result<Token, LexError> {
+        // Opening '"' already consumed; collect content until closing '"'.
+        let mut value = String::new();
+        loop {
+            match self.advance() {
+                None => {
+                    return Err(LexError {
+                        message: "unterminated string literal".to_string(),
+                        span: Span::new(start, self.pos),
+                    });
+                }
+                Some(b'"') => break,
+                Some(ch) => value.push(ch as char),
+            }
+        }
+        Ok(Token::new(TokenKind::StringLiteral(value), start, self.pos))
+    }
+
     fn skip_line_comment(&mut self, start: usize) -> Token {
         while !matches!(self.peek(), Some(b'\n') | None) {
             self.advance();
@@ -262,6 +281,7 @@ impl<'a> Lexer<'a> {
                 Some(b']') => tokens.push(Token::new(TokenKind::RBracket, start, self.pos)),
                 Some(b':') => tokens.push(Token::new(TokenKind::Colon, start, self.pos)),
                 Some(b'.') => tokens.push(Token::new(TokenKind::Dot, start, self.pos)),
+                Some(b'"') => tokens.push(self.read_string(start)?),
                 Some(b'$') => tokens.push(self.read_dollar(start)?),
                 Some(b'/') if self.peek() == Some(b'/') => {
                     self.advance(); // second '/'
@@ -460,6 +480,52 @@ agent support_triage {
     fn eof_is_always_last() {
         let tokens = lex_ok("agent foo {}");
         assert_eq!(tokens.last().unwrap().kind, TokenKind::Eof);
+    }
+
+    // ── String literal tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn tokenize_string_literal_simple() {
+        let tokens = non_eof(lex_ok(r#""anthropic""#));
+        assert_eq!(
+            kinds(&tokens),
+            vec![&TokenKind::StringLiteral("anthropic".into())]
+        );
+    }
+
+    #[test]
+    fn tokenize_string_literal_with_slash() {
+        let tokens = non_eof(lex_ok(r#""anthropic/claude-3-sonnet""#));
+        assert_eq!(
+            kinds(&tokens),
+            vec![&TokenKind::StringLiteral(
+                "anthropic/claude-3-sonnet".into()
+            )]
+        );
+    }
+
+    #[test]
+    fn tokenize_empty_string_literal() {
+        let tokens = non_eof(lex_ok(r#""""#));
+        assert_eq!(kinds(&tokens), vec![&TokenKind::StringLiteral("".into())]);
+    }
+
+    #[test]
+    fn tokenize_string_literal_span() {
+        let src = r#""hello""#;
+        let tokens = lex_ok(src);
+        let tok = tokens
+            .iter()
+            .find(|t| matches!(t.kind, TokenKind::StringLiteral(_)))
+            .unwrap();
+        // span covers the full `"hello"` including quotes
+        assert_eq!(tok.span, Span::new(0, 7));
+    }
+
+    #[test]
+    fn error_unterminated_string_literal() {
+        let err = tokenize(r#""not closed"#).unwrap_err();
+        assert!(err.message.contains("unterminated"), "got: {}", err.message);
     }
 
     // ── Error-path tests ──────────────────────────────────────────────────────

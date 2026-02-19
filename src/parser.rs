@@ -95,6 +95,31 @@ impl Parser {
         }
     }
 
+    /// Consume an `Ident` or `StringLiteral` token as a model name and return its value.
+    fn expect_model_value(&mut self) -> Result<String, ParseError> {
+        self.skip_comments();
+        let tok = self.current().clone();
+        match &tok.kind {
+            TokenKind::Ident(name) => {
+                let name = name.clone();
+                self.advance();
+                Ok(name)
+            }
+            TokenKind::StringLiteral(s) => {
+                let s = s.clone();
+                self.advance();
+                Ok(s)
+            }
+            _ => Err(ParseError::new(
+                format!(
+                    "expected model name (identifier or string literal), got {:?}",
+                    tok.kind
+                ),
+                tok.span,
+            )),
+        }
+    }
+
     /// Consume an `Ident` token and return its string value + span.
     fn expect_ident(&mut self) -> Result<(String, Span), ParseError> {
         self.skip_comments();
@@ -173,8 +198,8 @@ impl Parser {
                     seen_model = true;
                     self.advance(); // consume `model`
                     self.expect(&TokenKind::Colon)?;
-                    // model value is an ident (e.g. `anthropic`)
-                    let (value, _) = self.expect_ident()?;
+                    // model value: bare ident or quoted string literal
+                    let value = self.expect_model_value()?;
                     model = Some(value);
                 }
                 TokenKind::Can => {
@@ -318,6 +343,37 @@ mod tests {
 
     fn parse_err(src: &str) -> ParseError {
         parse(src).expect_err("expected parse to fail")
+    }
+
+    // ── String literal model values ───────────────────────────────────────────
+
+    #[test]
+    fn parse_model_as_string_literal() {
+        let f = parse_ok(r#"agent foo { model: "anthropic/claude-3-sonnet" }"#);
+        assert_eq!(
+            f.agents[0].model.as_deref(),
+            Some("anthropic/claude-3-sonnet")
+        );
+    }
+
+    #[test]
+    fn parse_model_string_literal_with_dashes() {
+        let f = parse_ok(r#"agent foo { model: "gpt-4o" }"#);
+        assert_eq!(f.agents[0].model.as_deref(), Some("gpt-4o"));
+    }
+
+    #[test]
+    fn parse_model_ident_still_works() {
+        // Bare identifier must continue to work alongside string literals.
+        let f = parse_ok("agent foo { model: anthropic }");
+        assert_eq!(f.agents[0].model.as_deref(), Some("anthropic"));
+    }
+
+    #[test]
+    fn error_model_invalid_value() {
+        // A dollar amount is neither an ident nor a string — must error.
+        let err = parse_err("agent foo { model: $5 }");
+        assert!(err.message.contains("model name"), "got: {}", err.message);
     }
 
     // ── Minimal agent ─────────────────────────────────────────────────────────
