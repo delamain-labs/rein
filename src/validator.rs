@@ -104,6 +104,7 @@ fn check_budget_positive(agent: &AgentDef, diags: &mut Vec<Diagnostic>) {
             ),
             budget.span.clone(),
         ));
+
     }
 }
 
