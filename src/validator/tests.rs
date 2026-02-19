@@ -79,6 +79,7 @@ fn zero_budget_detected() {
     // directly. amount is u64 (cents), so 0 is the only invalid value.
     use crate::ast::{AgentDef, Budget, ReinFile, Span};
     let file = ReinFile {
+        defaults: None,
         providers: vec![],
         tools: vec![],
         agents: vec![AgentDef {

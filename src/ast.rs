@@ -120,6 +120,18 @@ pub struct AgentDef {
 }
 
 // ---------------------------------------------------------------------------
+// Defaults types
+// ---------------------------------------------------------------------------
+
+/// A `defaults { model: ..., budget: ... }` block providing project-level defaults.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DefaultsDef {
+    pub model: Option<ValueExpr>,
+    pub budget: Option<Budget>,
+    pub span: Span,
+}
+
+// ---------------------------------------------------------------------------
 // Guardrails types
 // ---------------------------------------------------------------------------
 
@@ -250,6 +262,7 @@ pub struct WorkflowDef {
 /// Top-level parsed file — provider, agent, and workflow definitions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReinFile {
+    pub defaults: Option<DefaultsDef>,
     pub providers: Vec<ProviderDef>,
     pub tools: Vec<ToolDef>,
     pub agents: Vec<AgentDef>,
@@ -363,6 +376,7 @@ mod tests {
     #[test]
     fn rein_file_roundtrips_via_json() {
         let file = ReinFile {
+            defaults: None,
             providers: vec![],
             tools: vec![],
             agents: vec![AgentDef {
@@ -475,6 +489,7 @@ mod tests {
     #[test]
     fn rein_file_with_workflows_roundtrips() {
         let file = ReinFile {
+            defaults: None,
             providers: vec![],
             tools: vec![],
             agents: vec![],

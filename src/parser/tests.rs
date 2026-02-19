@@ -706,6 +706,76 @@ fn parse_workflow_mixed_stages_and_steps() {
     assert_eq!(f.workflows[0].steps.len(), 1);
 }
 
+// ───── Defaults block tests ─────
+
+#[test]
+fn parse_defaults_with_model() {
+    let f = parse_ok("defaults { model: anthropic }");
+    let d = f.defaults.unwrap();
+    assert!(d.model.is_some());
+    assert!(d.budget.is_none());
+}
+
+#[test]
+fn parse_defaults_with_budget() {
+    let f = parse_ok("defaults { budget: $0.05 per run }");
+    let d = f.defaults.unwrap();
+    assert!(d.budget.is_some());
+    assert_eq!(d.budget.unwrap().amount, 5);
+}
+
+#[test]
+fn parse_defaults_with_all_fields() {
+    let f = parse_ok("defaults { model: anthropic budget: $1.00 per request }");
+    let d = f.defaults.unwrap();
+    assert!(d.model.is_some());
+    assert!(d.budget.is_some());
+}
+
+#[test]
+fn parse_defaults_empty() {
+    let f = parse_ok("defaults {}");
+    let d = f.defaults.unwrap();
+    assert!(d.model.is_none());
+    assert!(d.budget.is_none());
+}
+
+#[test]
+fn parse_defaults_before_agents() {
+    let f = parse_ok(
+        r#"
+        defaults { model: openai }
+        agent bot { can [zendesk.read] }
+    "#,
+    );
+    assert!(f.defaults.is_some());
+    assert_eq!(f.agents.len(), 1);
+}
+
+#[test]
+fn parse_duplicate_defaults_errors() {
+    let err = parse_err("defaults {} defaults {}");
+    assert!(err.message.contains("duplicate"), "got: {}", err.message);
+}
+
+#[test]
+fn parse_defaults_duplicate_model_errors() {
+    let err = parse_err("defaults { model: a model: b }");
+    assert!(err.message.contains("duplicate"), "got: {}", err.message);
+}
+
+#[test]
+fn parse_defaults_unknown_field_errors() {
+    let err = parse_err("defaults { foo: bar }");
+    assert!(err.message.contains("unexpected"), "got: {}", err.message);
+}
+
+#[test]
+fn parse_no_defaults() {
+    let f = parse_ok("agent bot { model: openai }");
+    assert!(f.defaults.is_none());
+}
+
 // ───── Guardrails tests ─────
 
 #[test]

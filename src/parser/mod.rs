@@ -1,6 +1,7 @@
 use crate::ast::{
-    AgentDef, Budget, Capability, Constraint, ExecutionMode, GuardrailRule, GuardrailSection,
-    GuardrailsDef, ProviderDef, ReinFile, RouteRule, Span, Stage, ToolDef, ValueExpr, WorkflowDef,
+    AgentDef, Budget, Capability, Constraint, DefaultsDef, ExecutionMode, GuardrailRule,
+    GuardrailSection, GuardrailsDef, ProviderDef, ReinFile, RouteRule, Span, Stage, ToolDef,
+    ValueExpr, WorkflowDef,
 };
 use crate::lexer::{Token, TokenKind, tokenize};
 
@@ -172,19 +173,31 @@ impl Parser {
 
     pub fn parse_file(&mut self) -> Result<ReinFile, ParseError> {
         self.skip_comments();
+        let mut defaults: Option<DefaultsDef> = None;
         let mut providers = Vec::new();
         let mut tools = Vec::new();
         let mut agents = Vec::new();
         let mut workflows = Vec::new();
         while self.peek() != &TokenKind::Eof {
             match self.peek() {
+                TokenKind::Defaults => {
+                    if defaults.is_some() {
+                        return Err(ParseError::new(
+                            "duplicate 'defaults' block (only one allowed per file)",
+                            self.current_span(),
+                        ));
+                    }
+                    defaults = Some(self.parse_defaults()?);
+                }
                 TokenKind::Provider => providers.push(self.parse_provider()?),
                 TokenKind::Tool => tools.push(self.parse_tool()?),
                 TokenKind::Agent => agents.push(self.parse_agent()?),
                 TokenKind::Workflow => workflows.push(self.parse_workflow()?),
                 other => {
                     return Err(ParseError::new(
-                        format!("expected 'provider', 'tool', 'agent', or 'workflow', got {other}"),
+                        format!(
+                            "expected 'defaults', 'provider', 'tool', 'agent', or 'workflow', got {other}"
+                        ),
                         self.current_span(),
                     ));
                 }
@@ -192,11 +205,67 @@ impl Parser {
             self.skip_comments();
         }
         Ok(ReinFile {
+            defaults,
             providers,
             tools,
             agents,
             workflows,
         })
+    }
+
+    fn parse_defaults(&mut self) -> Result<DefaultsDef, ParseError> {
+        let start = self.current_span().start;
+        self.expect(&TokenKind::Defaults)?;
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut model: Option<ValueExpr> = None;
+        let mut budget: Option<Budget> = None;
+        let (mut seen_model, mut seen_budget) = (false, false);
+
+        loop {
+            self.skip_comments();
+            match self.peek().clone() {
+                TokenKind::RBrace => {
+                    let end = self.current_span().end;
+                    self.advance();
+                    return Ok(DefaultsDef {
+                        model,
+                        budget,
+                        span: Span::new(start, end),
+                    });
+                }
+                TokenKind::Model => {
+                    if seen_model {
+                        return Err(ParseError::new(
+                            "duplicate field 'model' in defaults block",
+                            self.current_span(),
+                        ));
+                    }
+                    seen_model = true;
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    model = Some(self.parse_value_expr()?);
+                }
+                TokenKind::Budget => {
+                    if seen_budget {
+                        return Err(ParseError::new(
+                            "duplicate field 'budget' in defaults block",
+                            self.current_span(),
+                        ));
+                    }
+                    seen_budget = true;
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    budget = Some(self.parse_budget()?);
+                }
+                other => {
+                    return Err(ParseError::new(
+                        format!("unexpected field in defaults block: {other}"),
+                        self.current_span(),
+                    ));
+                }
+            }
+        }
     }
 
     fn parse_provider(&mut self) -> Result<ProviderDef, ParseError> {

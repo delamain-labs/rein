@@ -421,6 +421,13 @@ fn hash_comment_at_start_of_file_with_code() {
 }
 
 #[test]
+fn defaults_keyword() {
+    let src = "defaults { model: openai }";
+    let tokens = non_eof(lex_ok(src));
+    assert_eq!(tokens[0].kind, TokenKind::Defaults);
+}
+
+#[test]
 fn guardrails_keyword() {
     let src = "guardrails { }";
     let tokens = non_eof(lex_ok(src));
