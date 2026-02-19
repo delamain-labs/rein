@@ -98,26 +98,54 @@ impl Parser {
         }
     }
 
-    /// Consume an `Ident` or `StringLiteral` token as a model name and return its value.
-    fn expect_model_value(&mut self) -> Result<String, ParseError> {
+    /// Parse a value expression: a string literal, identifier, or function
+    /// call like `env("VAR_NAME")`.
+    ///
+    /// Returns a `ValueExpr` representing the parsed value.
+    fn parse_value_expr(&mut self) -> Result<crate::ast::ValueExpr, ParseError> {
         self.skip_comments();
         let tok = self.current().clone();
         match &tok.kind {
+            TokenKind::Ident(name) if name == "env" => {
+                let start = tok.span.start;
+                self.advance(); // consume 'env'
+                self.expect(&TokenKind::LParen)?;
+                self.skip_comments();
+                let arg_tok = self.current().clone();
+                let var_name = match &arg_tok.kind {
+                    TokenKind::StringLiteral(s) => {
+                        let s = s.clone();
+                        self.advance();
+                        s
+                    }
+                    _ => {
+                        return Err(ParseError::new(
+                            format!(
+                                "env() expects a string argument, got {}",
+                                arg_tok.kind
+                            ),
+                            arg_tok.span,
+                        ));
+                    }
+                };
+                let end_span = self.expect(&TokenKind::RParen)?;
+                Ok(crate::ast::ValueExpr::EnvRef {
+                    var_name,
+                    span: crate::ast::Span::new(start, end_span.end),
+                })
+            }
             TokenKind::Ident(name) => {
                 let name = name.clone();
                 self.advance();
-                Ok(name)
+                Ok(crate::ast::ValueExpr::Literal(name))
             }
             TokenKind::StringLiteral(s) => {
                 let s = s.clone();
                 self.advance();
-                Ok(s)
+                Ok(crate::ast::ValueExpr::Literal(s))
             }
             _ => Err(ParseError::new(
-                format!(
-                    "expected model name (identifier or string literal), got {}",
-                    tok.kind
-                ),
+                format!("expected value (identifier, string, or env()), got {}", tok.kind),
                 tok.span,
             )),
         }
@@ -175,7 +203,7 @@ impl Parser {
         // `{`
         self.expect(&TokenKind::LBrace)?;
 
-        let mut model: Option<String> = None;
+        let mut model: Option<crate::ast::ValueExpr> = None;
         let mut can: Vec<Capability> = Vec::new();
         let mut cannot: Vec<Capability> = Vec::new();
         let mut budget: Option<Budget> = None;
@@ -211,8 +239,7 @@ impl Parser {
                     seen_model = true;
                     self.advance(); // consume `model`
                     self.expect(&TokenKind::Colon)?;
-                    // model value: bare ident or quoted string literal
-                    let value = self.expect_model_value()?;
+                    let value = self.parse_value_expr()?;
                     model = Some(value);
                 }
                 TokenKind::Can => {

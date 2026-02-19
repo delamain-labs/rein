@@ -13,6 +13,51 @@ impl Span {
     }
 }
 
+/// A value expression used in configuration fields.
+///
+/// Supports literal strings and function calls like `env("VAR_NAME")`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ValueExpr {
+    /// A plain string or identifier value.
+    Literal(String),
+    /// An environment variable reference: `env("VAR_NAME")`.
+    EnvRef { var_name: String, span: Span },
+}
+
+impl ValueExpr {
+    /// Resolve to a plain string value. For `Literal`, returns the string
+    /// directly. For `EnvRef`, reads from the environment.
+    ///
+    /// # Errors
+    /// Returns an error message if an env var is missing.
+    pub fn resolve(&self) -> Result<String, String> {
+        match self {
+            Self::Literal(s) => Ok(s.clone()),
+            Self::EnvRef { var_name, .. } => std::env::var(var_name)
+                .map_err(|_| format!("environment variable '{var_name}' is not set")),
+        }
+    }
+
+    /// Return the literal string value if this is a `Literal`.
+    pub fn as_literal(&self) -> Option<&str> {
+        match self {
+            Self::Literal(s) => Some(s),
+            Self::EnvRef { .. } => None,
+        }
+    }
+
+    /// Return the string value for display/comparison, regardless of variant.
+    /// For `Literal`, returns the string. For `EnvRef`, returns the var name
+    /// prefixed with `env:`.
+    pub fn display_value(&self) -> &str {
+        match self {
+            Self::Literal(s) => s,
+            Self::EnvRef { var_name, .. } => var_name,
+        }
+    }
+}
+
 /// A monetary cap constraint on a capability (`up to $<amount>`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -42,7 +87,7 @@ pub struct Budget {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentDef {
     pub name: String,
-    pub model: Option<String>,
+    pub model: Option<ValueExpr>,
     pub can: Vec<Capability>,
     pub cannot: Vec<Capability>,
     pub budget: Option<Budget>,
@@ -186,7 +231,7 @@ mod tests {
     fn agent_def_full_serializes() {
         let agent = AgentDef {
             name: "support_triage".to_string(),
-            model: Some("anthropic".to_string()),
+            model: Some(ValueExpr::Literal("anthropic".into())),
             can: vec![Capability {
                 namespace: "zendesk".to_string(),
                 action: "read_ticket".to_string(),
