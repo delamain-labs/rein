@@ -20,6 +20,14 @@ enum Command {
         #[arg(long)]
         ast: bool,
     },
+    /// Run an agent defined in a .rein file
+    Run {
+        /// Path to the .rein file
+        file: std::path::PathBuf,
+        /// User prompt message to send to the agent
+        #[arg(short, long)]
+        message: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -28,6 +36,10 @@ async fn main() {
     match cli.command {
         Command::Validate { file, ast } => {
             let exit_code = commands::validate::run_validate(&file, ast);
+            process::exit(exit_code);
+        }
+        Command::Run { file, message } => {
+            let exit_code = commands::run::run_agent(&file, message.as_deref());
             process::exit(exit_code);
         }
     }
