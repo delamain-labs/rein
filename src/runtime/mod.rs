@@ -1,3 +1,5 @@
+pub mod permissions;
+
 use serde::{Deserialize, Serialize};
 
 /// A tool invocation requested by the agent.
