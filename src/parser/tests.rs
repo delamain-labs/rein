@@ -466,6 +466,48 @@ fn parse_workflow_stages_without_commas() {
 }
 
 #[test]
+fn parse_workflow_trigger_multi_word() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow pipe {
+            trigger: new ticket in zendesk
+            stages: [a]
+        }
+    "#,
+    );
+    assert_eq!(f.workflows[0].trigger, "new ticket in zendesk");
+}
+
+#[test]
+fn parse_workflow_trigger_string_literal() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow pipe {
+            trigger: "new message in channel"
+            stages: [a]
+        }
+    "#,
+    );
+    assert_eq!(f.workflows[0].trigger, "new message in channel");
+}
+
+#[test]
+fn parse_workflow_trigger_single_word() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow pipe {
+            trigger: event
+            stages: [a]
+        }
+    "#,
+    );
+    assert_eq!(f.workflows[0].trigger, "event");
+}
+
+#[test]
 fn parse_workflow_missing_trigger_errors() {
     let err = parse_err(
         r#"
