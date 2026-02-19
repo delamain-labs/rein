@@ -139,13 +139,78 @@ impl<'a> Lexer<'a> {
 
     fn read_dollar(&mut self, start: usize) -> Result<Token, LexError> {
         // already consumed '$' at start; pos is now one past '$'
+
+        // The character immediately after '$' must be an ASCII digit.
+        match self.peek() {
+            Some(b'0'..=b'9') => {}
+            Some(ch) => {
+                return Err(LexError {
+                    message: format!(
+                        "invalid dollar amount: expected a number after '$', found '{}'",
+                        ch as char
+                    ),
+                    span: Span::new(start, self.pos + 1),
+                });
+            }
+            None => {
+                return Err(LexError {
+                    message:
+                        "invalid dollar amount: expected a number after '$', found end of input"
+                            .to_string(),
+                    span: Span::new(start, self.pos),
+                });
+            }
+        }
+
         let num_start = self.pos;
-        while matches!(self.peek(), Some(b'0'..=b'9') | Some(b'.')) {
+
+        // Consume the integer part.
+        while matches!(self.peek(), Some(b'0'..=b'9')) {
             self.advance();
         }
+
+        // Optional decimal part.
+        if self.peek() == Some(b'.') {
+            self.advance(); // consume '.'
+
+            // A digit must immediately follow the decimal point.
+            match self.peek() {
+                Some(b'0'..=b'9') => {}
+                Some(ch) => {
+                    return Err(LexError {
+                        message: format!(
+                            "invalid dollar amount: expected digit after decimal point, found '{}'",
+                            ch as char
+                        ),
+                        span: Span::new(start, self.pos + 1),
+                    });
+                }
+                None => {
+                    return Err(LexError {
+                        message: "invalid dollar amount: expected digit after decimal point, found end of input"
+                            .to_string(),
+                        span: Span::new(start, self.pos),
+                    });
+                }
+            }
+
+            // Consume the fractional digits.
+            while matches!(self.peek(), Some(b'0'..=b'9')) {
+                self.advance();
+            }
+
+            // A second decimal point is never valid.
+            if self.peek() == Some(b'.') {
+                return Err(LexError {
+                    message: "invalid dollar amount: too many decimal points".to_string(),
+                    span: Span::new(start, self.pos + 1),
+                });
+            }
+        }
+
         let num_str = std::str::from_utf8(&self.src[num_start..self.pos]).unwrap();
         let cents = parse_cents(num_str).map_err(|_| LexError {
-            message: format!("invalid dollar amount: ${}", num_str),
+            message: format!("invalid dollar amount: '${}'", num_str),
             span: Span::new(start, self.pos),
         })?;
         Ok(Token::new(TokenKind::Dollar(cents), start, self.pos))
@@ -422,5 +487,64 @@ agent support_triage {
         let err = result.unwrap_err();
         // '@' is at byte offset 4
         assert_eq!(err.span.start, 4);
+    }
+
+    // ── Dollar / number error tests ───────────────────────────────────────────
+
+    #[test]
+    fn error_bare_dollar_eof() {
+        let err = tokenize("$").unwrap_err();
+        assert!(
+            err.message.contains("expected a number"),
+            "got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn error_bare_dollar_space() {
+        let err = tokenize("$ ").unwrap_err();
+        assert!(
+            err.message.contains("expected a number"),
+            "got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn error_dollar_alpha() {
+        let err = tokenize("$abc").unwrap_err();
+        assert!(err.message.contains("found 'a'"), "got: {}", err.message);
+    }
+
+    #[test]
+    fn error_dollar_leading_dot() {
+        // '$.' — dot is not a digit so we should get the "expected a number" error
+        let err = tokenize("$.5").unwrap_err();
+        assert!(
+            err.message.contains("expected a number"),
+            "got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn error_dollar_trailing_dot() {
+        let err = tokenize("$1.").unwrap_err();
+        assert!(
+            err.message.contains("expected digit after decimal"),
+            "got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn error_dollar_multiple_dots() {
+        let err = tokenize("$1.2.3").unwrap_err();
+        assert!(
+            err.message.contains("too many decimal points"),
+            "got: {}",
+            err.message
+        );
     }
 }
