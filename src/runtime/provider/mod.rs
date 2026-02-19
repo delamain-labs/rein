@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+pub mod openai;
+
 #[cfg(test)]
 mod tests;
 
