@@ -51,11 +51,20 @@ fn multi_agent_exits_zero() {
 
 #[test]
 fn invalid_exits_one() {
-    let status = Command::new(rein_bin())
+    let out = Command::new(rein_bin())
         .args(["validate", example("invalid.rein").to_str().unwrap()])
-        .status()
+        .output()
         .expect("failed to spawn rein");
-    assert_eq!(status.code(), Some(1), "expected exit 1 for invalid.rein");
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expected exit 1 for invalid.rein"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("parse error") || stderr.contains("invalid.rein"),
+        "expected 'parse error' or filename in stderr, got: {stderr}"
+    );
 }
 
 // ── --ast flag ────────────────────────────────────────────────────────────────
