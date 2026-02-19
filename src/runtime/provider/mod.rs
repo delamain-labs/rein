@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 pub mod openai;
+pub mod resolver;
 
 #[cfg(test)]
 mod tests;
@@ -127,7 +128,7 @@ impl std::error::Error for ProviderError {}
 // ---------------------------------------------------------------------------
 
 /// An LLM provider that can complete chat conversations.
-#[allow(async_fn_in_trait)]
+#[async_trait::async_trait]
 pub trait Provider: Send + Sync {
     /// Send a chat completion request.
     async fn chat(
@@ -167,6 +168,7 @@ impl MockProvider {
     }
 }
 
+#[async_trait::async_trait]
 impl Provider for MockProvider {
     async fn chat(
         &self,
