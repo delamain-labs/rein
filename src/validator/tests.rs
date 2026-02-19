@@ -79,6 +79,7 @@ fn zero_budget_detected() {
     // directly. amount is u64 (cents), so 0 is the only invalid value.
     use crate::ast::{AgentDef, Budget, ReinFile, Span};
     let file = ReinFile {
+        providers: vec![],
         agents: vec![AgentDef {
             name: "bot".into(),
             model: Some(ValueExpr::Literal("anthropic".into())),
@@ -246,4 +247,30 @@ fn workflow_duplicate_stages_warns() {
     let warns = warnings(&diags);
     assert_eq!(warns.len(), 1);
     assert_eq!(warns[0].code, "W004");
+}
+
+// ── Provider validation tests ─────────────────────────────────────────────
+
+#[test]
+fn duplicate_provider_names_error() {
+    let diags = validate_src(r#"
+        provider openai { model: "gpt-4o" key: env("K1") }
+        provider openai { model: "gpt-4o-mini" key: env("K2") }
+    "#);
+    let errors: Vec<_> = diags.iter().filter(|d| d.code == "E007").collect();
+    assert_eq!(errors.len(), 1);
+}
+
+#[test]
+fn provider_missing_key_warns() {
+    let diags = validate_src("provider openai { model: openai }");
+    let warns: Vec<_> = diags.iter().filter(|d| d.code == "W005").collect();
+    assert_eq!(warns.len(), 1);
+}
+
+#[test]
+fn provider_with_key_no_warning() {
+    let diags = validate_src(r#"provider openai { model: openai key: env("K") }"#);
+    let warns: Vec<_> = diags.iter().filter(|d| d.code == "W005").collect();
+    assert_eq!(warns.len(), 0);
 }

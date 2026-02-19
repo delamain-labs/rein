@@ -15,6 +15,8 @@ pub enum TokenKind {
     Workflow,
     Trigger,
     Stages,
+    Provider,
+    Key,
     // Symbols
     LBrace,
     RBrace,
@@ -57,6 +59,8 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Workflow => write!(f, "workflow"),
             TokenKind::Trigger => write!(f, "trigger"),
             TokenKind::Stages => write!(f, "stages"),
+            TokenKind::Provider => write!(f, "provider"),
+            TokenKind::Key => write!(f, "key"),
             TokenKind::Ident(s) => write!(f, "{s}"),
             TokenKind::Dollar(n) => write!(f, "${}.{:02}", n / 100, n % 100),
             TokenKind::StringLiteral(s) => write!(f, "\"{s}\""),
@@ -171,6 +175,8 @@ impl<'a> Lexer<'a> {
             "workflow" => TokenKind::Workflow,
             "trigger" => TokenKind::Trigger,
             "stages" => TokenKind::Stages,
+            "provider" => TokenKind::Provider,
+            "key" => TokenKind::Key,
             _ => TokenKind::Ident(word.to_string()),
         };
         Token::new(kind, start, end)

@@ -1,4 +1,4 @@
-use crate::ast::{AgentDef, Constraint, ReinFile, Span};
+use crate::ast::{AgentDef, Constraint, ProviderDef, ReinFile, Span};
 
 /// Severity of a diagnostic.
 #[derive(Debug, Clone, PartialEq)]
@@ -44,6 +44,10 @@ impl Diagnostic {
 /// Returns a list of diagnostics (errors and warnings).
 pub fn validate(file: &ReinFile) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
+    check_duplicate_provider_names(file, &mut diags);
+    for provider in &file.providers {
+        check_provider_key_present(provider, &mut diags);
+    }
     check_duplicate_agent_names(file, &mut diags);
     for agent in &file.agents {
         check_can_cannot_overlap(agent, &mut diags);
@@ -225,6 +229,37 @@ fn check_model_present(agent: &AgentDef, diags: &mut Vec<Diagnostic>) {
             "W001",
             format!("agent '{}' has no `model` field", agent.name),
             agent.span.clone(),
+        ));
+    }
+}
+
+/// E007: two providers with the same name.
+fn check_duplicate_provider_names(file: &ReinFile, diags: &mut Vec<Diagnostic>) {
+    use std::collections::HashMap;
+    let mut seen: HashMap<&str, &ProviderDef> = HashMap::new();
+    for provider in &file.providers {
+        if let Some(first) = seen.get(provider.name.as_str()) {
+            diags.push(Diagnostic::error(
+                "E007",
+                format!(
+                    "duplicate provider name '{}': first defined at {}",
+                    provider.name, first.span.start
+                ),
+                provider.span.clone(),
+            ));
+        } else {
+            seen.insert(&provider.name, provider);
+        }
+    }
+}
+
+/// W005: provider has no `key` field.
+fn check_provider_key_present(provider: &ProviderDef, diags: &mut Vec<Diagnostic>) {
+    if provider.key.is_none() {
+        diags.push(Diagnostic::warning(
+            "W005",
+            format!("provider '{}' has no `key` field", provider.name),
+            provider.span.clone(),
         ));
     }
 }
