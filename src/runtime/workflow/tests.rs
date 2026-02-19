@@ -742,3 +742,124 @@ async fn resumable_corrupt_checkpoint_returns_persistence_error() {
         "expected PersistenceFailure, got: {err}"
     );
 }
+
+// ── Review feedback tests ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn condition_match_rejects_prefix_false_positive() {
+    // "high" should NOT match "higher"
+    assert!(condition_matches("priority: high", "priority", "high"));
+    assert!(condition_matches("priority: high.", "priority", "high"));
+    assert!(!condition_matches("priority: higher", "priority", "high"));
+    assert!(!condition_matches("priority: highlights", "priority", "high"));
+}
+
+#[tokio::test]
+async fn conditional_route_to_nonexistent_stage_errors() {
+    let file = parse_file(
+        r"
+        agent triage { model: openai }
+    ",
+    );
+
+    let workflow = WorkflowDef {
+        name: "bad".to_string(),
+        trigger: "event".to_string(),
+        stages: vec![Stage {
+            name: "triage".to_string(),
+            agent: "triage".to_string(),
+            route: RouteRule::Conditional {
+                field: "priority".to_string(),
+                equals: "high".to_string(),
+                then_stage: "nonexistent".to_string(),
+                else_stage: None,
+            },
+            span: Span::new(0, 1),
+        }],
+        mode: ExecutionMode::Sequential,
+        span: Span::new(0, 1),
+    };
+
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    provider.push_response(simple_response("priority: high"));
+
+    let err = run_sequential(
+        &workflow,
+        &file,
+        &provider,
+        &executor,
+        &[],
+        &RunConfig::default(),
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+        matches!(err, WorkflowError::StageNotFound(ref name) if name == "nonexistent"),
+        "expected StageNotFound, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn circular_route_returns_error() {
+    let file = parse_file(
+        r"
+        agent a { model: openai }
+        agent b { model: openai }
+    ",
+    );
+
+    // a routes to b, b routes to a → circular
+    let workflow = WorkflowDef {
+        name: "loop".to_string(),
+        trigger: "event".to_string(),
+        stages: vec![
+            Stage {
+                name: "a".to_string(),
+                agent: "a".to_string(),
+                route: RouteRule::Conditional {
+                    field: "go".to_string(),
+                    equals: "yes".to_string(),
+                    then_stage: "b".to_string(),
+                    else_stage: None,
+                },
+                span: Span::new(0, 1),
+            },
+            Stage {
+                name: "b".to_string(),
+                agent: "b".to_string(),
+                route: RouteRule::Conditional {
+                    field: "go".to_string(),
+                    equals: "yes".to_string(),
+                    then_stage: "a".to_string(),
+                    else_stage: None,
+                },
+                span: Span::new(0, 1),
+            },
+        ],
+        mode: ExecutionMode::Sequential,
+        span: Span::new(0, 1),
+    };
+
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    provider.push_response(simple_response("go: yes"));
+    provider.push_response(simple_response("go: yes"));
+
+    let err = run_sequential(
+        &workflow,
+        &file,
+        &provider,
+        &executor,
+        &[],
+        &RunConfig::default(),
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+        matches!(err, WorkflowError::CircularRoute(ref name) if name == "a"),
+        "expected CircularRoute, got: {err}"
+    );
+}

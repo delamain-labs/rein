@@ -13,7 +13,7 @@ mod tests;
 /// The result of a completed workflow run.
 #[derive(Debug)]
 pub struct WorkflowResult {
-    /// Results from each stage, in order.
+    /// Results from each stage, in order of execution.
     pub stage_results: Vec<StageResult>,
     /// The final output text.
     pub final_output: String,
@@ -47,6 +47,8 @@ pub enum WorkflowError {
     StageNotFound(String),
     /// State persistence failed (save/load/clear).
     PersistenceFailure(String),
+    /// A circular route was detected.
+    CircularRoute(String),
 }
 
 impl std::fmt::Display for WorkflowError {
@@ -58,6 +60,7 @@ impl std::fmt::Display for WorkflowError {
             }
             Self::StageNotFound(name) => write!(f, "route target stage not found: {name}"),
             Self::PersistenceFailure(msg) => write!(f, "state persistence failed: {msg}"),
+            Self::CircularRoute(name) => write!(f, "circular route detected at stage '{name}'"),
         }
     }
 }
@@ -123,6 +126,8 @@ fn build_result(stage_results: Vec<StageResult>, final_output: String) -> Workfl
 /// Check whether a conditional route matches the agent output.
 ///
 /// Looks for `field: value` or `field=value` patterns in the output text.
+/// Uses exact value matching (not prefix) to avoid false positives like
+/// "high" matching "higher".
 fn condition_matches(output: &str, field: &str, equals: &str) -> bool {
     let lower = output.to_lowercase();
     let field_lower = field.to_lowercase();
@@ -132,17 +137,19 @@ fn condition_matches(output: &str, field: &str, equals: &str) -> bool {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix(&field_lower) {
             let rest = rest.trim_start();
-            if rest
-                .strip_prefix(':')
-                .is_some_and(|val| val.trim().starts_with(&equals_lower))
-            {
-                return true;
-            }
-            if rest
-                .strip_prefix('=')
-                .is_some_and(|val| val.trim().starts_with(&equals_lower))
-            {
-                return true;
+            if let Some(val) = rest.strip_prefix(':').or_else(|| rest.strip_prefix('=')) {
+                let val = val.trim();
+                // Exact match: the value equals our target, or is followed
+                // by a non-alphanumeric character (e.g. "high." or "high,")
+                if val == equals_lower
+                    || val
+                        .strip_prefix(equals_lower.as_str())
+                        .is_some_and(|rest| {
+                            rest.starts_with(|c: char| !c.is_alphanumeric() && c != '_')
+                        })
+                {
+                    return true;
+                }
             }
         }
     }
@@ -154,13 +161,53 @@ fn find_stage<'a>(workflow: &'a WorkflowDef, name: &str) -> Option<&'a Stage> {
     workflow.stages.iter().find(|s| s.name == name)
 }
 
+/// Resolve the next stage given the current stage's route rule and output.
+///
+/// This is the single source of truth for routing logic, used by both
+/// `run_sequential` and `run_sequential_resumable`.
+fn resolve_next_stage<'a>(
+    workflow: &'a WorkflowDef,
+    current: &Stage,
+    output: &str,
+) -> Result<Option<&'a Stage>, WorkflowError> {
+    match &current.route {
+        RouteRule::Next => {
+            let idx = workflow
+                .stages
+                .iter()
+                .position(|s| s.name == current.name);
+            Ok(idx.and_then(|i| workflow.stages.get(i + 1)))
+        }
+        RouteRule::Conditional {
+            field,
+            equals,
+            then_stage,
+            else_stage,
+        } => {
+            if condition_matches(output, field, equals) {
+                Ok(Some(
+                    find_stage(workflow, then_stage)
+                        .ok_or_else(|| WorkflowError::StageNotFound(then_stage.clone()))?,
+                ))
+            } else if let Some(else_name) = else_stage {
+                Ok(Some(
+                    find_stage(workflow, else_name)
+                        .ok_or_else(|| WorkflowError::StageNotFound(else_name.clone()))?,
+                ))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+}
+
 /// Execute a workflow sequentially: each stage's output becomes the next
 /// stage's input. Respects [`RouteRule::Conditional`] for branching to named
 /// stages.
 ///
 /// # Errors
-/// Returns `WorkflowError` if an agent is missing, a stage fails, or a route
-/// references a nonexistent stage.
+/// Returns `WorkflowError` if an agent is missing, a stage fails, a route
+/// references a nonexistent stage, or a circular route is detected.
 pub async fn run_sequential(
     workflow: &WorkflowDef,
     file: &ReinFile,
@@ -176,8 +223,8 @@ pub async fn run_sequential(
     let mut current_stage: Option<&Stage> = workflow.stages.first();
 
     while let Some(stage) = current_stage {
-        if !visited.insert(stage.name.clone()) {
-            break; // circular routing protection
+        if !visited.insert(&*stage.name) {
+            return Err(WorkflowError::CircularRoute(stage.name.clone()));
         }
 
         let result = run_stage(
@@ -196,32 +243,7 @@ pub async fn run_sequential(
         let output = result.output.clone();
         stage_results.push(result);
 
-        current_stage = match &stage.route {
-            RouteRule::Next => {
-                let idx = workflow.stages.iter().position(|s| s.name == stage.name);
-                idx.and_then(|i| workflow.stages.get(i + 1))
-            }
-            RouteRule::Conditional {
-                field,
-                equals,
-                then_stage,
-                else_stage,
-            } => {
-                if condition_matches(&output, field, equals) {
-                    Some(
-                        find_stage(workflow, then_stage)
-                            .ok_or_else(|| WorkflowError::StageNotFound(then_stage.clone()))?,
-                    )
-                } else if let Some(else_name) = else_stage {
-                    Some(
-                        find_stage(workflow, else_name)
-                            .ok_or_else(|| WorkflowError::StageNotFound(else_name.clone()))?,
-                    )
-                } else {
-                    None
-                }
-            }
-        };
+        current_stage = resolve_next_stage(workflow, stage, &output)?;
     }
 
     let final_output = stage_results
@@ -264,45 +286,21 @@ fn build_resume_context(
 }
 
 /// Determine the stage to (re)start from given a checkpoint.
-///
-/// If no stages have been skipped, execution starts from the first stage.
-/// Otherwise the last completed stage's route decides the next one.
 fn find_resume_start<'a>(
     workflow: &'a WorkflowDef,
     checkpoint: Option<&persistence::WorkflowState>,
     skip_stages: &std::collections::HashSet<String>,
-) -> Option<&'a Stage> {
+) -> Result<Option<&'a Stage>, WorkflowError> {
     if skip_stages.is_empty() {
-        return workflow.stages.first();
+        return Ok(workflow.stages.first());
     }
     let Some(last_cs) = checkpoint.and_then(|s| s.completed_stages.last()) else {
-        return workflow.stages.first();
+        return Ok(workflow.stages.first());
     };
-    let last_stage = find_stage(workflow, &last_cs.stage_name)?;
-    match &last_stage.route {
-        RouteRule::Next => {
-            let idx = workflow
-                .stages
-                .iter()
-                .position(|s| s.name == last_stage.name)?;
-            workflow.stages.get(idx + 1)
-        }
-        RouteRule::Conditional {
-            field,
-            equals,
-            then_stage,
-            else_stage,
-        } => {
-            let output = last_cs.output.as_str();
-            if condition_matches(output, field, equals) {
-                find_stage(workflow, then_stage)
-            } else {
-                else_stage
-                    .as_ref()
-                    .and_then(|name| find_stage(workflow, name))
-            }
-        }
-    }
+    let Some(last_stage) = find_stage(workflow, &last_cs.stage_name) else {
+        return Ok(workflow.stages.first());
+    };
+    resolve_next_stage(workflow, last_stage, &last_cs.output)
 }
 
 /// Execute a workflow sequentially with checkpoint persistence.
@@ -314,7 +312,8 @@ fn find_resume_start<'a>(
 ///
 /// # Errors
 /// Returns `WorkflowError` if an agent is missing, a stage fails, a route
-/// references a nonexistent stage, or state persistence fails.
+/// references a nonexistent stage, circular routing is detected, or state
+/// persistence fails.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_sequential_resumable(
     workflow: &WorkflowDef,
@@ -332,12 +331,12 @@ pub async fn run_sequential_resumable(
 
     let (mut stage_results, mut current_input, skip_stages) =
         build_resume_context(checkpoint.as_ref(), workflow);
-    let mut visited: std::collections::HashSet<String> = skip_stages.iter().cloned().collect();
-    let mut current_stage = find_resume_start(workflow, checkpoint.as_ref(), &skip_stages);
+    let mut visited: std::collections::HashSet<&str> = skip_stages.iter().map(String::as_str).collect();
+    let mut current_stage = find_resume_start(workflow, checkpoint.as_ref(), &skip_stages)?;
 
     while let Some(stage) = current_stage {
-        if !visited.insert(stage.name.clone()) {
-            break;
+        if !visited.insert(&stage.name) {
+            return Err(WorkflowError::CircularRoute(stage.name.clone()));
         }
 
         let result = run_stage(
@@ -373,32 +372,7 @@ pub async fn run_sequential_resumable(
         save_state(&state, state_path)
             .map_err(|e| WorkflowError::PersistenceFailure(e.to_string()))?;
 
-        current_stage = match &stage.route {
-            RouteRule::Next => {
-                let idx = workflow.stages.iter().position(|s| s.name == stage.name);
-                idx.and_then(|i| workflow.stages.get(i + 1))
-            }
-            RouteRule::Conditional {
-                field,
-                equals,
-                then_stage,
-                else_stage,
-            } => {
-                if condition_matches(&output, field, equals) {
-                    Some(
-                        find_stage(workflow, then_stage)
-                            .ok_or_else(|| WorkflowError::StageNotFound(then_stage.clone()))?,
-                    )
-                } else if let Some(else_name) = else_stage {
-                    Some(
-                        find_stage(workflow, else_name)
-                            .ok_or_else(|| WorkflowError::StageNotFound(else_name.clone()))?,
-                    )
-                } else {
-                    None
-                }
-            }
-        };
+        current_stage = resolve_next_stage(workflow, stage, &output)?;
     }
 
     clear_state(state_path).map_err(|e| WorkflowError::PersistenceFailure(e.to_string()))?;
@@ -427,7 +401,6 @@ pub async fn run_parallel(
     let trigger_input = format!("Trigger: {}", workflow.trigger);
     let mut stage_results = Vec::new();
 
-    // Fan-out: each stage gets the trigger input (not chained)
     for stage in &workflow.stages {
         let result = run_stage(
             &stage.name,
@@ -443,7 +416,6 @@ pub async fn run_parallel(
         stage_results.push(result);
     }
 
-    // Merge outputs
     let final_output = stage_results
         .iter()
         .map(|r| format!("[{}]: {}", r.stage_name, r.output))
