@@ -514,3 +514,107 @@ fn parse_provider_unknown_field_errors() {
     let err = parse_err("provider x { model: a budget: $5 }");
     assert!(err.message.contains("unexpected"), "got: {}", err.message);
 }
+
+// ── Step block tests ──────────────────────────────────────────────────────
+
+#[test]
+fn parse_workflow_with_step_blocks() {
+    let src = r#"
+        agent triage { model: openai }
+        workflow support {
+            trigger: ticket
+            step classify {
+                agent: triage
+                goal: "Classify this ticket"
+            }
+        }
+    "#;
+    let f = parse_ok(src);
+    assert_eq!(f.workflows[0].steps.len(), 1);
+    assert_eq!(f.workflows[0].steps[0].name, "classify");
+    assert_eq!(f.workflows[0].steps[0].agent, "triage");
+    assert_eq!(f.workflows[0].steps[0].goal.as_deref(), Some("Classify this ticket"));
+}
+
+#[test]
+fn parse_workflow_with_multiple_steps() {
+    let src = r#"
+        agent a { model: openai }
+        agent b { model: openai }
+        workflow pipe {
+            trigger: event
+            step first {
+                agent: a
+                goal: "Do step one"
+            }
+            step second {
+                agent: b
+                goal: "Do step two"
+            }
+        }
+    "#;
+    let f = parse_ok(src);
+    assert_eq!(f.workflows[0].steps.len(), 2);
+    assert_eq!(f.workflows[0].steps[0].name, "first");
+    assert_eq!(f.workflows[0].steps[1].name, "second");
+}
+
+#[test]
+fn parse_step_without_goal() {
+    let src = r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step s1 {
+                agent: a
+            }
+        }
+    "#;
+    let f = parse_ok(src);
+    assert!(f.workflows[0].steps[0].goal.is_none());
+}
+
+#[test]
+fn parse_step_missing_agent_errors() {
+    let err = parse_err(r#"
+        workflow w {
+            trigger: event
+            step s1 {
+                goal: "Do something"
+            }
+        }
+    "#);
+    assert!(err.message.contains("missing"), "got: {}", err.message);
+}
+
+#[test]
+fn parse_step_duplicate_agent_errors() {
+    let err = parse_err(r#"
+        workflow w {
+            trigger: event
+            step s1 {
+                agent: a
+                agent: b
+            }
+        }
+    "#);
+    assert!(err.message.contains("duplicate"), "got: {}", err.message);
+}
+
+#[test]
+fn parse_workflow_mixed_stages_and_steps() {
+    let src = r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            stages: [a]
+            step extra {
+                agent: a
+                goal: "Extra processing"
+            }
+        }
+    "#;
+    let f = parse_ok(src);
+    assert_eq!(f.workflows[0].stages.len(), 1);
+    assert_eq!(f.workflows[0].steps.len(), 1);
+}

@@ -370,6 +370,7 @@ impl Parser {
 
         let mut trigger: Option<String> = None;
         let mut stages: Vec<Stage> = Vec::new();
+        let mut steps: Vec<crate::ast::StepDef> = Vec::new();
         let mut seen_trigger = false;
         let mut seen_stages = false;
 
@@ -387,9 +388,9 @@ impl Parser {
                         )
                     })?;
 
-                    if stages.is_empty() {
+                    if stages.is_empty() && steps.is_empty() {
                         return Err(ParseError::new(
-                            format!("workflow '{name}' must have at least one stage"),
+                            format!("workflow '{name}' must have at least one stage or step"),
                             Span::new(start, end),
                         ));
                     }
@@ -398,6 +399,7 @@ impl Parser {
                         name,
                         trigger,
                         stages,
+                        steps,
                         mode: ExecutionMode::Sequential,
                         span: Span::new(start, end),
                     });
@@ -426,6 +428,9 @@ impl Parser {
                     self.advance();
                     self.expect(&TokenKind::Colon)?;
                     stages = self.parse_stage_list()?;
+                }
+                TokenKind::Step => {
+                    steps.push(self.parse_step()?);
                 }
                 TokenKind::Eof => {
                     return Err(ParseError::new(
@@ -479,6 +484,89 @@ impl Parser {
             }
         }
         Ok(stages)
+    }
+
+    /// Parse a `step <name> { agent: <ident> goal: <text> }` block.
+    fn parse_step(&mut self) -> Result<crate::ast::StepDef, ParseError> {
+        self.skip_comments();
+        let start = self.current_span().start;
+
+        self.expect(&TokenKind::Step)?;
+        let (name, _) = self.expect_ident()?;
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut agent: Option<String> = None;
+        let mut goal: Option<String> = None;
+        let mut seen_agent = false;
+        let mut seen_goal = false;
+
+        loop {
+            self.skip_comments();
+            match self.peek().clone() {
+                TokenKind::RBrace => {
+                    let end = self.current_span().end;
+                    self.advance();
+
+                    let agent = agent.ok_or_else(|| {
+                        ParseError::new(
+                            format!("step '{name}' is missing required field 'agent'"),
+                            Span::new(start, end),
+                        )
+                    })?;
+
+                    return Ok(crate::ast::StepDef {
+                        name,
+                        agent,
+                        goal,
+                        span: Span::new(start, end),
+                    });
+                }
+                TokenKind::Agent => {
+                    if seen_agent {
+                        return Err(ParseError::new(
+                            format!("duplicate field 'agent' in step '{name}'"),
+                            self.current_span(),
+                        ));
+                    }
+                    seen_agent = true;
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    let (value, _) = self.expect_ident()?;
+                    agent = Some(value);
+                }
+                TokenKind::Goal => {
+                    if seen_goal {
+                        return Err(ParseError::new(
+                            format!("duplicate field 'goal' in step '{name}'"),
+                            self.current_span(),
+                        ));
+                    }
+                    seen_goal = true;
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    // Goal is a string literal or plain text value
+                    let value = self.parse_value_expr()?;
+                    goal = Some(match value {
+                        ValueExpr::Literal(s) => s,
+                        ValueExpr::EnvRef { var_name, .. } => {
+                            format!("env({var_name})")
+                        }
+                    });
+                }
+                TokenKind::Eof => {
+                    return Err(ParseError::new(
+                        "unexpected end of file: expected `}`",
+                        self.current_span(),
+                    ));
+                }
+                other => {
+                    return Err(ParseError::new(
+                        format!("unexpected token in step '{name}': {other}"),
+                        self.current_span(),
+                    ));
+                }
+            }
+        }
     }
 
     fn parse_capability_list(&mut self) -> Result<Vec<Capability>, ParseError> {

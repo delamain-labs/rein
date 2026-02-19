@@ -274,3 +274,49 @@ fn provider_with_key_no_warning() {
     let warns: Vec<_> = diags.iter().filter(|d| d.code == "W005").collect();
     assert_eq!(warns.len(), 0);
 }
+
+// ── Step validation tests ─────────────────────────────────────────────────
+
+#[test]
+fn step_references_unknown_agent_errors() {
+    let diags = validate_src(r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step s1 {
+                agent: nonexistent
+            }
+        }
+    "#);
+    let errors: Vec<_> = diags.iter().filter(|d| d.code == "E008").collect();
+    assert_eq!(errors.len(), 1);
+}
+
+#[test]
+fn step_references_valid_agent_ok() {
+    let diags = validate_src(r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step s1 {
+                agent: a
+            }
+        }
+    "#);
+    let errors: Vec<_> = diags.iter().filter(|d| d.code == "E008").collect();
+    assert_eq!(errors.len(), 0);
+}
+
+#[test]
+fn duplicate_step_names_error() {
+    let diags = validate_src(r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step s1 { agent: a }
+            step s1 { agent: a }
+        }
+    "#);
+    let errors: Vec<_> = diags.iter().filter(|d| d.code == "E009").collect();
+    assert_eq!(errors.len(), 1);
+}

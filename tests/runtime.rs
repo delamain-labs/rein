@@ -236,7 +236,8 @@ fn make_workflow(name: &str, trigger: &str, agents: &[&str]) -> WorkflowDef {
             route: RouteRule::Next,
             span: Span::new(0, 1),
         }).collect(),
-        mode: ExecutionMode::Sequential,
+        steps: vec![],
+            mode: ExecutionMode::Sequential,
         span: Span::new(0, 1),
     }
 }
