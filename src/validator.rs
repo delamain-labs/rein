@@ -93,17 +93,17 @@ fn check_can_cannot_overlap(agent: &AgentDef, diags: &mut Vec<Diagnostic>) {
 
 /// E003: budget amount must be positive.
 fn check_budget_positive(agent: &AgentDef, diags: &mut Vec<Diagnostic>) {
-    if let Some(budget) = &agent.budget {
-        if budget.amount <= 0.0 {
-            diags.push(Diagnostic::error(
-                "E003",
-                format!(
-                    "budget amount must be positive, got {} in agent '{}'",
-                    budget.amount, agent.name
-                ),
-                budget.span.clone(),
-            ));
-        }
+    if let Some(budget) = &agent.budget
+        && budget.amount <= 0.0
+    {
+        diags.push(Diagnostic::error(
+            "E003",
+            format!(
+                "budget amount must be positive, got {} in agent '{}'",
+                budget.amount, agent.name
+            ),
+            budget.span.clone(),
+        ));
     }
 }
 

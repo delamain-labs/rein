@@ -86,13 +86,19 @@ impl<'a> Lexer<'a> {
     }
 
     fn skip_whitespace(&mut self) {
-        while matches!(self.peek(), Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'\r')) {
+        while matches!(
+            self.peek(),
+            Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'\r')
+        ) {
             self.advance();
         }
     }
 
     fn read_ident(&mut self, start: usize) -> Token {
-        while matches!(self.peek(), Some(b'a'..=b'z') | Some(b'A'..=b'Z') | Some(b'0'..=b'9') | Some(b'_')) {
+        while matches!(
+            self.peek(),
+            Some(b'a'..=b'z') | Some(b'A'..=b'Z') | Some(b'0'..=b'9') | Some(b'_')
+        ) {
             self.advance();
         }
         let end = self.pos;
@@ -208,7 +214,10 @@ mod tests {
     }
 
     fn non_eof(tokens: Vec<Token>) -> Vec<Token> {
-        tokens.into_iter().filter(|t| t.kind != TokenKind::Eof).collect()
+        tokens
+            .into_iter()
+            .filter(|t| t.kind != TokenKind::Eof)
+            .collect()
     }
 
     // ── Happy-path tests ──────────────────────────────────────────────────────
@@ -218,7 +227,11 @@ mod tests {
         let tokens = non_eof(lex_ok("agent foo {"));
         assert_eq!(
             kinds(&tokens),
-            vec![&TokenKind::Agent, &TokenKind::Ident("foo".into()), &TokenKind::LBrace]
+            vec![
+                &TokenKind::Agent,
+                &TokenKind::Ident("foo".into()),
+                &TokenKind::LBrace
+            ]
         );
     }
 

@@ -1,6 +1,6 @@
-use ariadne::{Color, Label, Report, ReportKind, Source};
 use crate::parser::ParseError;
 use crate::validator::{Diagnostic, Severity};
+use ariadne::{Color, Label, Report, ReportKind, Source};
 
 /// Render a `ParseError` to stderr as a coloured ariadne report.
 pub fn report_parse_error(filename: &str, source: &str, error: &ParseError) {
@@ -97,7 +97,12 @@ mod tests {
         }
     }
 
-    fn make_warning_diag(code: &'static str, message: &str, start: usize, end: usize) -> Diagnostic {
+    fn make_warning_diag(
+        code: &'static str,
+        message: &str,
+        start: usize,
+        end: usize,
+    ) -> Diagnostic {
         Diagnostic {
             severity: Severity::Warning,
             code,
@@ -113,7 +118,8 @@ mod tests {
         let output = format_diagnostic("test.rein", src, &diag);
         assert!(
             output.contains("E001"),
-            "expected 'E001' in output:\n{}", output
+            "expected 'E001' in output:\n{}",
+            output
         );
     }
 
@@ -124,7 +130,8 @@ mod tests {
         let output = format_diagnostic("test.rein", src, &diag);
         assert!(
             output.contains("x.y") || output.contains("can and cannot"),
-            "expected message content in output:\n{}", output
+            "expected message content in output:\n{}",
+            output
         );
     }
 
@@ -135,7 +142,8 @@ mod tests {
         let output = format_diagnostic("test.rein", src, &diag);
         assert!(
             output.contains("W001"),
-            "expected 'W001' in output:\n{}", output
+            "expected 'W001' in output:\n{}",
+            output
         );
     }
 
@@ -150,7 +158,8 @@ mod tests {
         let output = format_parse_error("test.rein", src, &err);
         assert!(
             output.contains("E000"),
-            "expected 'E000' in output:\n{}", output
+            "expected 'E000' in output:\n{}",
+            output
         );
     }
 
@@ -165,7 +174,8 @@ mod tests {
         let output = format_parse_error("test.rein", src, &err);
         assert!(
             output.contains("identifier") || output.contains("LBrace"),
-            "expected error message in output:\n{}", output
+            "expected error message in output:\n{}",
+            output
         );
     }
 }

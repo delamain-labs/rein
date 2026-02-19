@@ -19,7 +19,11 @@ impl ParseError {
 
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} (at {}..{})", self.message, self.span.start, self.span.end)
+        write!(
+            f,
+            "{} (at {}..{})",
+            self.message, self.span.start, self.span.end
+        )
     }
 }
 
@@ -33,11 +37,17 @@ pub fn parse(source: &str) -> Result<ReinFile, ParseError> {
 struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    /// Byte offset of the end of the most recently consumed (non-comment) token.
+    last_consumed_end: usize,
 }
 
 impl Parser {
     fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, pos: 0 }
+        Self {
+            tokens,
+            pos: 0,
+            last_consumed_end: 0,
+        }
     }
 
     /// Current token (never out of bounds — last token is always Eof).
@@ -64,6 +74,7 @@ impl Parser {
     /// Advance one token, skipping comments.
     fn advance(&mut self) {
         if self.current().kind != TokenKind::Eof {
+            self.last_consumed_end = self.tokens[self.pos].span.end;
             self.pos += 1;
         }
         self.skip_comments();
@@ -224,7 +235,7 @@ impl Parser {
             None
         };
 
-        let end = self.current_span().start; // span ends where next token begins
+        let end = self.last_consumed_end;
         Ok(Capability {
             namespace,
             action,
@@ -253,7 +264,7 @@ impl Parser {
         let (amount, _) = self.expect_dollar()?;
         self.expect(&TokenKind::Per)?;
         let (unit, _) = self.expect_ident()?;
-        let end = self.current_span().start;
+        let end = self.last_consumed_end;
         Ok(Budget {
             amount,
             currency: "USD".to_string(),
@@ -410,6 +421,46 @@ agent foo {
         assert_eq!(f.agents[0].model.as_deref(), Some("anthropic"));
     }
 
+    // ── Span accuracy ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn capability_span_ends_at_last_consumed_token() {
+        // source: "agent foo { can [ zendesk.read_ticket ] }"
+        //                           ^18                ^37
+        // "zendesk" starts at byte 18, "read_ticket" ends at byte 37.
+        // The span end must be 37 (end of last consumed token), not 38 (start of ']').
+        let src = "agent foo { can [ zendesk.read_ticket ] }";
+        let f = parse_ok(src);
+        let cap = &f.agents[0].can[0];
+        assert_eq!(
+            cap.span.start, 18,
+            "span start should be start of 'zendesk'"
+        );
+        assert_eq!(
+            cap.span.end, 37,
+            "span end should be end of 'read_ticket', not start of ']'"
+        );
+    }
+
+    #[test]
+    fn capability_span_with_constraint_ends_at_dollar() {
+        // source: "agent foo { can [ zendesk.refund up to $50 ] }"
+        //                           ^18              ^39   ^42
+        // "zendesk" starts at byte 18, "$50" ends at byte 42.
+        // The span end must be 42 (end of '$50'), not 43 (start of ']').
+        let src = "agent foo { can [ zendesk.refund up to $50 ] }";
+        let f = parse_ok(src);
+        let cap = &f.agents[0].can[0];
+        assert_eq!(
+            cap.span.start, 18,
+            "span start should be start of 'zendesk'"
+        );
+        assert_eq!(
+            cap.span.end, 42,
+            "span end should be end of '$50', not start of ']'"
+        );
+    }
+
     // ── Error paths ───────────────────────────────────────────────────────────
 
     #[test]
@@ -421,13 +472,21 @@ agent foo {
     #[test]
     fn error_missing_lbrace() {
         let err = parse_err("agent foo }");
-        assert!(err.message.contains("LBrace") || err.message.contains('{'), "got: {}", err.message);
+        assert!(
+            err.message.contains("LBrace") || err.message.contains('{'),
+            "got: {}",
+            err.message
+        );
     }
 
     #[test]
     fn error_missing_rbrace() {
         let err = parse_err("agent foo {");
-        assert!(err.message.contains("end of file") || err.message.contains('}'), "got: {}", err.message);
+        assert!(
+            err.message.contains("end of file") || err.message.contains('}'),
+            "got: {}",
+            err.message
+        );
     }
 
     #[test]
