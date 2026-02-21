@@ -10,6 +10,18 @@ pub mod persistence;
 #[cfg(test)]
 mod tests;
 
+/// Bundles the shared dependencies needed to execute workflow stages.
+///
+/// Eliminates repetitive parameter lists across `run_sequential`,
+/// `run_parallel`, `run_sequential_resumable`, and `run_workflow`.
+pub struct WorkflowContext<'a> {
+    pub file: &'a ReinFile,
+    pub provider: &'a dyn Provider,
+    pub executor: &'a dyn ToolExecutor,
+    pub tool_defs: &'a [ToolDef],
+    pub config: &'a RunConfig,
+}
+
 /// The result of a completed workflow run.
 #[derive(Debug)]
 pub struct WorkflowResult {
@@ -68,18 +80,14 @@ impl std::fmt::Display for WorkflowError {
 impl std::error::Error for WorkflowError {}
 
 /// Run a single stage and return its result.
-#[allow(clippy::too_many_arguments)]
 async fn run_stage(
     stage_name: &str,
     agent_name: &str,
     input: &str,
-    file: &ReinFile,
-    provider: &dyn Provider,
-    executor: &dyn ToolExecutor,
-    tool_defs: &[ToolDef],
-    config: &RunConfig,
+    ctx: &WorkflowContext<'_>,
 ) -> Result<StageResult, WorkflowError> {
-    let agent = file
+    let agent = ctx
+        .file
         .agents
         .iter()
         .find(|a| a.name == agent_name)
@@ -87,11 +95,11 @@ async fn run_stage(
 
     let registry = ToolRegistry::from_agent(agent);
     let engine = AgentEngine::new(
-        provider,
-        executor,
+        ctx.provider,
+        ctx.executor,
         &registry,
-        tool_defs.to_vec(),
-        config.clone(),
+        ctx.tool_defs.to_vec(),
+        ctx.config.clone(),
     );
 
     let result = engine
@@ -198,11 +206,7 @@ fn resolve_next_stage<'a>(
 /// references a nonexistent stage, or a circular route is detected.
 pub async fn run_sequential(
     workflow: &WorkflowDef,
-    file: &ReinFile,
-    provider: &dyn Provider,
-    executor: &dyn ToolExecutor,
-    tool_defs: &[ToolDef],
-    config: &RunConfig,
+    ctx: &WorkflowContext<'_>,
 ) -> Result<WorkflowResult, WorkflowError> {
     let mut stage_results = Vec::new();
     let mut current_input = format!("Trigger: {}", workflow.trigger);
@@ -215,17 +219,7 @@ pub async fn run_sequential(
             return Err(WorkflowError::CircularRoute(stage.name.clone()));
         }
 
-        let result = run_stage(
-            &stage.name,
-            &stage.agent,
-            &current_input,
-            file,
-            provider,
-            executor,
-            tool_defs,
-            config,
-        )
-        .await?;
+        let result = run_stage(&stage.name, &stage.agent, &current_input, ctx).await?;
 
         current_input.clone_from(&result.output);
         let output = result.output.clone();
@@ -302,14 +296,9 @@ fn find_resume_start<'a>(
 /// Returns `WorkflowError` if an agent is missing, a stage fails, a route
 /// references a nonexistent stage, circular routing is detected, or state
 /// persistence fails.
-#[allow(clippy::too_many_arguments)]
 pub async fn run_sequential_resumable(
     workflow: &WorkflowDef,
-    file: &ReinFile,
-    provider: &dyn Provider,
-    executor: &dyn ToolExecutor,
-    tool_defs: &[ToolDef],
-    config: &RunConfig,
+    ctx: &WorkflowContext<'_>,
     state_path: &std::path::Path,
 ) -> Result<WorkflowResult, WorkflowError> {
     use persistence::{CompletedStage, WorkflowState, clear_state, load_state, save_state};
@@ -328,17 +317,7 @@ pub async fn run_sequential_resumable(
             return Err(WorkflowError::CircularRoute(stage.name.clone()));
         }
 
-        let result = run_stage(
-            &stage.name,
-            &stage.agent,
-            &current_input,
-            file,
-            provider,
-            executor,
-            tool_defs,
-            config,
-        )
-        .await?;
+        let result = run_stage(&stage.name, &stage.agent, &current_input, ctx).await?;
 
         current_input.clone_from(&result.output);
         let output = result.output.clone();
@@ -382,27 +361,13 @@ pub async fn run_sequential_resumable(
 /// Returns `WorkflowError` if an agent is missing or any stage fails.
 pub async fn run_parallel(
     workflow: &WorkflowDef,
-    file: &ReinFile,
-    provider: &dyn Provider,
-    executor: &dyn ToolExecutor,
-    tool_defs: &[ToolDef],
-    config: &RunConfig,
+    ctx: &WorkflowContext<'_>,
 ) -> Result<WorkflowResult, WorkflowError> {
     let trigger_input = format!("Trigger: {}", workflow.trigger);
     let mut stage_results = Vec::new();
 
     for stage in &workflow.stages {
-        let result = run_stage(
-            &stage.name,
-            &stage.agent,
-            &trigger_input,
-            file,
-            provider,
-            executor,
-            tool_defs,
-            config,
-        )
-        .await?;
+        let result = run_stage(&stage.name, &stage.agent, &trigger_input, ctx).await?;
         stage_results.push(result);
     }
 
@@ -421,18 +386,10 @@ pub async fn run_parallel(
 /// Returns `WorkflowError` if execution fails.
 pub async fn run_workflow(
     workflow: &WorkflowDef,
-    file: &ReinFile,
-    provider: &dyn Provider,
-    executor: &dyn ToolExecutor,
-    tool_defs: &[ToolDef],
-    config: &RunConfig,
+    ctx: &WorkflowContext<'_>,
 ) -> Result<WorkflowResult, WorkflowError> {
     match workflow.mode {
-        ExecutionMode::Sequential => {
-            run_sequential(workflow, file, provider, executor, tool_defs, config).await
-        }
-        ExecutionMode::Parallel => {
-            run_parallel(workflow, file, provider, executor, tool_defs, config).await
-        }
+        ExecutionMode::Sequential => run_sequential(workflow, ctx).await,
+        ExecutionMode::Parallel => run_parallel(workflow, ctx).await,
     }
 }
