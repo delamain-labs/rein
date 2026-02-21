@@ -5,6 +5,15 @@ use super::Span;
 /// A value expression used in configuration fields.
 ///
 /// Supports literal strings and function calls like `env("VAR_NAME")`.
+///
+/// # Serde invariant
+///
+/// This enum uses `#[serde(untagged)]`, which means deserialization tries
+/// variants **in declaration order**. `Literal` must remain first so that
+/// a plain string deserializes as `Literal` rather than failing to match
+/// `EnvRef`'s structured fields. Adding new variants? Put them **after**
+/// `Literal` and ensure they have at least one field that a plain string
+/// would not satisfy, so the ordering remains unambiguous.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ValueExpr {
