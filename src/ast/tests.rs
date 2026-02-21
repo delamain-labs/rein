@@ -102,7 +102,7 @@ fn agent_def_full_serializes() {
 
 #[test]
 fn rein_file_roundtrips_via_json() {
-    let file = ReinFile { archetypes: vec![], policies: vec![], observes: vec![], fleets: vec![], channels: vec![],
+    let file = ReinFile { archetypes: vec![], policies: vec![], observes: vec![], fleets: vec![], channels: vec![], circuit_breakers: vec![],
         imports: vec![],
         defaults: None,
         providers: vec![],
@@ -192,7 +192,7 @@ fn workflow_def_serializes() {
         steps: vec![],
         route_blocks: vec![],
         parallel_blocks: vec![],
-        auto_resolve: None,
+        auto_resolve: None, within_blocks: vec![],
         mode: ExecutionMode::Sequential,
         span: dummy_span(),
     };
@@ -212,7 +212,7 @@ fn workflow_roundtrips_via_json() {
         steps: vec![],
         route_blocks: vec![],
         parallel_blocks: vec![],
-        auto_resolve: None,
+        auto_resolve: None, within_blocks: vec![],
         mode: ExecutionMode::Parallel,
         span: dummy_span(),
     };
@@ -223,7 +223,7 @@ fn workflow_roundtrips_via_json() {
 
 #[test]
 fn rein_file_with_workflows_roundtrips() {
-    let file = ReinFile { archetypes: vec![], policies: vec![], observes: vec![], fleets: vec![], channels: vec![],
+    let file = ReinFile { archetypes: vec![], policies: vec![], observes: vec![], fleets: vec![], channels: vec![], circuit_breakers: vec![],
         imports: vec![],
         defaults: None,
         providers: vec![],
@@ -236,7 +236,7 @@ fn rein_file_with_workflows_roundtrips() {
             steps: vec![],
             route_blocks: vec![],
             parallel_blocks: vec![],
-            auto_resolve: None,
+            auto_resolve: None, within_blocks: vec![],
             mode: ExecutionMode::Sequential,
             span: dummy_span(),
         }],
@@ -269,7 +269,7 @@ fn workflow_def_find_stage() {
         steps: vec![],
         route_blocks: vec![],
         parallel_blocks: vec![],
-        auto_resolve: None,
+        auto_resolve: None, within_blocks: vec![],
         mode: ExecutionMode::Sequential,
         span: dummy_span(),
     };

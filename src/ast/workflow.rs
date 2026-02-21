@@ -4,6 +4,28 @@ use super::pipe::PipeExpr;
 use super::types::TypeExpr;
 use super::Span;
 
+/// A `send to` notification target with optional message template.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SendTarget {
+    /// Target string (e.g. `slack(#pricing)`, `email(team@co.com)`).
+    pub target: String,
+    /// Optional message template with `{{var}}` interpolation.
+    pub message: Option<String>,
+    pub span: Span,
+}
+
+/// A `within(cost: $0.05, latency: 2s) { ... }` constraint wrapper.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WithinBlock {
+    /// Cost constraint in cents.
+    pub cost: Option<u64>,
+    /// Latency constraint as a string (e.g. "2s", "500ms").
+    pub latency: Option<String>,
+    /// Steps inside the constraint block.
+    pub steps: Vec<StepDef>,
+    pub span: Span,
+}
+
 /// A single condition in an `auto resolve when` block.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -192,6 +214,8 @@ pub struct StepDef {
     pub when: Option<WhenExpr>,
     /// Optional retry policy: `on failure: retry 3 exponential then escalate`.
     pub on_failure: Option<RetryPolicy>,
+    /// Optional `send to` notification: `send to: target, message: "..."`.
+    pub send_to: Option<SendTarget>,
     /// Optional fallback step executed when the primary step fails.
     pub fallback: Option<Box<StepDef>>,
     pub span: Span,
@@ -213,6 +237,8 @@ pub struct WorkflowDef {
     pub parallel_blocks: Vec<ParallelBlock>,
     /// Auto resolve conditions.
     pub auto_resolve: Option<AutoResolveBlock>,
+    /// `within(...)` constraint blocks.
+    pub within_blocks: Vec<WithinBlock>,
     /// Default execution mode.
     pub mode: ExecutionMode,
     pub span: Span,

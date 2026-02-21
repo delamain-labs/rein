@@ -3,7 +3,9 @@ use crate::lexer::{Token, TokenKind, tokenize};
 
 mod agent_parser;
 mod channel_parser;
+mod circuit_breaker_parser;
 mod common_parser;
+mod condition_parser;
 mod fleet_parser;
 mod import_parser;
 mod observe_parser;
@@ -11,6 +13,7 @@ mod pipe_parser;
 mod policy_parser;
 mod step_parser;
 mod type_parser;
+mod within_parser;
 mod workflow_parser;
 
 /// Parse error with source location and message.
@@ -254,6 +257,10 @@ impl Parser {
             | TokenKind::Min
             | TokenKind::Max
             | TokenKind::Retention
+            | TokenKind::Send
+            | TokenKind::To
+            | TokenKind::Within
+            | TokenKind::CircuitBreaker
             | TokenKind::Promote => {
                 let name = tok.kind.to_string();
                 self.advance();
@@ -341,6 +348,7 @@ impl Parser {
         let mut observes = Vec::new();
         let mut fleets = Vec::new();
         let mut channels = Vec::new();
+        let mut circuit_breakers = Vec::new();
         while self.peek() != &TokenKind::Eof {
             match self.peek() {
                 TokenKind::Import => imports.push(self.parse_import()?),
@@ -363,6 +371,9 @@ impl Parser {
                 TokenKind::Observe => observes.push(self.parse_observe()?),
                 TokenKind::Fleet => fleets.push(self.parse_fleet()?),
                 TokenKind::Channel => channels.push(self.parse_channel()?),
+                TokenKind::CircuitBreaker => {
+                    circuit_breakers.push(self.parse_circuit_breaker()?);
+                }
                 other => {
                     return Err(ParseError::new(
                         format!(
@@ -387,6 +398,7 @@ impl Parser {
             observes,
             fleets,
             channels,
+            circuit_breakers,
         })
     }
 }

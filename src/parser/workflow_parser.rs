@@ -1,7 +1,7 @@
 use crate::ast::{
     AutoResolveBlock, AutoResolveCondition, CompareOp, ExecutionMode, ParallelBlock, RouteArm,
     RouteBlock, RoutePattern, RouteRule, Span, Stage, StepDef, TypeExpr, WhenComparison,
-    WorkflowDef,
+    WithinBlock, WorkflowDef,
 };
 use crate::lexer::TokenKind;
 
@@ -15,6 +15,7 @@ struct WorkflowBody {
     route_blocks: Vec<RouteBlock>,
     parallel_blocks: Vec<ParallelBlock>,
     auto_resolve: Option<AutoResolveBlock>,
+    within_blocks: Vec<WithinBlock>,
 }
 
 impl Parser {
@@ -43,6 +44,7 @@ impl Parser {
             && body.steps.is_empty()
             && body.route_blocks.is_empty()
             && body.parallel_blocks.is_empty()
+            && body.within_blocks.is_empty()
         {
             return Err(ParseError::new(
                 format!(
@@ -60,6 +62,7 @@ impl Parser {
             route_blocks: body.route_blocks,
             parallel_blocks: body.parallel_blocks,
             auto_resolve: body.auto_resolve,
+            within_blocks: body.within_blocks,
             mode: ExecutionMode::Sequential,
             span: Span::new(start, end),
         })
@@ -97,6 +100,7 @@ impl Parser {
                     body.stages = self.parse_stage_list()?;
                 }
                 TokenKind::Step => body.steps.push(self.parse_step()?),
+                TokenKind::Within => body.within_blocks.push(self.parse_within_block()?),
                 TokenKind::Route => body.route_blocks.push(self.parse_route_block()?),
                 TokenKind::Parallel => body.parallel_blocks.push(self.parse_parallel_block()?),
                 TokenKind::Auto => {
