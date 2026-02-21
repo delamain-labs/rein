@@ -1639,3 +1639,74 @@ fn parse_step_with_when_and_retry() {
     assert!(step.when.is_some());
     assert!(step.on_failure.is_some());
 }
+
+// ── auto resolve when tests ─────────────────────────────────────────────
+
+#[test]
+fn parse_auto_resolve_basic() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step classify { agent: a }
+            auto resolve when {
+                confidence > 90%,
+                action is one of [order_status, tracking]
+            }
+        }
+    "#,
+    );
+    let ar = f.workflows[0].auto_resolve.as_ref().unwrap();
+    assert_eq!(ar.conditions.len(), 2);
+
+    match &ar.conditions[0] {
+        crate::ast::AutoResolveCondition::Comparison(c) => {
+            assert_eq!(c.field, "confidence");
+            assert_eq!(c.op, crate::ast::CompareOp::Gt);
+            assert!(matches!(&c.value, crate::ast::WhenValue::Percent(p) if p == "90"));
+        }
+        other => panic!("expected Comparison, got {other:?}"),
+    }
+
+    match &ar.conditions[1] {
+        crate::ast::AutoResolveCondition::IsOneOf { field, variants } => {
+            assert_eq!(field, "action");
+            assert_eq!(variants, &["order_status", "tracking"]);
+        }
+        other => panic!("expected IsOneOf, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_auto_resolve_comparison_only() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step s { agent: a }
+            auto resolve when {
+                score >= 95
+            }
+        }
+    "#,
+    );
+    let ar = f.workflows[0].auto_resolve.as_ref().unwrap();
+    assert_eq!(ar.conditions.len(), 1);
+    assert!(matches!(&ar.conditions[0], crate::ast::AutoResolveCondition::Comparison(c) if c.field == "score"));
+}
+
+#[test]
+fn parse_workflow_without_auto_resolve() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step s { agent: a }
+        }
+    "#,
+    );
+    assert!(f.workflows[0].auto_resolve.is_none());
+}

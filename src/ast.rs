@@ -228,6 +228,26 @@ pub struct TypeDef {
     pub span: Span,
 }
 
+/// A single condition in an `auto resolve when` block.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AutoResolveCondition {
+    /// A comparison: `confidence > 90%`.
+    Comparison(WhenComparison),
+    /// A membership check: `action is one of [order_status, tracking]`.
+    IsOneOf {
+        field: String,
+        variants: Vec<String>,
+    },
+}
+
+/// An `auto resolve when { ... }` block for autonomous agent actions.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AutoResolveBlock {
+    pub conditions: Vec<AutoResolveCondition>,
+    pub span: Span,
+}
+
 /// Backoff strategy for retry policies.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum BackoffStrategy {
@@ -437,6 +457,8 @@ pub struct WorkflowDef {
     pub route_blocks: Vec<RouteBlock>,
     /// Parallel execution blocks.
     pub parallel_blocks: Vec<ParallelBlock>,
+    /// Auto resolve conditions.
+    pub auto_resolve: Option<AutoResolveBlock>,
     /// Default execution mode.
     pub mode: ExecutionMode,
     pub span: Span,
@@ -661,6 +683,7 @@ mod tests {
             steps: vec![],
             route_blocks: vec![],
             parallel_blocks: vec![],
+            auto_resolve: None,
             mode: ExecutionMode::Sequential,
             span: dummy_span(),
         };
@@ -680,6 +703,7 @@ mod tests {
             steps: vec![],
             route_blocks: vec![],
             parallel_blocks: vec![],
+            auto_resolve: None,
             mode: ExecutionMode::Parallel,
             span: dummy_span(),
         };
@@ -703,6 +727,7 @@ mod tests {
                 steps: vec![],
             route_blocks: vec![],
             parallel_blocks: vec![],
+            auto_resolve: None,
                 mode: ExecutionMode::Sequential,
                 span: dummy_span(),
             }],
@@ -735,6 +760,7 @@ mod tests {
             steps: vec![],
             route_blocks: vec![],
             parallel_blocks: vec![],
+            auto_resolve: None,
             mode: ExecutionMode::Sequential,
             span: dummy_span(),
         };
