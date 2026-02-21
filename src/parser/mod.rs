@@ -638,6 +638,7 @@ impl Parser {
         let mut stages: Vec<Stage> = Vec::new();
         let mut steps: Vec<crate::ast::StepDef> = Vec::new();
         let mut route_blocks: Vec<crate::ast::RouteBlock> = Vec::new();
+        let mut parallel_blocks: Vec<crate::ast::ParallelBlock> = Vec::new();
         let mut seen_trigger = false;
         let mut seen_stages = false;
 
@@ -655,7 +656,7 @@ impl Parser {
                         )
                     })?;
 
-                    if stages.is_empty() && steps.is_empty() && route_blocks.is_empty() {
+                    if stages.is_empty() && steps.is_empty() && route_blocks.is_empty() && parallel_blocks.is_empty() {
                         return Err(ParseError::new(
                             format!("workflow '{name}' must have at least one stage, step, or route block"),
                             Span::new(start, end),
@@ -668,6 +669,7 @@ impl Parser {
                         stages,
                         steps,
                         route_blocks,
+                        parallel_blocks,
                         mode: ExecutionMode::Sequential,
                         span: Span::new(start, end),
                     });
@@ -701,6 +703,9 @@ impl Parser {
                 }
                 TokenKind::Route => {
                     route_blocks.push(self.parse_route_block()?);
+                }
+                TokenKind::Parallel => {
+                    parallel_blocks.push(self.parse_parallel_block()?);
                 }
                 TokenKind::Eof => {
                     return Err(ParseError::new(
@@ -858,6 +863,36 @@ impl Parser {
                 }
             }
         }
+    }
+
+    /// Parse a `parallel { step a {...} step b {...} }` block.
+    fn parse_parallel_block(&mut self) -> Result<crate::ast::ParallelBlock, ParseError> {
+        let start = self.current_span().start;
+        self.expect(&TokenKind::Parallel)?;
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut steps = Vec::new();
+        loop {
+            self.skip_comments();
+            if *self.peek() == TokenKind::RBrace {
+                break;
+            }
+            steps.push(self.parse_step()?);
+        }
+        let end = self.current_span().end;
+        self.expect(&TokenKind::RBrace)?;
+
+        if steps.is_empty() {
+            return Err(ParseError::new(
+                "parallel block must contain at least one step",
+                Span::new(start, end),
+            ));
+        }
+
+        Ok(crate::ast::ParallelBlock {
+            steps,
+            span: Span::new(start, end),
+        })
     }
 
     /// Parse a `route on <field_path> { pattern -> step name { ... }, ... }` block.

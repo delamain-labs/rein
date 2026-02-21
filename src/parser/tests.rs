@@ -1388,3 +1388,61 @@ fn parse_route_on_with_steps() {
     assert_eq!(f.workflows[0].steps.len(), 1);
     assert_eq!(f.workflows[0].route_blocks.len(), 1);
 }
+
+// ── parallel block tests ────────────────────────────────────────────────
+
+#[test]
+fn parse_parallel_block_basic() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        agent b { model: openai }
+        workflow w {
+            trigger: event
+            parallel {
+                step analyze { agent: a goal: "Analyze" }
+                step summarize { agent: b goal: "Summarize" }
+            }
+        }
+    "#,
+    );
+    assert_eq!(f.workflows[0].parallel_blocks.len(), 1);
+    let pb = &f.workflows[0].parallel_blocks[0];
+    assert_eq!(pb.steps.len(), 2);
+    assert_eq!(pb.steps[0].name, "analyze");
+    assert_eq!(pb.steps[1].name, "summarize");
+}
+
+#[test]
+fn parse_parallel_with_sequential_steps() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        agent b { model: openai }
+        agent c { model: openai }
+        workflow w {
+            trigger: event
+            step first { agent: a }
+            parallel {
+                step p1 { agent: b }
+                step p2 { agent: c }
+            }
+        }
+    "#,
+    );
+    assert_eq!(f.workflows[0].steps.len(), 1);
+    assert_eq!(f.workflows[0].parallel_blocks.len(), 1);
+}
+
+#[test]
+fn parse_parallel_empty_errors() {
+    let err = parse_err(
+        r#"
+        workflow w {
+            trigger: event
+            parallel {}
+        }
+    "#,
+    );
+    assert!(err.message.contains("at least one"), "got: {}", err.message);
+}

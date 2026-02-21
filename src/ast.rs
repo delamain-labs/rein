@@ -228,6 +228,13 @@ pub struct TypeDef {
     pub span: Span,
 }
 
+/// A `parallel { step a {...} step b {...} }` block for concurrent execution.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParallelBlock {
+    pub steps: Vec<StepDef>,
+    pub span: Span,
+}
+
 /// A single arm in a `route on` block.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RouteArm {
@@ -358,6 +365,8 @@ pub struct WorkflowDef {
     pub steps: Vec<StepDef>,
     /// Route-on blocks for pattern-matched routing.
     pub route_blocks: Vec<RouteBlock>,
+    /// Parallel execution blocks.
+    pub parallel_blocks: Vec<ParallelBlock>,
     /// Default execution mode.
     pub mode: ExecutionMode,
     pub span: Span,
@@ -581,6 +590,7 @@ mod tests {
             ],
             steps: vec![],
             route_blocks: vec![],
+            parallel_blocks: vec![],
             mode: ExecutionMode::Sequential,
             span: dummy_span(),
         };
@@ -599,6 +609,7 @@ mod tests {
             stages: vec![],
             steps: vec![],
             route_blocks: vec![],
+            parallel_blocks: vec![],
             mode: ExecutionMode::Parallel,
             span: dummy_span(),
         };
@@ -621,6 +632,7 @@ mod tests {
                 stages: vec![],
                 steps: vec![],
             route_blocks: vec![],
+            parallel_blocks: vec![],
                 mode: ExecutionMode::Sequential,
                 span: dummy_span(),
             }],
@@ -652,6 +664,7 @@ mod tests {
             ],
             steps: vec![],
             route_blocks: vec![],
+            parallel_blocks: vec![],
             mode: ExecutionMode::Sequential,
             span: dummy_span(),
         };
