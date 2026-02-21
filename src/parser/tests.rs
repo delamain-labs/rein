@@ -1,5 +1,5 @@
 use super::*;
-use crate::ast::Constraint;
+use crate::ast::{Constraint, TypeExpr};
 
 fn parse_ok(src: &str) -> ReinFile {
     parse(src).expect("expected parse to succeed")
@@ -1059,6 +1059,7 @@ fn parse_step_with_one_of_constraint() {
         crate::ast::TypeExpr::OneOf { variants, .. } => {
             assert_eq!(variants, &["billing", "technical", "general"]);
         }
+        other => panic!("expected OneOf, got {other:?}"),
     }
 }
 
@@ -1124,5 +1125,105 @@ fn parse_one_of_trailing_comma() {
         crate::ast::TypeExpr::OneOf { variants, .. } => {
             assert_eq!(variants, &["open", "closed"]);
         }
+        other => panic!("expected OneOf, got {other:?}"),
     }
+}
+
+// ── type system tests ───────────────────────────────────────────────────
+
+#[test]
+fn parse_type_def_basic() {
+    let f = parse_ok(
+        r#"
+        type TicketClassification {
+            category: one of [billing, technical, general]
+            confidence: percent
+            tags: string[]
+        }
+    "#,
+    );
+    assert_eq!(f.types.len(), 1);
+    let td = &f.types[0];
+    assert_eq!(td.name, "TicketClassification");
+    assert_eq!(td.fields.len(), 3);
+
+    assert_eq!(td.fields[0].name, "category");
+    assert!(matches!(&td.fields[0].type_expr, TypeExpr::OneOf { variants, .. } if variants.len() == 3));
+
+    assert_eq!(td.fields[1].name, "confidence");
+    assert!(matches!(&td.fields[1].type_expr, TypeExpr::Named { name, array: false } if name == "percent"));
+
+    assert_eq!(td.fields[2].name, "tags");
+    assert!(matches!(&td.fields[2].type_expr, TypeExpr::Named { name, array: true } if name == "string"));
+}
+
+#[test]
+fn parse_type_def_builtins() {
+    let f = parse_ok(
+        r#"
+        type Record {
+            name: string
+            age: int
+            score: float
+            active: bool
+            price: currency
+            elapsed: duration
+        }
+    "#,
+    );
+    let td = &f.types[0];
+    assert_eq!(td.fields.len(), 6);
+    let names: Vec<&str> = td.fields.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, &["name", "age", "score", "active", "price", "elapsed"]);
+}
+
+#[test]
+fn parse_type_def_with_range() {
+    let f = parse_ok(
+        r#"
+        type Config {
+            temperature: 0..100
+        }
+    "#,
+    );
+    let td = &f.types[0];
+    assert!(matches!(&td.fields[0].type_expr, TypeExpr::Range { min, max } if min == "0" && max == "100"));
+}
+
+#[test]
+fn parse_type_def_float_range() {
+    let f = parse_ok(
+        r#"
+        type Config {
+            temperature: 0.0..1.0
+        }
+    "#,
+    );
+    let td = &f.types[0];
+    assert!(matches!(&td.fields[0].type_expr, TypeExpr::Range { min, max } if min == "0.0" && max == "1.0"));
+}
+
+#[test]
+fn parse_multiple_type_defs() {
+    let f = parse_ok(
+        r#"
+        type A { x: int }
+        type B { y: string }
+    "#,
+    );
+    assert_eq!(f.types.len(), 2);
+    assert_eq!(f.types[0].name, "A");
+    assert_eq!(f.types[1].name, "B");
+}
+
+#[test]
+fn parse_type_with_agents() {
+    let f = parse_ok(
+        r#"
+        type Output { status: one of [ok, error] }
+        agent bot { model: openai }
+    "#,
+    );
+    assert_eq!(f.types.len(), 1);
+    assert_eq!(f.agents.len(), 1);
 }

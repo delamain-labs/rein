@@ -198,11 +198,34 @@ pub struct ToolDef {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TypeExpr {
+    /// A built-in or user-defined named type (e.g. `string`, `int`, `MyType`).
+    Named { name: String, array: bool },
     /// A union of allowed values: `one of [billing, technical, general]`.
     OneOf {
         variants: Vec<String>,
         span: Span,
     },
+    /// A numeric range: `1..10` or `0.0..1.0`.
+    Range {
+        min: String,
+        max: String,
+    },
+}
+
+/// A field within a `type` definition.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TypeField {
+    pub name: String,
+    pub type_expr: TypeExpr,
+    pub span: Span,
+}
+
+/// A `type Name { ... }` definition.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TypeDef {
+    pub name: String,
+    pub fields: Vec<TypeField>,
+    pub span: Span,
 }
 
 /// How a condition is evaluated against agent output.
@@ -304,6 +327,7 @@ pub struct ReinFile {
     pub tools: Vec<ToolDef>,
     pub agents: Vec<AgentDef>,
     pub workflows: Vec<WorkflowDef>,
+    pub types: Vec<TypeDef>,
 }
 
 #[cfg(test)]
@@ -426,6 +450,7 @@ mod tests {
                 span: dummy_span(),
             }],
             workflows: vec![],
+            types: vec![],
         };
         let json = serde_json::to_string(&file).unwrap();
         let decoded: ReinFile = serde_json::from_str(&json).unwrap();
@@ -538,6 +563,7 @@ mod tests {
                 mode: ExecutionMode::Sequential,
                 span: dummy_span(),
             }],
+            types: vec![],
         };
         let json = serde_json::to_string(&file).unwrap();
         let decoded: ReinFile = serde_json::from_str(&json).unwrap();
