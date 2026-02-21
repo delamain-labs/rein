@@ -154,11 +154,6 @@ fn condition_matches(output: &str, field: &str, equals: &str) -> bool {
     false
 }
 
-/// Find a stage by name within a workflow.
-fn find_stage<'a>(workflow: &'a WorkflowDef, name: &str) -> Option<&'a Stage> {
-    workflow.stages.iter().find(|s| s.name == name)
-}
-
 /// Resolve the next stage given the current stage's route rule and output.
 ///
 /// This is the single source of truth for routing logic, used by both
@@ -180,11 +175,11 @@ fn resolve_next_stage<'a>(
             else_stage,
         } => {
             if condition_matches(output, field, equals) {
-                Ok(Some(find_stage(workflow, then_stage).ok_or_else(|| {
+                Ok(Some(workflow.find_stage(then_stage).ok_or_else(|| {
                     WorkflowError::StageNotFound(then_stage.clone())
                 })?))
             } else if let Some(else_name) = else_stage {
-                Ok(Some(find_stage(workflow, else_name).ok_or_else(|| {
+                Ok(Some(workflow.find_stage(else_name).ok_or_else(|| {
                     WorkflowError::StageNotFound(else_name.clone())
                 })?))
             } else {
@@ -290,7 +285,7 @@ fn find_resume_start<'a>(
     let Some(last_cs) = checkpoint.and_then(|s| s.completed_stages.last()) else {
         return Ok(workflow.stages.first());
     };
-    let Some(last_stage) = find_stage(workflow, &last_cs.stage_name) else {
+    let Some(last_stage) = workflow.find_stage(&last_cs.stage_name) else {
         return Ok(workflow.stages.first());
     };
     resolve_next_stage(workflow, last_stage, &last_cs.output)

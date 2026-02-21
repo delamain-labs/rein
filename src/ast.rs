@@ -255,6 +255,13 @@ pub struct WorkflowDef {
     pub span: Span,
 }
 
+impl WorkflowDef {
+    /// Find a stage by name within this workflow.
+    pub fn find_stage(&self, name: &str) -> Option<&Stage> {
+        self.stages.iter().find(|s| s.name == name)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Top-level file
 // ---------------------------------------------------------------------------
@@ -505,5 +512,34 @@ mod tests {
         let json = serde_json::to_string(&file).unwrap();
         let decoded: ReinFile = serde_json::from_str(&json).unwrap();
         assert_eq!(file, decoded);
+    }
+
+    #[test]
+    fn workflow_def_find_stage() {
+        let wf = WorkflowDef {
+            name: "test".to_string(),
+            trigger: "event".to_string(),
+            stages: vec![
+                Stage {
+                    name: "a".to_string(),
+                    agent: "agent_a".to_string(),
+                    route: RouteRule::Next,
+                    span: dummy_span(),
+                },
+                Stage {
+                    name: "b".to_string(),
+                    agent: "agent_b".to_string(),
+                    route: RouteRule::Next,
+                    span: dummy_span(),
+                },
+            ],
+            steps: vec![],
+            mode: ExecutionMode::Sequential,
+            span: dummy_span(),
+        };
+
+        assert_eq!(wf.find_stage("a").unwrap().agent, "agent_a");
+        assert_eq!(wf.find_stage("b").unwrap().agent, "agent_b");
+        assert!(wf.find_stage("nonexistent").is_none());
     }
 }
