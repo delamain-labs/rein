@@ -230,40 +230,56 @@ impl Parser {
         }
     }
 
-    /// Parse a `when` expression: `field op value [or|and field op value ...]`.
+    /// Parse a `when` expression with proper precedence: `and` binds tighter than `or`.
+    ///
+    /// Grammar:
+    ///   `or_expr`  = `and_expr` (`or` `and_expr`)*
+    ///   `and_expr` = comparison (`and` comparison)*
     pub(super) fn parse_when_expr(&mut self) -> Result<WhenExpr, ParseError> {
-        let first = self.parse_when_comparison()?;
-        let mut expr = WhenExpr::Comparison(first);
+        self.parse_when_or_expr()
+    }
+
+    fn parse_when_or_expr(&mut self) -> Result<WhenExpr, ParseError> {
+        let first = self.parse_when_and_expr()?;
+        let mut parts = vec![first];
 
         loop {
             self.skip_comments();
-            match self.peek() {
-                TokenKind::Or => {
-                    self.advance();
-                    let next = self.parse_when_comparison()?;
-                    expr = match expr {
-                        WhenExpr::Or(mut parts) => {
-                            parts.push(WhenExpr::Comparison(next));
-                            WhenExpr::Or(parts)
-                        }
-                        other => WhenExpr::Or(vec![other, WhenExpr::Comparison(next)]),
-                    };
-                }
-                TokenKind::And => {
-                    self.advance();
-                    let next = self.parse_when_comparison()?;
-                    expr = match expr {
-                        WhenExpr::And(mut parts) => {
-                            parts.push(WhenExpr::Comparison(next));
-                            WhenExpr::And(parts)
-                        }
-                        other => WhenExpr::And(vec![other, WhenExpr::Comparison(next)]),
-                    };
-                }
-                _ => break,
+            if *self.peek() == TokenKind::Or {
+                self.advance();
+                parts.push(self.parse_when_and_expr()?);
+            } else {
+                break;
             }
         }
-        Ok(expr)
+
+        if parts.len() == 1 {
+            Ok(parts.into_iter().next().unwrap())
+        } else {
+            Ok(WhenExpr::Or(parts))
+        }
+    }
+
+    fn parse_when_and_expr(&mut self) -> Result<WhenExpr, ParseError> {
+        let first = self.parse_when_comparison()?;
+        let mut parts = vec![WhenExpr::Comparison(first)];
+
+        loop {
+            self.skip_comments();
+            if *self.peek() == TokenKind::And {
+                self.advance();
+                let next = self.parse_when_comparison()?;
+                parts.push(WhenExpr::Comparison(next));
+            } else {
+                break;
+            }
+        }
+
+        if parts.len() == 1 {
+            Ok(parts.into_iter().next().unwrap())
+        } else {
+            Ok(WhenExpr::And(parts))
+        }
     }
 
     /// Parse a single comparison: `field op value`.

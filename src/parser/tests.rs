@@ -1710,3 +1710,98 @@ fn parse_workflow_without_auto_resolve() {
     );
     assert!(f.workflows[0].auto_resolve.is_none());
 }
+
+// ── when expression precedence tests ────────────────────────────────────
+
+#[test]
+fn when_and_binds_tighter_than_or() {
+    // `a > 1 or b > 2 and c > 3` should parse as `a > 1 or (b > 2 and c > 3)`
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step s {
+                agent: a
+                when: score > 50 or confidence > 80 and priority < 3
+            }
+        }
+    "#,
+    );
+    let when = f.workflows[0].steps[0].when.as_ref().unwrap();
+    match when {
+        crate::ast::WhenExpr::Or(parts) => {
+            assert_eq!(parts.len(), 2);
+            // First part is a simple comparison
+            assert!(matches!(&parts[0], crate::ast::WhenExpr::Comparison(_)));
+            // Second part is an And group
+            match &parts[1] {
+                crate::ast::WhenExpr::And(and_parts) => assert_eq!(and_parts.len(), 2),
+                other => panic!("expected And, got {other:?}"),
+            }
+        }
+        other => panic!("expected Or, got {other:?}"),
+    }
+}
+
+#[test]
+fn when_and_chain_without_or() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step s {
+                agent: a
+                when: a > 1 and b > 2 and c > 3
+            }
+        }
+    "#,
+    );
+    let when = f.workflows[0].steps[0].when.as_ref().unwrap();
+    assert!(matches!(when, crate::ast::WhenExpr::And(parts) if parts.len() == 3));
+}
+
+#[test]
+fn when_or_chain_without_and() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step s {
+                agent: a
+                when: a > 1 or b > 2 or c > 3
+            }
+        }
+    "#,
+    );
+    let when = f.workflows[0].steps[0].when.as_ref().unwrap();
+    assert!(matches!(when, crate::ast::WhenExpr::Or(parts) if parts.len() == 3));
+}
+
+#[test]
+fn when_mixed_precedence_complex() {
+    // `a > 1 and b > 2 or c > 3 and d > 4` = `(a > 1 and b > 2) or (c > 3 and d > 4)`
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step s {
+                agent: a
+                when: x > 1 and y > 2 or z > 3 and w > 4
+            }
+        }
+    "#,
+    );
+    let when = f.workflows[0].steps[0].when.as_ref().unwrap();
+    match when {
+        crate::ast::WhenExpr::Or(parts) => {
+            assert_eq!(parts.len(), 2);
+            assert!(matches!(&parts[0], crate::ast::WhenExpr::And(p) if p.len() == 2));
+            assert!(matches!(&parts[1], crate::ast::WhenExpr::And(p) if p.len() == 2));
+        }
+        other => panic!("expected Or, got {other:?}"),
+    }
+}
