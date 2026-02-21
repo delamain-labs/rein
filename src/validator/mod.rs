@@ -57,6 +57,7 @@ pub fn validate(file: &ReinFile) -> Vec<Diagnostic> {
         check_duplicate_capabilities(agent, &mut diags);
         check_model_present(agent, &mut diags);
     }
+    check_agent_model_provider_refs(file, &mut diags);
     check_duplicate_workflow_names(file, &mut diags);
     for workflow in &file.workflows {
         check_workflow_stages_reference_agents(file, workflow, &mut diags);
@@ -350,6 +351,29 @@ fn check_provider_key_present(provider: &ProviderDef, diags: &mut Vec<Diagnostic
             format!("provider '{}' has no `key` field", provider.name),
             provider.span.clone(),
         ));
+    }
+}
+
+/// W006: agent model references a provider prefix that doesn't match any defined provider.
+fn check_agent_model_provider_refs(file: &ReinFile, diags: &mut Vec<Diagnostic>) {
+    use std::collections::HashSet;
+    let provider_names: HashSet<&str> = file.providers.iter().map(|p| p.name.as_str()).collect();
+
+    for agent in &file.agents {
+        if let Some(model_expr) = &agent.model
+            && let Some(model_str) = model_expr.as_literal()
+            && let Some((prefix, _)) = model_str.split_once('/')
+            && !provider_names.contains(prefix)
+        {
+            diags.push(Diagnostic::warning(
+                "W006",
+                format!(
+                    "agent '{}' model '{}' references unknown provider '{}'",
+                    agent.name, model_str, prefix
+                ),
+                agent.span.clone(),
+            ));
+        }
     }
 }
 

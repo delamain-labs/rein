@@ -375,3 +375,38 @@ fn step_stage_name_collision_errors() {
     assert_eq!(errors.len(), 1);
     assert!(errors[0].message.contains("collides with stage"));
 }
+
+#[test]
+fn model_with_known_provider_prefix_no_warning() {
+    let diags = validate_src(
+        r#"
+        provider anthropic { key: "k" }
+        agent foo { model: "anthropic/claude-3" }
+    "#,
+    );
+    let w006: Vec<_> = diags.iter().filter(|d| d.code == "W006").collect();
+    assert!(w006.is_empty(), "expected no W006, got: {w006:?}");
+}
+
+#[test]
+fn model_with_unknown_provider_prefix_warns() {
+    let diags = validate_src(
+        r#"
+        agent foo { model: "unknown_provider/some-model" }
+    "#,
+    );
+    let w006: Vec<_> = diags.iter().filter(|d| d.code == "W006").collect();
+    assert_eq!(w006.len(), 1);
+    assert!(w006[0].message.contains("unknown_provider"));
+}
+
+#[test]
+fn model_without_slash_no_provider_warning() {
+    let diags = validate_src(
+        r#"
+        agent foo { model: "gpt-4o" }
+    "#,
+    );
+    let w006: Vec<_> = diags.iter().filter(|d| d.code == "W006").collect();
+    assert!(w006.is_empty());
+}
