@@ -2049,3 +2049,47 @@ fn inline_step_shorthand_without_goal() {
     assert_eq!(step.agent, "triage");
     assert_eq!(step.goal, None);
 }
+
+#[test]
+fn step_with_fallback() {
+    let f = parse_ok(
+        r#"
+        agent primary { model: "gpt-4o" }
+        agent backup { model: "gpt-4o" }
+        workflow support {
+            trigger: ticket
+            step handle {
+                agent: primary
+                goal: "Handle the ticket"
+                fallback step recover {
+                    agent: backup
+                    goal: "Recover from failure"
+                }
+            }
+        }
+    "#,
+    );
+    let step = &f.workflows[0].steps[0];
+    assert_eq!(step.name, "handle");
+    let fb = step.fallback.as_ref().expect("expected fallback");
+    assert_eq!(fb.name, "recover");
+    assert_eq!(fb.agent, "backup");
+    assert_eq!(fb.goal.as_deref(), Some("Recover from failure"));
+}
+
+#[test]
+fn step_duplicate_fallback_errors() {
+    let err = parse_err(
+        r#"
+        workflow w {
+            trigger: t
+            step s {
+                agent: a
+                fallback step f1 { agent: b }
+                fallback step f2 { agent: c }
+            }
+        }
+    "#,
+    );
+    assert!(err.message.contains("duplicate 'fallback'"), "got: {}", err.message);
+}
