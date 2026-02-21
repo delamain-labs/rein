@@ -49,16 +49,19 @@ async fn single_stage_workflow() {
     let workflow = make_workflow("pipe", "ticket", &["triage"]);
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+    };
 
     provider.push_response(simple_response("Triaged: low priority"));
 
     let result = run_sequential(
         &workflow,
-        &file,
-        &provider,
-        &executor,
-        &[],
-        &RunConfig::default(),
+        &ctx,
     )
     .await
     .expect("should succeed");
@@ -79,6 +82,13 @@ async fn two_stage_pipeline_passes_output() {
     let workflow = make_workflow("pipe", "ticket", &["triage", "responder"]);
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+    };
 
     // Stage 1: triage
     provider.push_response(simple_response("Priority: high. Issue: billing error."));
@@ -89,11 +99,7 @@ async fn two_stage_pipeline_passes_output() {
 
     let result = run_sequential(
         &workflow,
-        &file,
-        &provider,
-        &executor,
-        &[],
-        &RunConfig::default(),
+        &ctx,
     )
     .await
     .expect("should succeed");
@@ -125,6 +131,13 @@ async fn three_stage_pipeline() {
     let workflow = make_workflow("pipe", "event", &["a", "b", "c"]);
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+    };
 
     provider.push_response(simple_response("output_a"));
     provider.push_response(simple_response("output_b"));
@@ -132,11 +145,7 @@ async fn three_stage_pipeline() {
 
     let result = run_sequential(
         &workflow,
-        &file,
-        &provider,
-        &executor,
-        &[],
-        &RunConfig::default(),
+        &ctx,
     )
     .await
     .expect("should succeed");
@@ -151,16 +160,19 @@ async fn unknown_agent_returns_error() {
     let workflow = make_workflow("pipe", "event", &["a", "nonexistent"]);
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+    };
 
     provider.push_response(simple_response("ok"));
 
     let err = run_sequential(
         &workflow,
-        &file,
-        &provider,
-        &executor,
-        &[],
-        &RunConfig::default(),
+        &ctx,
     )
     .await
     .unwrap_err();
@@ -174,16 +186,19 @@ async fn stage_failure_returns_error() {
     let workflow = make_workflow("pipe", "event", &["a"]);
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+    };
 
     provider.push_error("provider down");
 
     let err = run_sequential(
         &workflow,
-        &file,
-        &provider,
-        &executor,
-        &[],
-        &RunConfig::default(),
+        &ctx,
     )
     .await
     .unwrap_err();
@@ -206,17 +221,20 @@ async fn parallel_workflow_runs_all_stages() {
 
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+    };
 
     provider.push_response(simple_response("output_a"));
     provider.push_response(simple_response("output_b"));
 
     let result = run_parallel(
         &workflow,
-        &file,
-        &provider,
-        &executor,
-        &[],
-        &RunConfig::default(),
+        &ctx,
     )
     .await
     .expect("should succeed");
@@ -236,17 +254,20 @@ async fn parallel_unknown_agent_errors() {
 
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+    };
 
     // Queue response for agent "a" so it doesn't fail first
     provider.push_response(simple_response("ok"));
 
     let err = run_parallel(
         &workflow,
-        &file,
-        &provider,
-        &executor,
-        &[],
-        &RunConfig::default(),
+        &ctx,
     )
     .await
     .unwrap_err();
@@ -259,6 +280,13 @@ async fn run_workflow_dispatches_by_mode() {
     let file = parse_file("agent a { model: openai }");
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+    };
 
     // Sequential
     let mut seq = make_workflow("seq", "event", &["a"]);
@@ -266,11 +294,7 @@ async fn run_workflow_dispatches_by_mode() {
     provider.push_response(simple_response("sequential"));
     let r1 = run_workflow(
         &seq,
-        &file,
-        &provider,
-        &executor,
-        &[],
-        &RunConfig::default(),
+        &ctx,
     )
     .await
     .expect("ok");
@@ -282,11 +306,7 @@ async fn run_workflow_dispatches_by_mode() {
     provider.push_response(simple_response("parallel"));
     let r2 = run_workflow(
         &par,
-        &file,
-        &provider,
-        &executor,
-        &[],
-        &RunConfig::default(),
+        &ctx,
     )
     .await
     .expect("ok");
@@ -345,6 +365,13 @@ async fn conditional_routes_to_then_stage() {
     let (file, workflow) = make_conditional_workflow();
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+    };
 
     // triage → escalate (conditional match) → respond (Next from escalate)
     provider.push_response(simple_response("Priority: high. Urgent billing issue."));
@@ -353,11 +380,7 @@ async fn conditional_routes_to_then_stage() {
 
     let result = run_sequential(
         &workflow,
-        &file,
-        &provider,
-        &executor,
-        &[],
-        &RunConfig::default(),
+        &ctx,
     )
     .await
     .expect("ok");
@@ -374,17 +397,20 @@ async fn conditional_routes_to_else_stage() {
     let (file, workflow) = make_conditional_workflow();
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+    };
 
     provider.push_response(simple_response("Priority: low. Simple question."));
     provider.push_response(simple_response("Here's your answer."));
 
     let result = run_sequential(
         &workflow,
-        &file,
-        &provider,
-        &executor,
-        &[],
-        &RunConfig::default(),
+        &ctx,
     )
     .await
     .expect("ok");
@@ -433,16 +459,19 @@ async fn conditional_no_else_ends_workflow() {
 
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+    };
 
     provider.push_response(simple_response("needs_action: no. All clear."));
 
     let result = run_sequential(
         &workflow,
-        &file,
-        &provider,
-        &executor,
-        &[],
-        &RunConfig::default(),
+        &ctx,
     )
     .await
     .expect("ok");
@@ -464,6 +493,13 @@ async fn resumable_fresh_run_no_checkpoint() {
     let workflow = make_workflow("pipe", "event", &["a", "b"]);
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+    };
 
     provider.push_response(simple_response("output_a"));
     provider.push_response(simple_response("output_b"));
@@ -474,11 +510,7 @@ async fn resumable_fresh_run_no_checkpoint() {
 
     let result = run_sequential_resumable(
         &workflow,
-        &file,
-        &provider,
-        &executor,
-        &[],
-        &RunConfig::default(),
+        &ctx,
         &state_path,
     )
     .await
@@ -503,6 +535,13 @@ async fn resumable_resumes_after_first_stage() {
     let workflow = make_workflow("pipe", "event", &["a", "b"]);
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+    };
 
     // Only stage b gets a response — if stage a runs it would consume this
     // response and stage b would fail with an empty queue.
@@ -529,11 +568,7 @@ async fn resumable_resumes_after_first_stage() {
 
     let result = run_sequential_resumable(
         &workflow,
-        &file,
-        &provider,
-        &executor,
-        &[],
-        &RunConfig::default(),
+        &ctx,
         &state_path,
     )
     .await
@@ -564,6 +599,13 @@ async fn resumable_resumes_mid_pipeline() {
     let workflow = make_workflow("pipe", "event", &["a", "b", "c", "d"]);
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+    };
 
     // Only c and d get responses — a and b are replayed from the checkpoint.
     provider.push_response(simple_response("output_c"));
@@ -599,11 +641,7 @@ async fn resumable_resumes_mid_pipeline() {
 
     let result = run_sequential_resumable(
         &workflow,
-        &file,
-        &provider,
-        &executor,
-        &[],
-        &RunConfig::default(),
+        &ctx,
         &state_path,
     )
     .await
@@ -629,6 +667,13 @@ async fn resumable_different_workflow_name_restarts_fresh() {
     let workflow = make_workflow("workflow_b", "event", &["a", "b"]);
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+    };
 
     // Both stages must run — the checkpoint is for a different workflow.
     provider.push_response(simple_response("output_a"));
@@ -655,11 +700,7 @@ async fn resumable_different_workflow_name_restarts_fresh() {
 
     let result = run_sequential_resumable(
         &workflow,
-        &file,
-        &provider,
-        &executor,
-        &[],
-        &RunConfig::default(),
+        &ctx,
         &state_path,
     )
     .await
@@ -675,6 +716,13 @@ async fn resumable_conditional_routing_on_resume() {
     let (file, workflow) = make_conditional_workflow();
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+    };
 
     // Triage is in the checkpoint; only escalate and respond need responses.
     provider.push_response(simple_response("Escalated to manager."));
@@ -703,11 +751,7 @@ async fn resumable_conditional_routing_on_resume() {
 
     let result = run_sequential_resumable(
         &workflow,
-        &file,
-        &provider,
-        &executor,
-        &[],
-        &RunConfig::default(),
+        &ctx,
         &state_path,
     )
     .await
@@ -727,6 +771,13 @@ async fn resumable_corrupt_checkpoint_returns_persistence_error() {
     let workflow = make_workflow("pipe", "event", &["a"]);
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+    };
 
     let tmp = NamedTempFile::new().unwrap();
     let state_path = tmp.path().to_path_buf();
@@ -734,11 +785,7 @@ async fn resumable_corrupt_checkpoint_returns_persistence_error() {
 
     let err = run_sequential_resumable(
         &workflow,
-        &file,
-        &provider,
-        &executor,
-        &[],
-        &RunConfig::default(),
+        &ctx,
         &state_path,
     )
     .await
@@ -794,15 +841,18 @@ async fn conditional_route_to_nonexistent_stage_errors() {
 
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+    };
     provider.push_response(simple_response("priority: high"));
 
     let err = run_sequential(
         &workflow,
-        &file,
-        &provider,
-        &executor,
-        &[],
-        &RunConfig::default(),
+        &ctx,
     )
     .await
     .unwrap_err();
@@ -857,16 +907,19 @@ async fn circular_route_returns_error() {
 
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+    };
     provider.push_response(simple_response("go: yes"));
     provider.push_response(simple_response("go: yes"));
 
     let err = run_sequential(
         &workflow,
-        &file,
-        &provider,
-        &executor,
-        &[],
-        &RunConfig::default(),
+        &ctx,
     )
     .await
     .unwrap_err();

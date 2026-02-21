@@ -254,7 +254,7 @@ async fn full_pipeline_trace_summary_is_readable() {
 // ── Workflow integration tests ───────────────────────────────────────────
 
 use rein::ast::{ExecutionMode, RouteRule, Span, Stage, WorkflowDef};
-use rein::runtime::workflow::{run_parallel, run_sequential};
+use rein::runtime::workflow::{WorkflowContext, run_parallel, run_sequential};
 
 fn make_workflow(name: &str, trigger: &str, agents: &[&str]) -> WorkflowDef {
     WorkflowDef {
@@ -285,22 +285,20 @@ async fn integration_sequential_workflow() {
     let workflow = make_workflow("pipe", "ticket_123", &["classifier", "responder"]);
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+    };
 
     provider.push_response(simple_response("Category: billing. Priority: high."));
     provider.push_response(simple_response(
         "Dear customer, we've resolved your billing issue.",
     ));
 
-    let result = run_sequential(
-        &workflow,
-        &file,
-        &provider,
-        &executor,
-        &[],
-        &RunConfig::default(),
-    )
-    .await
-    .expect("ok");
+    let result = run_sequential(&workflow, &ctx).await.expect("ok");
 
     assert_eq!(result.stage_results.len(), 2);
     assert_eq!(result.stage_results[0].agent_name, "classifier");
@@ -319,20 +317,18 @@ async fn integration_parallel_workflow() {
     workflow.mode = ExecutionMode::Parallel;
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+    };
 
     provider.push_response(simple_response("Sentiment: positive"));
     provider.push_response(simple_response("Summary: quarterly results are up"));
 
-    let result = run_parallel(
-        &workflow,
-        &file,
-        &provider,
-        &executor,
-        &[],
-        &RunConfig::default(),
-    )
-    .await
-    .expect("ok");
+    let result = run_parallel(&workflow, &ctx).await.expect("ok");
 
     assert_eq!(result.stage_results.len(), 2);
     assert!(result.final_output.contains("Sentiment"));
