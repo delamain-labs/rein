@@ -228,6 +228,36 @@ pub struct TypeDef {
     pub span: Span,
 }
 
+/// A single arm in a `route on` block.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RouteArm {
+    /// The match pattern: a literal value or `_` for wildcard/default.
+    pub pattern: RoutePattern,
+    /// The step to execute if this arm matches.
+    pub step: StepDef,
+    pub span: Span,
+}
+
+/// A match pattern in a route arm.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RoutePattern {
+    /// Match a specific value.
+    Value(String),
+    /// Wildcard: match anything not matched above.
+    Wildcard,
+}
+
+/// A `route on <expr> { ... }` block for pattern-matched routing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RouteBlock {
+    /// Dot-separated field path to match on (e.g. `classify.category`).
+    pub field_path: String,
+    /// Match arms in order.
+    pub arms: Vec<RouteArm>,
+    pub span: Span,
+}
+
 /// An import declaration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -326,6 +356,8 @@ pub struct WorkflowDef {
     pub stages: Vec<Stage>,
     /// Named step blocks (`step <name> { ... }`).
     pub steps: Vec<StepDef>,
+    /// Route-on blocks for pattern-matched routing.
+    pub route_blocks: Vec<RouteBlock>,
     /// Default execution mode.
     pub mode: ExecutionMode,
     pub span: Span,
@@ -548,6 +580,7 @@ mod tests {
                 },
             ],
             steps: vec![],
+            route_blocks: vec![],
             mode: ExecutionMode::Sequential,
             span: dummy_span(),
         };
@@ -565,6 +598,7 @@ mod tests {
             trigger: "event".to_string(),
             stages: vec![],
             steps: vec![],
+            route_blocks: vec![],
             mode: ExecutionMode::Parallel,
             span: dummy_span(),
         };
@@ -586,6 +620,7 @@ mod tests {
                 trigger: "event".to_string(),
                 stages: vec![],
                 steps: vec![],
+            route_blocks: vec![],
                 mode: ExecutionMode::Sequential,
                 span: dummy_span(),
             }],
@@ -616,6 +651,7 @@ mod tests {
                 },
             ],
             steps: vec![],
+            route_blocks: vec![],
             mode: ExecutionMode::Sequential,
             span: dummy_span(),
         };

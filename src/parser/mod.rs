@@ -637,6 +637,7 @@ impl Parser {
         let mut trigger: Option<String> = None;
         let mut stages: Vec<Stage> = Vec::new();
         let mut steps: Vec<crate::ast::StepDef> = Vec::new();
+        let mut route_blocks: Vec<crate::ast::RouteBlock> = Vec::new();
         let mut seen_trigger = false;
         let mut seen_stages = false;
 
@@ -654,9 +655,9 @@ impl Parser {
                         )
                     })?;
 
-                    if stages.is_empty() && steps.is_empty() {
+                    if stages.is_empty() && steps.is_empty() && route_blocks.is_empty() {
                         return Err(ParseError::new(
-                            format!("workflow '{name}' must have at least one stage or step"),
+                            format!("workflow '{name}' must have at least one stage, step, or route block"),
                             Span::new(start, end),
                         ));
                     }
@@ -666,6 +667,7 @@ impl Parser {
                         trigger,
                         stages,
                         steps,
+                        route_blocks,
                         mode: ExecutionMode::Sequential,
                         span: Span::new(start, end),
                     });
@@ -696,6 +698,9 @@ impl Parser {
                 }
                 TokenKind::Step => {
                     steps.push(self.parse_step()?);
+                }
+                TokenKind::Route => {
+                    route_blocks.push(self.parse_route_block()?);
                 }
                 TokenKind::Eof => {
                     return Err(ParseError::new(
@@ -855,6 +860,68 @@ impl Parser {
         }
     }
 
+    /// Parse a `route on <field_path> { pattern -> step name { ... }, ... }` block.
+    fn parse_route_block(&mut self) -> Result<crate::ast::RouteBlock, ParseError> {
+        let start = self.current_span().start;
+        self.expect(&TokenKind::Route)?;
+        self.expect(&TokenKind::On)?;
+
+        // Parse dot-separated field path (keywords allowed as segments)
+        let (first, _) = self.expect_ident()?;
+        let mut path = first;
+        while *self.peek() == TokenKind::Dot {
+            self.advance(); // .
+            // Allow keywords as path segments
+            let segment = self.expect_ident_or_keyword()?;
+            path.push('.');
+            path.push_str(&segment);
+        }
+
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut arms = Vec::new();
+        loop {
+            self.skip_comments();
+            if *self.peek() == TokenKind::RBrace {
+                break;
+            }
+            let arm_start = self.current_span().start;
+            let pattern = match self.peek().clone() {
+                TokenKind::Underscore => {
+                    self.advance();
+                    crate::ast::RoutePattern::Wildcard
+                }
+                TokenKind::Ident(val) => {
+                    let val = val.clone();
+                    self.advance();
+                    crate::ast::RoutePattern::Value(val)
+                }
+                other => {
+                    return Err(ParseError::new(
+                        format!("expected pattern value or '_', got {other}"),
+                        self.current_span(),
+                    ));
+                }
+            };
+            self.expect(&TokenKind::Arrow)?;
+            let step = self.parse_step()?;
+            let arm_end = self.current_span().start;
+            arms.push(crate::ast::RouteArm {
+                pattern,
+                step,
+                span: Span::new(arm_start, arm_end),
+            });
+        }
+        let end = self.current_span().end;
+        self.expect(&TokenKind::RBrace)?;
+
+        Ok(crate::ast::RouteBlock {
+            field_path: path,
+            arms,
+            span: Span::new(start, end),
+        })
+    }
+
     /// Parse an import declaration.
     ///
     /// Supports:
@@ -924,6 +991,35 @@ impl Parser {
             }
             other => Err(ParseError::new(
                 format!("expected '{{', 'all', or 'from' after 'import', got {other}"),
+                self.current_span(),
+            )),
+        }
+    }
+
+    /// Expect an identifier or keyword token, returning the text.
+    /// Useful in contexts where keywords are valid (e.g. field paths).
+    fn expect_ident_or_keyword(&mut self) -> Result<String, ParseError> {
+        let text = self.peek().to_string();
+        match self.peek() {
+            TokenKind::Ident(_)
+            | TokenKind::Agent
+            | TokenKind::Model
+            | TokenKind::Type
+            | TokenKind::Step
+            | TokenKind::Goal
+            | TokenKind::Tool
+            | TokenKind::Route
+            | TokenKind::On
+            | TokenKind::One
+            | TokenKind::Of
+            | TokenKind::All
+            | TokenKind::From
+            | TokenKind::Import => {
+                self.advance();
+                Ok(text)
+            }
+            other => Err(ParseError::new(
+                format!("expected identifier, got {other}"),
                 self.current_span(),
             )),
         }

@@ -31,6 +31,10 @@ pub enum TokenKind {
     All,
     At,
     Slash,
+    Arrow,
+    Route,
+    On,
+    Underscore,
     // Symbols
     LBrace,
     RBrace,
@@ -96,6 +100,10 @@ impl std::fmt::Display for TokenKind {
             TokenKind::All => write!(f, "all"),
             TokenKind::At => write!(f, "@"),
             TokenKind::Slash => write!(f, "/"),
+            TokenKind::Arrow => write!(f, "->"),
+            TokenKind::Route => write!(f, "route"),
+            TokenKind::On => write!(f, "on"),
+            TokenKind::Underscore => write!(f, "_"),
             TokenKind::DotDot => write!(f, ".."),
             TokenKind::Number(n) => write!(f, "{n}"),
             TokenKind::Ident(s) => write!(f, "{s}"),
@@ -228,6 +236,9 @@ impl<'a> Lexer<'a> {
             "import" => TokenKind::Import,
             "from" => TokenKind::From,
             "all" => TokenKind::All,
+            "route" => TokenKind::Route,
+            "on" => TokenKind::On,
+            "_" => TokenKind::Underscore,
             _ => TokenKind::Ident(word.to_string()),
         };
         Token::new(kind, start, end)
@@ -417,6 +428,10 @@ impl<'a> Lexer<'a> {
                 }
                 Some(b'/') => tokens.push(Token::new(TokenKind::Slash, start, self.pos)),
                 Some(b'@') => tokens.push(Token::new(TokenKind::At, start, self.pos)),
+                Some(b'-') if self.peek() == Some(b'>') => {
+                    self.advance(); // consume '>'
+                    tokens.push(Token::new(TokenKind::Arrow, start, self.pos));
+                }
                 Some(ch) if ch.is_ascii_digit() => {
                     tokens.push(self.read_number(start));
                 }
