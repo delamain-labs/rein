@@ -2014,3 +2014,38 @@ fn key_field_still_works_in_provider() {
     let f = parse_ok(r#"provider openai { key: env("OPENAI_KEY") }"#);
     assert!(f.providers[0].key.is_some());
 }
+
+#[test]
+fn inline_step_shorthand_with_goal() {
+    let f = parse_ok(
+        r#"
+        agent triage { model: "gpt-4o" }
+        workflow support {
+            trigger: new_ticket
+            step classify: triage goal "Classify this ticket"
+        }
+    "#,
+    );
+    assert_eq!(f.workflows[0].steps.len(), 1);
+    let step = &f.workflows[0].steps[0];
+    assert_eq!(step.name, "classify");
+    assert_eq!(step.agent, "triage");
+    assert_eq!(step.goal.as_deref(), Some("Classify this ticket"));
+}
+
+#[test]
+fn inline_step_shorthand_without_goal() {
+    let f = parse_ok(
+        r#"
+        agent triage { model: "gpt-4o" }
+        workflow support {
+            trigger: new_ticket
+            step classify: triage
+        }
+    "#,
+    );
+    let step = &f.workflows[0].steps[0];
+    assert_eq!(step.name, "classify");
+    assert_eq!(step.agent, "triage");
+    assert_eq!(step.goal, None);
+}
