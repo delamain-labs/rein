@@ -7,13 +7,20 @@ use crate::lexer::TokenKind;
 use super::{ParseError, Parser};
 
 impl Parser {
-    /// Parse a `step <name> { agent: <ident> goal: <text> }` block.
+    /// Parse a step: either block form `step <name> { ... }` or inline
+    /// shorthand `step <name>: <agent> goal "<text>"`.
     pub(super) fn parse_step(&mut self) -> Result<StepDef, ParseError> {
         self.skip_comments();
         let start = self.current_span().start;
 
         self.expect(&TokenKind::Step)?;
         let (name, _) = self.expect_ident()?;
+
+        // Inline shorthand: `step name: agent goal "text"`
+        if *self.peek() == TokenKind::Colon {
+            return self.parse_inline_step(name, start);
+        }
+
         self.expect(&TokenKind::LBrace)?;
 
         let mut agent: Option<String> = None;
@@ -104,6 +111,40 @@ impl Parser {
                 }
             }
         }
+    }
+
+    /// Parse inline step shorthand: `step <name>: <agent> goal "<text>"`.
+    /// The `step` keyword and name have already been consumed.
+    fn parse_inline_step(&mut self, name: String, start: usize) -> Result<StepDef, ParseError> {
+        self.expect(&TokenKind::Colon)?;
+        let (agent, _) = self.expect_ident()?;
+
+        let goal = if *self.peek() == TokenKind::Goal {
+            self.advance();
+            let value = self.parse_value_expr()?;
+            Some(match value {
+                ValueExpr::Literal(s) => s,
+                ValueExpr::EnvRef { span, .. } => {
+                    return Err(ParseError::new(
+                        "goal must be a string literal, not env()",
+                        span,
+                    ));
+                }
+            })
+        } else {
+            None
+        };
+
+        let end = self.last_consumed_end;
+        Ok(StepDef {
+            name,
+            agent,
+            goal,
+            output_constraints: Vec::new(),
+            when: None,
+            on_failure: None,
+            span: Span::new(start, end),
+        })
     }
 
     fn parse_step_agent_field(
