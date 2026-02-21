@@ -1227,3 +1227,86 @@ fn parse_type_with_agents() {
     assert_eq!(f.types.len(), 1);
     assert_eq!(f.agents.len(), 1);
 }
+
+// ── import system tests ─────────────────────────────────────────────────
+
+#[test]
+fn parse_named_import() {
+    let f = parse_ok(
+        r#"
+        import { classifier, responder } from "./agents/support.rein"
+        agent classifier { model: openai }
+        agent responder { model: openai }
+    "#,
+    );
+    assert_eq!(f.imports.len(), 1);
+    match &f.imports[0] {
+        crate::ast::ImportDef::Named { names, source, .. } => {
+            assert_eq!(names, &["classifier", "responder"]);
+            assert_eq!(source, "./agents/support.rein");
+        }
+        other => panic!("expected Named import, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_glob_import() {
+    let f = parse_ok(
+        r#"
+        import all from "./agents/"
+    "#,
+    );
+    assert_eq!(f.imports.len(), 1);
+    match &f.imports[0] {
+        crate::ast::ImportDef::Glob { source, .. } => {
+            assert_eq!(source, "./agents/");
+        }
+        other => panic!("expected Glob import, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_registry_import() {
+    let f = parse_ok(
+        r#"
+        import from @rein/support
+    "#,
+    );
+    assert_eq!(f.imports.len(), 1);
+    match &f.imports[0] {
+        crate::ast::ImportDef::Registry { scope, name, .. } => {
+            assert_eq!(scope, "rein");
+            assert_eq!(name, "support");
+        }
+        other => panic!("expected Registry import, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_multiple_imports() {
+    let f = parse_ok(
+        r#"
+        import { bot } from "./bot.rein"
+        import all from "./shared/"
+        import from @rein/stdlib
+        agent bot { model: openai }
+    "#,
+    );
+    assert_eq!(f.imports.len(), 3);
+    assert_eq!(f.agents.len(), 1);
+}
+
+#[test]
+fn parse_import_single_name() {
+    let f = parse_ok(
+        r#"
+        import { classifier } from "./classifier.rein"
+    "#,
+    );
+    match &f.imports[0] {
+        crate::ast::ImportDef::Named { names, .. } => {
+            assert_eq!(names, &["classifier"]);
+        }
+        other => panic!("expected Named import, got {other:?}"),
+    }
+}

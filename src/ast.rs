@@ -228,6 +228,29 @@ pub struct TypeDef {
     pub span: Span,
 }
 
+/// An import declaration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ImportDef {
+    /// Named imports: `import { name1, name2 } from "./path.rein"`.
+    Named {
+        names: Vec<String>,
+        source: String,
+        span: Span,
+    },
+    /// Glob import: `import all from "./dir/"`.
+    Glob {
+        source: String,
+        span: Span,
+    },
+    /// Registry import: `import from @scope/name`.
+    Registry {
+        scope: String,
+        name: String,
+        span: Span,
+    },
+}
+
 /// How a condition is evaluated against agent output.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode", content = "value", rename_all = "snake_case")]
@@ -322,6 +345,7 @@ impl WorkflowDef {
 /// Top-level parsed file — provider, agent, and workflow definitions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReinFile {
+    pub imports: Vec<ImportDef>,
     pub defaults: Option<DefaultsDef>,
     pub providers: Vec<ProviderDef>,
     pub tools: Vec<ToolDef>,
@@ -437,6 +461,7 @@ mod tests {
     #[test]
     fn rein_file_roundtrips_via_json() {
         let file = ReinFile {
+            imports: vec![],
             defaults: None,
             providers: vec![],
             tools: vec![],
@@ -551,6 +576,7 @@ mod tests {
     #[test]
     fn rein_file_with_workflows_roundtrips() {
         let file = ReinFile {
+            imports: vec![],
             defaults: None,
             providers: vec![],
             tools: vec![],
