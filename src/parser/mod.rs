@@ -175,9 +175,29 @@ impl Parser {
     fn expect_ident(&mut self) -> Result<(String, Span), ParseError> {
         self.skip_comments();
         let tok = self.current().clone();
-        match tok.kind {
-            TokenKind::Ident(ref name) => {
+        match &tok.kind {
+            TokenKind::Ident(name) => {
                 let name = name.clone();
+                self.advance();
+                Ok((name, tok.span))
+            }
+            // Contextual keywords that can appear as identifiers
+            TokenKind::Failure
+            | TokenKind::Retry
+            | TokenKind::Then
+            | TokenKind::Exponential
+            | TokenKind::Linear
+            | TokenKind::Fixed
+            | TokenKind::Escalate
+            | TokenKind::One
+            | TokenKind::Of
+            | TokenKind::On
+            | TokenKind::All
+            | TokenKind::From
+            | TokenKind::When
+            | TokenKind::Route
+            | TokenKind::Parallel => {
+                let name = tok.kind.to_string();
                 self.advance();
                 Ok((name, tok.span))
             }
@@ -775,6 +795,7 @@ impl Parser {
         let mut goal: Option<String> = None;
         let mut output_constraints: Vec<(String, TypeExpr)> = Vec::new();
         let mut when: Option<crate::ast::WhenExpr> = None;
+        let mut on_failure: Option<crate::ast::RetryPolicy> = None;
         let mut seen_agent = false;
         let mut seen_goal = false;
 
@@ -798,6 +819,7 @@ impl Parser {
                         goal,
                         output_constraints,
                         when,
+                        on_failure,
                         span: Span::new(start, end),
                     });
                 }
@@ -835,6 +857,15 @@ impl Parser {
                             ));
                         }
                     });
+                }
+                TokenKind::On => {
+                    if on_failure.is_some() {
+                        return Err(ParseError::new(
+                            format!("duplicate 'on failure' in step '{name}'"),
+                            self.current_span(),
+                        ));
+                    }
+                    on_failure = Some(self.parse_retry_policy()?);
                 }
                 TokenKind::When => {
                     if when.is_some() {
@@ -877,6 +908,83 @@ impl Parser {
                 }
             }
         }
+    }
+
+    /// Parse `on failure: retry N strategy then action`.
+    fn parse_retry_policy(&mut self) -> Result<crate::ast::RetryPolicy, ParseError> {
+        self.expect(&TokenKind::On)?;
+        self.expect(&TokenKind::Failure)?;
+        self.expect(&TokenKind::Colon)?;
+        self.expect(&TokenKind::Retry)?;
+
+        // Parse retry count
+        let max_retries = match self.peek().clone() {
+            TokenKind::Number(n) => {
+                let val = n.parse::<u32>().map_err(|_| {
+                    ParseError::new(
+                        format!("invalid retry count: {n}"),
+                        self.current_span(),
+                    )
+                })?;
+                self.advance();
+                val
+            }
+            other => {
+                return Err(ParseError::new(
+                    format!("expected retry count (number), got {other}"),
+                    self.current_span(),
+                ));
+            }
+        };
+
+        // Parse backoff strategy
+        let backoff = match self.peek() {
+            TokenKind::Exponential => {
+                self.advance();
+                crate::ast::BackoffStrategy::Exponential
+            }
+            TokenKind::Linear => {
+                self.advance();
+                crate::ast::BackoffStrategy::Linear
+            }
+            TokenKind::Fixed => {
+                self.advance();
+                crate::ast::BackoffStrategy::Fixed
+            }
+            other => {
+                return Err(ParseError::new(
+                    format!("expected backoff strategy (exponential, linear, fixed), got {other}"),
+                    self.current_span(),
+                ));
+            }
+        };
+
+        self.expect(&TokenKind::Then)?;
+
+        // Parse failure action
+        let then = match self.peek() {
+            TokenKind::Escalate => {
+                self.advance();
+                crate::ast::FailureAction::Escalate
+            }
+            TokenKind::Ident(name) => {
+                let name = name.clone();
+                self.advance();
+                crate::ast::FailureAction::Step(name)
+            }
+            other => {
+                return Err(ParseError::new(
+                    format!("expected failure action (escalate or step name), got {other}"),
+                    self.current_span(),
+                ));
+            }
+        };
+
+        Ok(crate::ast::RetryPolicy {
+            max_retries,
+            backoff,
+            then,
+        })
     }
 
     /// Parse a `when` expression: `field op value [or|and field op value ...]`.
@@ -1030,22 +1138,12 @@ impl Parser {
                 break;
             }
             let arm_start = self.current_span().start;
-            let pattern = match self.peek().clone() {
-                TokenKind::Underscore => {
-                    self.advance();
-                    crate::ast::RoutePattern::Wildcard
-                }
-                TokenKind::Ident(val) => {
-                    let val = val.clone();
-                    self.advance();
-                    crate::ast::RoutePattern::Value(val)
-                }
-                other => {
-                    return Err(ParseError::new(
-                        format!("expected pattern value or '_', got {other}"),
-                        self.current_span(),
-                    ));
-                }
+            let pattern = if *self.peek() == TokenKind::Underscore {
+                self.advance();
+                crate::ast::RoutePattern::Wildcard
+            } else {
+                let (val, _) = self.expect_ident()?;
+                crate::ast::RoutePattern::Value(val)
             };
             self.expect(&TokenKind::Arrow)?;
             let step = self.parse_step()?;
