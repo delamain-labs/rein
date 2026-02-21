@@ -189,6 +189,8 @@ pub struct StepDef {
     pub when: Option<WhenExpr>,
     /// Optional retry policy: `on failure: retry 3 exponential then escalate`.
     pub on_failure: Option<RetryPolicy>,
+    /// Optional fallback step executed when the primary step fails.
+    pub fallback: Option<Box<StepDef>>,
     pub span: Span,
 }
 

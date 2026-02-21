@@ -228,6 +228,7 @@ impl Parser {
             | TokenKind::Is
             | TokenKind::Policy
             | TokenKind::Tier
+            | TokenKind::Fallback
             | TokenKind::Promote => {
                 let name = tok.kind.to_string();
                 self.advance();

@@ -6,6 +6,19 @@ use crate::lexer::TokenKind;
 
 use super::{ParseError, Parser};
 
+/// Accumulator for step block fields during parsing.
+#[derive(Default)]
+struct StepFields {
+    agent: Option<String>,
+    goal: Option<String>,
+    output_constraints: Vec<(String, TypeExpr)>,
+    when: Option<WhenExpr>,
+    on_failure: Option<RetryPolicy>,
+    fallback: Option<Box<StepDef>>,
+    seen_agent: bool,
+    seen_goal: bool,
+}
+
 impl Parser {
     /// Parse a step: either block form `step <name> { ... }` or inline
     /// shorthand `step <name>: <agent> goal "<text>"`.
@@ -22,14 +35,16 @@ impl Parser {
         }
 
         self.expect(&TokenKind::LBrace)?;
+        self.parse_step_block_body(name, start)
+    }
 
-        let mut agent: Option<String> = None;
-        let mut goal: Option<String> = None;
-        let mut output_constraints: Vec<(String, TypeExpr)> = Vec::new();
-        let mut when: Option<WhenExpr> = None;
-        let mut on_failure: Option<RetryPolicy> = None;
-        let mut seen_agent = false;
-        let mut seen_goal = false;
+    /// Parse the body of a block-form step (after the opening `{`).
+    fn parse_step_block_body(
+        &mut self,
+        name: String,
+        start: usize,
+    ) -> Result<StepDef, ParseError> {
+        let mut f = StepFields::default();
 
         loop {
             self.skip_comments();
@@ -37,79 +52,124 @@ impl Parser {
                 TokenKind::RBrace => {
                     let end = self.current_span().end;
                     self.advance();
-
-                    let agent = agent.ok_or_else(|| {
+                    let agent = f.agent.ok_or_else(|| {
                         ParseError::new(
                             format!("step '{name}' is missing required field 'agent'"),
                             Span::new(start, end),
                         )
                     })?;
-
                     return Ok(StepDef {
                         name,
                         agent,
-                        goal,
-                        output_constraints,
-                        when,
-                        on_failure,
+                        goal: f.goal,
+                        output_constraints: f.output_constraints,
+                        when: f.when,
+                        on_failure: f.on_failure,
+                        fallback: f.fallback,
                         span: Span::new(start, end),
                     });
                 }
                 TokenKind::Agent => {
-                    self.parse_step_agent_field(&name, &mut agent, &mut seen_agent)?;
+                    self.parse_step_agent_field(&name, &mut f.agent, &mut f.seen_agent)?;
                 }
                 TokenKind::Goal => {
-                    self.parse_step_goal_field(&name, &mut goal, &mut seen_goal)?;
+                    self.parse_step_goal_field(&name, &mut f.goal, &mut f.seen_goal)?;
                 }
                 TokenKind::On => {
-                    if on_failure.is_some() {
-                        return Err(ParseError::new(
-                            format!("duplicate 'on failure' in step '{name}'"),
-                            self.current_span(),
-                        ));
-                    }
-                    on_failure = Some(self.parse_retry_policy()?);
+                    self.parse_step_on_failure(&name, &mut f.on_failure)?;
                 }
                 TokenKind::When => {
-                    if when.is_some() {
-                        return Err(ParseError::new(
-                            format!("duplicate field 'when' in step '{name}'"),
-                            self.current_span(),
-                        ));
-                    }
-                    self.advance();
-                    self.expect(&TokenKind::Colon)?;
-                    when = Some(self.parse_when_expr()?);
+                    self.parse_step_when(&name, &mut f.when)?;
                 }
-                TokenKind::Ident(ref field_name)
-                    if self.peek_at(1).is_some_and(|t| *t == TokenKind::Colon) =>
-                {
-                    let field_name = field_name.clone();
-                    self.advance(); // consume ident
-                    self.expect(&TokenKind::Colon)?;
-                    if *self.peek() == TokenKind::One {
-                        let type_expr = self.parse_one_of()?;
-                        output_constraints.push((field_name, type_expr));
-                    } else {
-                        return Err(ParseError::new(
-                            format!("unexpected field '{field_name}' in step '{name}'"),
-                            self.current_span(),
-                        ));
-                    }
+                TokenKind::Fallback => {
+                    self.parse_step_fallback(&name, &mut f.fallback)?;
                 }
-                TokenKind::Eof => {
-                    return Err(ParseError::new(
-                        "unexpected end of file: expected `}`",
-                        self.current_span(),
-                    ));
-                }
-                other => {
-                    return Err(ParseError::new(
-                        format!("unexpected token in step '{name}': {other}"),
-                        self.current_span(),
-                    ));
+                _ => {
+                    self.parse_step_field_or_error(&name, &mut f.output_constraints)?;
                 }
             }
+        }
+    }
+
+    fn parse_step_on_failure(
+        &mut self,
+        name: &str,
+        on_failure: &mut Option<RetryPolicy>,
+    ) -> Result<(), ParseError> {
+        if on_failure.is_some() {
+            return Err(ParseError::new(
+                format!("duplicate 'on failure' in step '{name}'"),
+                self.current_span(),
+            ));
+        }
+        *on_failure = Some(self.parse_retry_policy()?);
+        Ok(())
+    }
+
+    fn parse_step_when(
+        &mut self,
+        name: &str,
+        when: &mut Option<WhenExpr>,
+    ) -> Result<(), ParseError> {
+        if when.is_some() {
+            return Err(ParseError::new(
+                format!("duplicate field 'when' in step '{name}'"),
+                self.current_span(),
+            ));
+        }
+        self.advance();
+        self.expect(&TokenKind::Colon)?;
+        *when = Some(self.parse_when_expr()?);
+        Ok(())
+    }
+
+    fn parse_step_fallback(
+        &mut self,
+        name: &str,
+        fallback: &mut Option<Box<StepDef>>,
+    ) -> Result<(), ParseError> {
+        if fallback.is_some() {
+            return Err(ParseError::new(
+                format!("duplicate 'fallback' in step '{name}'"),
+                self.current_span(),
+            ));
+        }
+        self.advance();
+        *fallback = Some(Box::new(self.parse_step()?));
+        Ok(())
+    }
+
+    fn parse_step_field_or_error(
+        &mut self,
+        name: &str,
+        output_constraints: &mut Vec<(String, TypeExpr)>,
+    ) -> Result<(), ParseError> {
+        match self.peek().clone() {
+            TokenKind::Ident(ref field_name)
+                if self.peek_at(1).is_some_and(|t| *t == TokenKind::Colon) =>
+            {
+                let field_name = field_name.clone();
+                self.advance();
+                self.expect(&TokenKind::Colon)?;
+                if *self.peek() == TokenKind::One {
+                    let type_expr = self.parse_one_of()?;
+                    output_constraints.push((field_name, type_expr));
+                    Ok(())
+                } else {
+                    Err(ParseError::new(
+                        format!("unexpected field '{field_name}' in step '{name}'"),
+                        self.current_span(),
+                    ))
+                }
+            }
+            TokenKind::Eof => Err(ParseError::new(
+                "unexpected end of file: expected `}`",
+                self.current_span(),
+            )),
+            other => Err(ParseError::new(
+                format!("unexpected token in step '{name}': {other}"),
+                self.current_span(),
+            )),
         }
     }
 
@@ -143,6 +203,7 @@ impl Parser {
             output_constraints: Vec::new(),
             when: None,
             on_failure: None,
+            fallback: None,
             span: Span::new(start, end),
         })
     }
