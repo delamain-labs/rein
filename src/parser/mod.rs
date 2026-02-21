@@ -612,6 +612,7 @@ impl Parser {
         let mut trigger: Option<String> = None;
         let mut stages: Vec<Stage> = Vec::new();
         let mut steps: Vec<crate::ast::StepDef> = Vec::new();
+        let mut parallel_blocks: Vec<crate::ast::ParallelBlock> = Vec::new();
         let mut seen_trigger = false;
         let mut seen_stages = false;
 
@@ -629,7 +630,7 @@ impl Parser {
                         )
                     })?;
 
-                    if stages.is_empty() && steps.is_empty() {
+                    if stages.is_empty() && steps.is_empty() && parallel_blocks.is_empty() {
                         return Err(ParseError::new(
                             format!("workflow '{name}' must have at least one stage or step"),
                             Span::new(start, end),
@@ -641,6 +642,7 @@ impl Parser {
                         trigger,
                         stages,
                         steps,
+                        parallel_blocks,
                         mode: ExecutionMode::Sequential,
                         span: Span::new(start, end),
                     });
@@ -668,6 +670,9 @@ impl Parser {
                     self.advance();
                     self.expect(&TokenKind::Colon)?;
                     stages = self.parse_stage_list()?;
+                }
+                TokenKind::Parallel => {
+                    parallel_blocks.push(self.parse_parallel_block()?);
                 }
                 TokenKind::Step => {
                     steps.push(self.parse_step()?);
@@ -727,6 +732,52 @@ impl Parser {
     }
 
     /// Parse a `step <name> { agent: <ident> goal: <text> }` block.
+    fn parse_parallel_block(&mut self) -> Result<crate::ast::ParallelBlock, ParseError> {
+        self.skip_comments();
+        let start = self.current_span().start;
+
+        self.expect(&TokenKind::Parallel)?;
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut steps = Vec::new();
+        loop {
+            self.skip_comments();
+            match self.peek().clone() {
+                TokenKind::RBrace => {
+                    let end = self.current_span().end;
+                    self.advance();
+
+                    if steps.is_empty() {
+                        return Err(ParseError::new(
+                            "parallel block must contain at least one step",
+                            Span::new(start, end),
+                        ));
+                    }
+
+                    return Ok(crate::ast::ParallelBlock {
+                        steps,
+                        span: Span::new(start, end),
+                    });
+                }
+                TokenKind::Step => {
+                    steps.push(self.parse_step()?);
+                }
+                TokenKind::Eof => {
+                    return Err(ParseError::new(
+                        "unexpected end of file in parallel block",
+                        self.current_span(),
+                    ));
+                }
+                other => {
+                    return Err(ParseError::new(
+                        format!("expected step or }} in parallel block, got {other}"),
+                        self.current_span(),
+                    ));
+                }
+            }
+        }
+    }
+
     fn parse_step(&mut self) -> Result<crate::ast::StepDef, ParseError> {
         self.skip_comments();
         let start = self.current_span().start;

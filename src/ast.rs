@@ -240,6 +240,13 @@ pub struct StepDef {
     pub span: Span,
 }
 
+/// A parallel group of steps: `parallel { step a {...} step b {...} }`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParallelBlock {
+    pub steps: Vec<StepDef>,
+    pub span: Span,
+}
+
 /// A `workflow <name> { ... }` definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkflowDef {
@@ -250,6 +257,8 @@ pub struct WorkflowDef {
     pub stages: Vec<Stage>,
     /// Named step blocks (`step <name> { ... }`).
     pub steps: Vec<StepDef>,
+    /// Inline parallel blocks containing grouped steps.
+    pub parallel_blocks: Vec<ParallelBlock>,
     /// Default execution mode.
     pub mode: ExecutionMode,
     pub span: Span,
@@ -461,6 +470,7 @@ mod tests {
                 },
             ],
             steps: vec![],
+            parallel_blocks: vec![],
             mode: ExecutionMode::Sequential,
             span: dummy_span(),
         };
@@ -478,6 +488,7 @@ mod tests {
             trigger: "event".to_string(),
             stages: vec![],
             steps: vec![],
+            parallel_blocks: vec![],
             mode: ExecutionMode::Parallel,
             span: dummy_span(),
         };
@@ -498,6 +509,7 @@ mod tests {
                 trigger: "event".to_string(),
                 stages: vec![],
                 steps: vec![],
+                parallel_blocks: vec![],
                 mode: ExecutionMode::Sequential,
                 span: dummy_span(),
             }],

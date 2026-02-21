@@ -535,3 +535,14 @@ fn tool_and_endpoint_keywords() {
     assert_eq!(tokens[3].kind, TokenKind::Endpoint);
     assert_eq!(tokens[4].kind, TokenKind::Colon);
 }
+
+// ── Parallel keyword test ────────────────────────────────────────────────
+
+#[test]
+fn tokenize_parallel_keyword() {
+    let tokens = non_eof(lex_ok("parallel { step }"));
+    assert_eq!(tokens[0].kind, TokenKind::Parallel);
+    assert_eq!(tokens[1].kind, TokenKind::LBrace);
+    assert_eq!(tokens[2].kind, TokenKind::Step);
+    assert_eq!(tokens[3].kind, TokenKind::RBrace);
+}

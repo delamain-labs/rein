@@ -1032,3 +1032,104 @@ fn parse_multiple_tools() {
     );
     assert_eq!(f.tools.len(), 2);
 }
+
+// ── Inline parallel block tests ──────────────────────────────────────────
+
+#[test]
+fn parse_parallel_block_with_two_steps() {
+    let f = parse_ok(
+        r#"
+        agent bot {
+            model: anthropic
+            can [tools.read]
+            budget: $1 per request
+        }
+
+        workflow flow {
+            trigger: event
+            parallel {
+                step a { agent: bot goal: "do A" }
+                step b { agent: bot goal: "do B" }
+            }
+        }
+    "#,
+    );
+    let wf = &f.workflows[0];
+    assert_eq!(wf.parallel_blocks.len(), 1);
+    assert_eq!(wf.parallel_blocks[0].steps.len(), 2);
+    assert_eq!(wf.parallel_blocks[0].steps[0].name, "a");
+    assert_eq!(wf.parallel_blocks[0].steps[1].name, "b");
+}
+
+#[test]
+fn parse_parallel_block_mixed_with_regular_steps() {
+    let f = parse_ok(
+        r#"
+        agent bot {
+            model: anthropic
+            can [tools.read]
+            budget: $1 per request
+        }
+
+        workflow flow {
+            trigger: event
+            step first { agent: bot goal: "first" }
+            parallel {
+                step a { agent: bot goal: "do A" }
+                step b { agent: bot goal: "do B" }
+            }
+            step last { agent: bot goal: "last" }
+        }
+    "#,
+    );
+    let wf = &f.workflows[0];
+    assert_eq!(wf.steps.len(), 2);
+    assert_eq!(wf.parallel_blocks.len(), 1);
+    assert_eq!(wf.parallel_blocks[0].steps.len(), 2);
+}
+
+#[test]
+fn parse_multiple_parallel_blocks() {
+    let f = parse_ok(
+        r#"
+        agent bot {
+            model: anthropic
+            can [tools.read]
+            budget: $1 per request
+        }
+
+        workflow flow {
+            trigger: event
+            parallel {
+                step a { agent: bot goal: "A" }
+                step b { agent: bot goal: "B" }
+            }
+            parallel {
+                step c { agent: bot goal: "C" }
+                step d { agent: bot goal: "D" }
+            }
+        }
+    "#,
+    );
+    let wf = &f.workflows[0];
+    assert_eq!(wf.parallel_blocks.len(), 2);
+    assert_eq!(wf.parallel_blocks[0].steps.len(), 2);
+    assert_eq!(wf.parallel_blocks[1].steps.len(), 2);
+}
+
+#[test]
+fn parse_parallel_block_empty_fails() {
+    let src = r#"
+        agent bot {
+            model: anthropic
+            can [tools.read]
+            budget: $1 per request
+        }
+        workflow flow {
+            trigger: event
+            parallel {}
+        }
+    "#;
+    let result = crate::parser::parse(src);
+    assert!(result.is_err());
+}
