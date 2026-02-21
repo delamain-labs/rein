@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 mod agent;
 mod import;
+mod pipe;
 mod policy;
 mod provider;
 mod types;
@@ -12,6 +13,7 @@ mod workflow;
 
 pub use agent::*;
 pub use import::*;
+pub use pipe::*;
 pub use policy::*;
 pub use provider::*;
 pub use types::*;

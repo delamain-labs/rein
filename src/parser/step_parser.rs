@@ -1,6 +1,6 @@
 use crate::ast::{
-    BackoffStrategy, CompareOp, FailureAction, RetryPolicy, Span, StepDef, TypeExpr, ValueExpr,
-    WhenComparison, WhenExpr, WhenValue,
+    BackoffStrategy, CompareOp, FailureAction, PipeExpr, RetryPolicy, Span, StepDef, TypeExpr,
+    ValueExpr, WhenComparison, WhenExpr, WhenValue,
 };
 use crate::lexer::TokenKind;
 
@@ -11,6 +11,7 @@ use super::{ParseError, Parser};
 struct StepFields {
     agent: Option<String>,
     goal: Option<String>,
+    input: Option<PipeExpr>,
     output_constraints: Vec<(String, TypeExpr)>,
     when: Option<WhenExpr>,
     on_failure: Option<RetryPolicy>,
@@ -62,6 +63,7 @@ impl Parser {
                         name,
                         agent,
                         goal: f.goal,
+                        input: f.input,
                         output_constraints: f.output_constraints,
                         when: f.when,
                         on_failure: f.on_failure,
@@ -85,7 +87,7 @@ impl Parser {
                     self.parse_step_fallback(&name, &mut f.fallback)?;
                 }
                 _ => {
-                    self.parse_step_field_or_error(&name, &mut f.output_constraints)?;
+                    self.parse_step_field_or_error(&name, &mut f)?;
                 }
             }
         }
@@ -142,18 +144,30 @@ impl Parser {
     fn parse_step_field_or_error(
         &mut self,
         name: &str,
-        output_constraints: &mut Vec<(String, TypeExpr)>,
+        fields: &mut StepFields,
     ) -> Result<(), ParseError> {
         match self.peek().clone() {
             TokenKind::Ident(ref field_name)
                 if self.peek_at(1).is_some_and(|t| *t == TokenKind::Colon) =>
             {
                 let field_name = field_name.clone();
+                if field_name == "input" {
+                    if fields.input.is_some() {
+                        return Err(ParseError::new(
+                            format!("duplicate field 'input' in step '{name}'"),
+                            self.current_span(),
+                        ));
+                    }
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    fields.input = Some(self.parse_pipe_expr()?);
+                    return Ok(());
+                }
                 self.advance();
                 self.expect(&TokenKind::Colon)?;
                 if *self.peek() == TokenKind::One {
                     let type_expr = self.parse_one_of()?;
-                    output_constraints.push((field_name, type_expr));
+                    fields.output_constraints.push((field_name, type_expr));
                     Ok(())
                 } else {
                     Err(ParseError::new(
@@ -200,6 +214,7 @@ impl Parser {
             name,
             agent,
             goal,
+            input: None,
             output_constraints: Vec::new(),
             when: None,
             on_failure: None,
