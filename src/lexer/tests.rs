@@ -535,3 +535,29 @@ fn tool_and_endpoint_keywords() {
     assert_eq!(tokens[3].kind, TokenKind::Endpoint);
     assert_eq!(tokens[4].kind, TokenKind::Colon);
 }
+
+#[test]
+fn arrow_ascii() {
+    let tokens = non_eof(lex_ok("a -> b"));
+    assert_eq!(tokens[1].kind, TokenKind::Arrow);
+}
+
+#[test]
+fn arrow_unicode() {
+    let tokens = non_eof(lex_ok("a → b"));
+    assert_eq!(tokens[1].kind, TokenKind::Arrow);
+}
+
+#[test]
+fn underscore_wildcard() {
+    let tokens = non_eof(lex_ok("_ -> x"));
+    assert_eq!(tokens[0].kind, TokenKind::Underscore);
+    assert_eq!(tokens[1].kind, TokenKind::Arrow);
+}
+
+#[test]
+fn route_on_keywords() {
+    let tokens = non_eof(lex_ok("route on"));
+    assert_eq!(tokens[0].kind, TokenKind::Route);
+    assert_eq!(tokens[1].kind, TokenKind::On);
+}

@@ -237,6 +237,8 @@ pub struct StepDef {
     pub agent: String,
     /// Natural language goal describing what the step should accomplish.
     pub goal: Option<String>,
+    /// Optional condition that must be true for this step to execute.
+    pub when: Option<WhenExpr>,
     pub span: Span,
 }
 
@@ -250,8 +252,76 @@ pub struct WorkflowDef {
     pub stages: Vec<Stage>,
     /// Named step blocks (`step <name> { ... }`).
     pub steps: Vec<StepDef>,
+    /// Route-on blocks for conditional branching.
+    pub route_ons: Vec<RouteOnDef>,
     /// Default execution mode.
     pub mode: ExecutionMode,
+    pub span: Span,
+}
+
+// ---------------------------------------------------------------------------
+// Route-on types
+// ---------------------------------------------------------------------------
+
+/// A `route on <expr> { value -> target }` block.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RouteOnDef {
+    pub expr: String,
+    pub branches: Vec<RouteBranch>,
+    pub span: Span,
+}
+
+/// A single branch: `billing -> billing_agent` or `_ -> fallback`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RouteBranch {
+    pub pattern: String,
+    pub target: String,
+    pub span: Span,
+}
+
+// ---------------------------------------------------------------------------
+// When expression types
+// ---------------------------------------------------------------------------
+
+/// A comparison operator in a `when` expression.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompareOp {
+    LessThan,
+    GreaterThan,
+}
+
+/// A threshold value in a `when` comparison.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ThresholdValue {
+    /// A percentage (e.g. `70%`).
+    Percent { value: u64 },
+    /// A monetary amount (e.g. `$50`).
+    Currency { amount: u64, currency: String },
+}
+
+/// A single comparison: `field op threshold`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Comparison {
+    pub field: String,
+    pub op: CompareOp,
+    pub threshold: ThresholdValue,
+    pub span: Span,
+}
+
+/// A logical operator joining comparisons.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LogicOp {
+    And,
+    Or,
+}
+
+/// A `when` expression: one or more comparisons joined by `and`/`or`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WhenExpr {
+    pub conditions: Vec<(Option<LogicOp>, Comparison)>,
     pub span: Span,
 }
 
@@ -461,6 +531,7 @@ mod tests {
                 },
             ],
             steps: vec![],
+            route_ons: vec![],
             mode: ExecutionMode::Sequential,
             span: dummy_span(),
         };
@@ -478,6 +549,7 @@ mod tests {
             trigger: "event".to_string(),
             stages: vec![],
             steps: vec![],
+            route_ons: vec![],
             mode: ExecutionMode::Parallel,
             span: dummy_span(),
         };
@@ -498,6 +570,7 @@ mod tests {
                 trigger: "event".to_string(),
                 stages: vec![],
                 steps: vec![],
+                route_ons: vec![],
                 mode: ExecutionMode::Sequential,
                 span: dummy_span(),
             }],

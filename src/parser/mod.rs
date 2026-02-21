@@ -612,6 +612,7 @@ impl Parser {
         let mut trigger: Option<String> = None;
         let mut stages: Vec<Stage> = Vec::new();
         let mut steps: Vec<crate::ast::StepDef> = Vec::new();
+        let mut route_ons: Vec<crate::ast::RouteOnDef> = Vec::new();
         let mut seen_trigger = false;
         let mut seen_stages = false;
 
@@ -629,9 +630,11 @@ impl Parser {
                         )
                     })?;
 
-                    if stages.is_empty() && steps.is_empty() {
+                    if stages.is_empty() && steps.is_empty() && route_ons.is_empty() {
                         return Err(ParseError::new(
-                            format!("workflow '{name}' must have at least one stage or step"),
+                            format!(
+                                "workflow '{name}' must have at least one stage, step, or route on"
+                            ),
                             Span::new(start, end),
                         ));
                     }
@@ -641,6 +644,7 @@ impl Parser {
                         trigger,
                         stages,
                         steps,
+                        route_ons,
                         mode: ExecutionMode::Sequential,
                         span: Span::new(start, end),
                     });
@@ -671,6 +675,9 @@ impl Parser {
                 }
                 TokenKind::Step => {
                     steps.push(self.parse_step()?);
+                }
+                TokenKind::Route => {
+                    route_ons.push(self.parse_route_on()?);
                 }
                 TokenKind::Eof => {
                     return Err(ParseError::new(
@@ -737,8 +744,10 @@ impl Parser {
 
         let mut agent: Option<String> = None;
         let mut goal: Option<String> = None;
+        let mut when: Option<crate::ast::WhenExpr> = None;
         let mut seen_agent = false;
         let mut seen_goal = false;
+        let mut seen_when = false;
 
         loop {
             self.skip_comments();
@@ -758,6 +767,7 @@ impl Parser {
                         name,
                         agent,
                         goal,
+                        when,
                         span: Span::new(start, end),
                     });
                 }
@@ -795,6 +805,18 @@ impl Parser {
                             ));
                         }
                     });
+                }
+                TokenKind::When => {
+                    if seen_when {
+                        return Err(ParseError::new(
+                            format!("duplicate field 'when' in step '{name}'"),
+                            self.current_span(),
+                        ));
+                    }
+                    seen_when = true;
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    when = Some(self.parse_when_expr()?);
                 }
                 TokenKind::Eof => {
                     return Err(ParseError::new(
@@ -904,6 +926,296 @@ impl Parser {
     }
     /// Parse a trigger expression: either a string literal or a sequence of
     /// identifiers (e.g., `new ticket in zendesk`).
+    /// Parse a `when` expression: `field < 70% or field > $50`.
+    fn parse_when_expr(&mut self) -> Result<crate::ast::WhenExpr, ParseError> {
+        let start = self.current_span().start;
+        let mut conditions = Vec::new();
+
+        // First comparison (no leading logic op)
+        let comp = self.parse_comparison()?;
+        conditions.push((None, comp));
+
+        // Subsequent comparisons joined by `and`/`or`
+        loop {
+            self.skip_comments();
+            match self.peek().clone() {
+                TokenKind::And => {
+                    self.advance();
+                    let comp = self.parse_comparison()?;
+                    conditions.push((Some(crate::ast::LogicOp::And), comp));
+                }
+                TokenKind::Or => {
+                    self.advance();
+                    let comp = self.parse_comparison()?;
+                    conditions.push((Some(crate::ast::LogicOp::Or), comp));
+                }
+                _ => break,
+            }
+        }
+
+        let end = self.last_consumed_end;
+        Ok(crate::ast::WhenExpr {
+            conditions,
+            span: Span::new(start, end),
+        })
+    }
+
+    /// Parse a single comparison: `field < threshold` or `field > threshold`.
+    fn parse_comparison(&mut self) -> Result<crate::ast::Comparison, ParseError> {
+        self.skip_comments();
+        let start = self.current_span().start;
+
+        // Field: dotted identifier (e.g. `confidence` or `step.refund`)
+        let mut field_parts = Vec::new();
+        let (first, _) = self.expect_ident()?;
+        field_parts.push(first);
+        while self.peek() == &TokenKind::Dot {
+            self.advance();
+            let (part, _) = self.expect_ident()?;
+            field_parts.push(part);
+        }
+        let field = field_parts.join(".");
+
+        // Operator
+        self.skip_comments();
+        let op = match self.peek().clone() {
+            TokenKind::LessThan => {
+                self.advance();
+                crate::ast::CompareOp::LessThan
+            }
+            TokenKind::GreaterThan => {
+                self.advance();
+                crate::ast::CompareOp::GreaterThan
+            }
+            other => {
+                return Err(ParseError::new(
+                    format!("expected '<' or '>' in when expression, got {other}"),
+                    self.current_span(),
+                ));
+            }
+        };
+
+        // Threshold: percentage or currency
+        self.skip_comments();
+        let tok = self.current().clone();
+        let threshold = match &tok.kind {
+            TokenKind::Percent(value) => {
+                let value = *value;
+                self.advance();
+                crate::ast::ThresholdValue::Percent { value }
+            }
+            TokenKind::Currency { amount, symbol } => {
+                let amount = *amount;
+                let currency = match symbol {
+                    '€' => "EUR",
+                    '£' => "GBP",
+                    '¥' => "JPY",
+                    _ => "USD",
+                }
+                .to_string();
+                self.advance();
+                crate::ast::ThresholdValue::Currency { amount, currency }
+            }
+            other => {
+                return Err(ParseError::new(
+                    format!(
+                        "expected percentage or currency amount in when expression, got {other}"
+                    ),
+                    tok.span,
+                ));
+            }
+        };
+
+        let end = self.last_consumed_end;
+        Ok(crate::ast::Comparison {
+            field,
+            op,
+            threshold,
+            span: Span::new(start, end),
+        })
+    }
+
+    fn parse_route_on(&mut self) -> Result<crate::ast::RouteOnDef, ParseError> {
+        let start = self.current_span().start;
+        self.expect(&TokenKind::Route)?;
+        self.expect(&TokenKind::On)?;
+
+        // Parse dotted expression (e.g., `classify.category` or `step.output`)
+        let mut expr_parts = Vec::new();
+        loop {
+            self.skip_comments();
+            match self.peek().clone() {
+                TokenKind::Ident(word) => {
+                    expr_parts.push(word);
+                    self.advance();
+                    if self.peek() == &TokenKind::Dot {
+                        expr_parts.push(".".to_string());
+                        self.advance();
+                    }
+                }
+                // Allow keywords as expression parts (e.g., `step.output`)
+                ref tok if self.peek() != &TokenKind::LBrace && self.peek() != &TokenKind::Eof => {
+                    let word = tok.to_string();
+                    if self.tokens.get(self.pos + 1).map(|t| &t.kind) == Some(&TokenKind::Dot)
+                        || !expr_parts.is_empty()
+                    {
+                        expr_parts.push(word);
+                        self.advance();
+                        if self.peek() == &TokenKind::Dot {
+                            expr_parts.push(".".to_string());
+                            self.advance();
+                        }
+                    } else {
+                        return Err(ParseError::new(
+                            format!("expected expression or '{{' in route on, got {tok}"),
+                            self.current_span(),
+                        ));
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        if expr_parts.is_empty() {
+            return Err(ParseError::new(
+                "route on requires an expression",
+                self.current_span(),
+            ));
+        }
+
+        let expr = expr_parts.join("");
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut branches = Vec::new();
+        loop {
+            self.skip_comments();
+            match self.peek().clone() {
+                TokenKind::RBrace => {
+                    let end = self.current_span().end;
+                    self.advance();
+                    return Ok(crate::ast::RouteOnDef {
+                        expr,
+                        branches,
+                        span: Span::new(start, end),
+                    });
+                }
+                TokenKind::Ident(_) | TokenKind::Underscore => {
+                    branches.push(self.parse_route_branch()?);
+                }
+                TokenKind::Eof => {
+                    return Err(ParseError::new(
+                        "unexpected end of file in route on block",
+                        self.current_span(),
+                    ));
+                }
+                other => {
+                    return Err(ParseError::new(
+                        format!("expected branch or '}}' in route on, got {other}"),
+                        self.current_span(),
+                    ));
+                }
+            }
+        }
+    }
+
+    fn parse_route_branch(&mut self) -> Result<crate::ast::RouteBranch, ParseError> {
+        let start = self.current_span().start;
+
+        let pattern = match self.peek().clone() {
+            TokenKind::Underscore => {
+                self.advance();
+                "_".to_string()
+            }
+            TokenKind::Ident(name) => {
+                self.advance();
+                name
+            }
+            other => {
+                return Err(ParseError::new(
+                    format!("expected branch pattern, got {other}"),
+                    self.current_span(),
+                ));
+            }
+        };
+
+        self.expect(&TokenKind::Arrow)?;
+
+        // Target: idents and keywords, but stop if the NEXT word-like token
+        // is followed by Arrow (that means it's the start of the next branch)
+        let mut target_parts = Vec::new();
+        loop {
+            self.skip_comments();
+            if let Some(word) = self.current_word() {
+                // Lookahead: if the token after this is Arrow,
+                // this word is the next branch's pattern, not our target
+                if !target_parts.is_empty() && self.is_next_arrow() {
+                    break;
+                }
+                target_parts.push(word);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        if target_parts.is_empty() {
+            return Err(ParseError::new(
+                format!("expected target after '->' in branch '{pattern}'"),
+                self.current_span(),
+            ));
+        }
+
+        let end = self.last_consumed_end;
+        Ok(crate::ast::RouteBranch {
+            pattern,
+            target: target_parts.join(" "),
+            span: Span::new(start, end),
+        })
+    }
+
+    /// If the current token is a word-like token (identifier or keyword),
+    /// return its string representation. Used in contexts where keywords
+    /// can appear as plain words (e.g. route branch targets).
+    fn current_word(&self) -> Option<String> {
+        match &self.current().kind {
+            TokenKind::Ident(s) => Some(s.clone()),
+            TokenKind::Agent => Some("agent".to_string()),
+            TokenKind::Can => Some("can".to_string()),
+            TokenKind::Cannot => Some("cannot".to_string()),
+            TokenKind::Model => Some("model".to_string()),
+            TokenKind::Budget => Some("budget".to_string()),
+            TokenKind::Per => Some("per".to_string()),
+            TokenKind::Up => Some("up".to_string()),
+            TokenKind::To => Some("to".to_string()),
+            TokenKind::Workflow => Some("workflow".to_string()),
+            TokenKind::Trigger => Some("trigger".to_string()),
+            TokenKind::Stages => Some("stages".to_string()),
+            TokenKind::Provider => Some("provider".to_string()),
+            TokenKind::Key => Some("key".to_string()),
+            TokenKind::Step => Some("step".to_string()),
+            TokenKind::Goal => Some("goal".to_string()),
+            TokenKind::Tool => Some("tool".to_string()),
+            TokenKind::Endpoint => Some("endpoint".to_string()),
+            TokenKind::Guardrails => Some("guardrails".to_string()),
+            TokenKind::Defaults => Some("defaults".to_string()),
+            TokenKind::Route => Some("route".to_string()),
+            TokenKind::On => Some("on".to_string()),
+            TokenKind::When => Some("when".to_string()),
+            TokenKind::And => Some("and".to_string()),
+            TokenKind::Or => Some("or".to_string()),
+            _ => None,
+        }
+    }
+
+    /// Peek two tokens ahead: is the token after the current one an Arrow?
+    fn is_next_arrow(&self) -> bool {
+        if self.pos + 1 < self.tokens.len() {
+            self.tokens[self.pos + 1].kind == TokenKind::Arrow
+        } else {
+            false
+        }
+    }
+
     fn parse_trigger_expr(&mut self) -> Result<String, ParseError> {
         self.skip_comments();
         match self.peek().clone() {

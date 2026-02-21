@@ -23,7 +23,16 @@ pub enum TokenKind {
     Endpoint,
     Guardrails,
     Defaults,
+    Route,
+    On,
+    When,
+    And,
+    Or,
     // Symbols
+    Arrow,
+    LessThan,
+    GreaterThan,
+    Underscore,
     LBrace,
     RBrace,
     LBracket,
@@ -41,6 +50,8 @@ pub enum TokenKind {
         symbol: char,
         amount: u64,
     },
+    /// A percentage value (e.g. `70%`). Stored as integer (70 = 70%).
+    Percent(u64),
     // Trivia
     Comment,
     Eof,
@@ -77,10 +88,20 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Endpoint => write!(f, "endpoint"),
             TokenKind::Guardrails => write!(f, "guardrails"),
             TokenKind::Defaults => write!(f, "defaults"),
+            TokenKind::Route => write!(f, "route"),
+            TokenKind::On => write!(f, "on"),
+            TokenKind::When => write!(f, "when"),
+            TokenKind::And => write!(f, "and"),
+            TokenKind::Or => write!(f, "or"),
+            TokenKind::Arrow => write!(f, "->"),
+            TokenKind::LessThan => write!(f, "<"),
+            TokenKind::GreaterThan => write!(f, ">"),
+            TokenKind::Underscore => write!(f, "_"),
             TokenKind::Ident(s) => write!(f, "{s}"),
             TokenKind::Currency { symbol, amount } => {
                 write!(f, "{symbol}{}.{:02}", amount / 100, amount % 100)
             }
+            TokenKind::Percent(value) => write!(f, "{value}%"),
             TokenKind::StringLiteral(s) => write!(f, "\"{s}\""),
             TokenKind::Comment => write!(f, "comment"),
             TokenKind::Eof => write!(f, "end of file"),
@@ -201,6 +222,12 @@ impl<'a> Lexer<'a> {
             "endpoint" => TokenKind::Endpoint,
             "guardrails" => TokenKind::Guardrails,
             "defaults" => TokenKind::Defaults,
+            "route" => TokenKind::Route,
+            "on" => TokenKind::On,
+            "when" => TokenKind::When,
+            "and" => TokenKind::And,
+            "or" => TokenKind::Or,
+            "_" => TokenKind::Underscore,
             _ => TokenKind::Ident(word.to_string()),
         };
         Token::new(kind, start, end)
@@ -285,6 +312,29 @@ impl<'a> Lexer<'a> {
         ))
     }
 
+    fn read_number(&mut self, start: usize) -> Result<Token, LexError> {
+        // First digit already consumed by advance() in run()
+        while matches!(self.peek(), Some(b'0'..=b'9')) {
+            self.advance();
+        }
+
+        // Check for '%' suffix → Percent token
+        if self.peek() == Some(b'%') {
+            self.advance();
+            let num_str = std::str::from_utf8(&self.src[start..self.pos - 1]).unwrap();
+            let value: u64 = num_str.parse().map_err(|_| LexError {
+                message: format!("invalid percentage: '{num_str}%'"),
+                span: Span::new(start, self.pos),
+            })?;
+            return Ok(Token::new(TokenKind::Percent(value), start, self.pos));
+        }
+
+        Err(LexError {
+            message: "bare numbers are not allowed; use a currency symbol (e.g. $50) or percentage (e.g. 70%)".to_string(),
+            span: Span::new(start, self.pos),
+        })
+    }
+
     fn read_string(&mut self, start: usize) -> Result<Token, LexError> {
         // Opening '"' already consumed; collect content until closing '"'.
         let mut value = String::new();
@@ -354,6 +404,12 @@ impl<'a> Lexer<'a> {
                 Some(b',') => tokens.push(Token::new(TokenKind::Comma, start, self.pos)),
                 Some(b'"') => tokens.push(self.read_string(start)?),
                 Some(b'$') => tokens.push(self.read_currency('$', start)?),
+                Some(b'<') => tokens.push(Token::new(TokenKind::LessThan, start, self.pos)),
+                Some(b'>') => tokens.push(Token::new(TokenKind::GreaterThan, start, self.pos)),
+                Some(b'-') if self.peek() == Some(b'>') => {
+                    self.advance();
+                    tokens.push(Token::new(TokenKind::Arrow, start, self.pos));
+                }
                 Some(b'#') => {
                     tokens.push(self.skip_line_comment(start));
                 }
@@ -365,8 +421,21 @@ impl<'a> Lexer<'a> {
                     self.advance(); // '*'
                     tokens.push(self.skip_block_comment(start)?);
                 }
+                Some(ch) if ch.is_ascii_digit() => {
+                    tokens.push(self.read_number(start)?);
+                }
                 Some(ch) if ch.is_ascii_alphabetic() || ch == b'_' => {
                     tokens.push(self.read_ident(start));
+                }
+                // → arrow (E2 86 92)
+                Some(0xE2)
+                    if self.pos + 1 < self.src.len()
+                        && self.src[self.pos] == 0x86
+                        && self.src[self.pos + 1] == 0x92 =>
+                {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token::new(TokenKind::Arrow, start, self.pos));
                 }
                 // Multi-byte currency symbols: £ (C2 A3), ¥ (C2 A5), € (E2 82 AC)
                 Some(0xC2) if matches!(self.peek(), Some(0xA3 | 0xA5)) => {

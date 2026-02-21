@@ -270,6 +270,7 @@ fn make_workflow(name: &str, trigger: &str, agents: &[&str]) -> WorkflowDef {
             })
             .collect(),
         steps: vec![],
+        route_ons: vec![],
         mode: ExecutionMode::Sequential,
         span: Span::new(0, 1),
     }

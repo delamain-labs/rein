@@ -508,6 +508,89 @@ fn parse_workflow_trigger_single_word() {
 }
 
 #[test]
+fn parse_route_on_basic() {
+    let f = parse_ok(
+        r#"
+        agent billing { model: openai }
+        agent tech { model: openai }
+        agent fallback { model: openai }
+        workflow pipe {
+            trigger: event
+            route on classify.category {
+                billing -> billing
+                technical -> tech
+                _ -> fallback
+            }
+        }
+    "#,
+    );
+    let route = &f.workflows[0].route_ons[0];
+    assert_eq!(route.expr, "classify.category");
+    assert_eq!(route.branches.len(), 3);
+    assert_eq!(route.branches[0].pattern, "billing");
+    assert_eq!(route.branches[0].target, "billing");
+    assert_eq!(route.branches[1].pattern, "technical");
+    assert_eq!(route.branches[1].target, "tech");
+    assert_eq!(route.branches[2].pattern, "_");
+    assert_eq!(route.branches[2].target, "fallback");
+}
+
+#[test]
+fn parse_route_on_unicode_arrow() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow pipe {
+            trigger: event
+            route on step.output {
+                yes → a
+                _ → a
+            }
+        }
+    "#,
+    );
+    assert_eq!(f.workflows[0].route_ons[0].branches.len(), 2);
+}
+
+#[test]
+fn parse_route_on_multi_word_target() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow pipe {
+            trigger: event
+            route on step.result {
+                fail -> escalate to human
+                _ -> a
+            }
+        }
+    "#,
+    );
+    assert_eq!(
+        f.workflows[0].route_ons[0].branches[0].target,
+        "escalate to human"
+    );
+}
+
+#[test]
+fn parse_route_on_as_only_content() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow pipe {
+            trigger: event
+            route on x.y {
+                _ -> a
+            }
+        }
+    "#,
+    );
+    assert!(f.workflows[0].stages.is_empty());
+    assert!(f.workflows[0].steps.is_empty());
+    assert_eq!(f.workflows[0].route_ons.len(), 1);
+}
+
+#[test]
 fn parse_workflow_missing_trigger_errors() {
     let err = parse_err(
         r#"
