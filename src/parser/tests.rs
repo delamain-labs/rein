@@ -1032,3 +1032,97 @@ fn parse_multiple_tools() {
     );
     assert_eq!(f.tools.len(), 2);
 }
+
+// ── one of union type tests ─────────────────────────────────────────────
+
+#[test]
+fn parse_step_with_one_of_constraint() {
+    let f = parse_ok(
+        r#"
+        agent classifier { model: openai }
+        workflow support {
+            trigger: ticket
+            step classify {
+                agent: classifier
+                goal: "Classify the ticket"
+                category: one of [billing, technical, general]
+            }
+        }
+    "#,
+    );
+    let wf = &f.workflows[0];
+    let step = &wf.steps[0];
+    assert_eq!(step.output_constraints.len(), 1);
+    let (name, type_expr) = &step.output_constraints[0];
+    assert_eq!(name, "category");
+    match type_expr {
+        crate::ast::TypeExpr::OneOf { variants, .. } => {
+            assert_eq!(variants, &["billing", "technical", "general"]);
+        }
+    }
+}
+
+#[test]
+fn parse_step_with_multiple_one_of_constraints() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step s {
+                agent: a
+                category: one of [a, b]
+                priority: one of [low, medium, high]
+            }
+        }
+    "#,
+    );
+    let step = &f.workflows[0].steps[0];
+    assert_eq!(step.output_constraints.len(), 2);
+    assert_eq!(step.output_constraints[0].0, "category");
+    assert_eq!(step.output_constraints[1].0, "priority");
+}
+
+#[test]
+fn parse_one_of_empty_variants_errors() {
+    let err = parse_err(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step s {
+                agent: a
+                category: one of []
+            }
+        }
+    "#,
+    );
+    assert!(
+        err.message.contains("at least one"),
+        "got: {}",
+        err.message
+    );
+}
+
+#[test]
+fn parse_one_of_trailing_comma() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step s {
+                agent: a
+                status: one of [open, closed,]
+            }
+        }
+    "#,
+    );
+    let step = &f.workflows[0].steps[0];
+    let (_, type_expr) = &step.output_constraints[0];
+    match type_expr {
+        crate::ast::TypeExpr::OneOf { variants, .. } => {
+            assert_eq!(variants, &["open", "closed"]);
+        }
+    }
+}

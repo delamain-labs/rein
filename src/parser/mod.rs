@@ -1,7 +1,7 @@
 use crate::ast::{
     AgentDef, Budget, Capability, Constraint, DefaultsDef, ExecutionMode, GuardrailRule,
     GuardrailSection, GuardrailsDef, ProviderDef, ReinFile, RouteRule, Span, Stage, ToolDef,
-    ValueExpr, WorkflowDef,
+    TypeExpr, ValueExpr, WorkflowDef,
 };
 use crate::lexer::{Token, TokenKind, tokenize};
 
@@ -66,6 +66,24 @@ impl Parser {
     /// Peek at current kind without consuming.
     fn peek(&self) -> &TokenKind {
         &self.current().kind
+    }
+
+    /// Peek at a token at `offset` positions ahead (skipping comments).
+    fn peek_at(&self, offset: usize) -> Option<&TokenKind> {
+        let mut pos = self.pos;
+        let mut seen = 0;
+        while pos < self.tokens.len() {
+            if self.tokens[pos].kind == TokenKind::Comment {
+                pos += 1;
+                continue;
+            }
+            if seen == offset {
+                return Some(&self.tokens[pos].kind);
+            }
+            seen += 1;
+            pos += 1;
+        }
+        None
     }
 
     /// Advance past comment tokens, returning the next meaningful token.
@@ -737,6 +755,7 @@ impl Parser {
 
         let mut agent: Option<String> = None;
         let mut goal: Option<String> = None;
+        let mut output_constraints: Vec<(String, TypeExpr)> = Vec::new();
         let mut seen_agent = false;
         let mut seen_goal = false;
 
@@ -758,6 +777,7 @@ impl Parser {
                         name,
                         agent,
                         goal,
+                        output_constraints,
                         span: Span::new(start, end),
                     });
                 }
@@ -796,6 +816,22 @@ impl Parser {
                         }
                     });
                 }
+                TokenKind::Ident(ref field_name)
+                    if self.peek_at(1).is_some_and(|t| *t == TokenKind::Colon) =>
+                {
+                    let field_name = field_name.clone();
+                    self.advance(); // consume ident
+                    self.expect(&TokenKind::Colon)?;
+                    if *self.peek() == TokenKind::One {
+                        let type_expr = self.parse_one_of()?;
+                        output_constraints.push((field_name, type_expr));
+                    } else {
+                        return Err(ParseError::new(
+                            format!("unexpected field '{field_name}' in step '{name}'"),
+                            self.current_span(),
+                        ));
+                    }
+                }
                 TokenKind::Eof => {
                     return Err(ParseError::new(
                         "unexpected end of file: expected `}`",
@@ -810,6 +846,42 @@ impl Parser {
                 }
             }
         }
+    }
+
+    /// Parse `one of [a, b, c]` type expression.
+    fn parse_one_of(&mut self) -> Result<TypeExpr, ParseError> {
+        let start = self.current_span().start;
+        self.expect(&TokenKind::One)?;
+        self.expect(&TokenKind::Of)?;
+        self.expect(&TokenKind::LBracket)?;
+
+        let mut variants = Vec::new();
+        loop {
+            self.skip_comments();
+            if *self.peek() == TokenKind::RBracket {
+                break;
+            }
+            let (variant, _) = self.expect_ident()?;
+            variants.push(variant);
+            self.skip_comments();
+            if *self.peek() == TokenKind::Comma {
+                self.advance();
+            }
+        }
+        let end = self.current_span().end;
+        self.expect(&TokenKind::RBracket)?;
+
+        if variants.is_empty() {
+            return Err(ParseError::new(
+                "one of requires at least one variant",
+                Span::new(start, end),
+            ));
+        }
+
+        Ok(TypeExpr::OneOf {
+            variants,
+            span: Span::new(start, end),
+        })
     }
 
     fn parse_capability_list(&mut self) -> Result<Vec<Capability>, ParseError> {

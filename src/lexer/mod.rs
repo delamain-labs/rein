@@ -23,6 +23,8 @@ pub enum TokenKind {
     Endpoint,
     Guardrails,
     Defaults,
+    One,
+    Of,
     // Symbols
     LBrace,
     RBrace,
@@ -77,6 +79,8 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Endpoint => write!(f, "endpoint"),
             TokenKind::Guardrails => write!(f, "guardrails"),
             TokenKind::Defaults => write!(f, "defaults"),
+            TokenKind::One => write!(f, "one"),
+            TokenKind::Of => write!(f, "of"),
             TokenKind::Ident(s) => write!(f, "{s}"),
             TokenKind::Currency { symbol, amount } => {
                 write!(f, "{symbol}{}.{:02}", amount / 100, amount % 100)
@@ -201,6 +205,8 @@ impl<'a> Lexer<'a> {
             "endpoint" => TokenKind::Endpoint,
             "guardrails" => TokenKind::Guardrails,
             "defaults" => TokenKind::Defaults,
+            "one" => TokenKind::One,
+            "of" => TokenKind::Of,
             _ => TokenKind::Ident(word.to_string()),
         };
         Token::new(kind, start, end)
