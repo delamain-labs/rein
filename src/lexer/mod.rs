@@ -26,6 +26,11 @@ pub enum TokenKind {
     One,
     Of,
     Type,
+    Import,
+    From,
+    All,
+    At,
+    Slash,
     // Symbols
     LBrace,
     RBrace,
@@ -86,6 +91,11 @@ impl std::fmt::Display for TokenKind {
             TokenKind::One => write!(f, "one"),
             TokenKind::Of => write!(f, "of"),
             TokenKind::Type => write!(f, "type"),
+            TokenKind::Import => write!(f, "import"),
+            TokenKind::From => write!(f, "from"),
+            TokenKind::All => write!(f, "all"),
+            TokenKind::At => write!(f, "@"),
+            TokenKind::Slash => write!(f, "/"),
             TokenKind::DotDot => write!(f, ".."),
             TokenKind::Number(n) => write!(f, "{n}"),
             TokenKind::Ident(s) => write!(f, "{s}"),
@@ -215,6 +225,9 @@ impl<'a> Lexer<'a> {
             "one" => TokenKind::One,
             "of" => TokenKind::Of,
             "type" => TokenKind::Type,
+            "import" => TokenKind::Import,
+            "from" => TokenKind::From,
+            "all" => TokenKind::All,
             _ => TokenKind::Ident(word.to_string()),
         };
         Token::new(kind, start, end)
@@ -402,6 +415,8 @@ impl<'a> Lexer<'a> {
                     self.advance(); // '*'
                     tokens.push(self.skip_block_comment(start)?);
                 }
+                Some(b'/') => tokens.push(Token::new(TokenKind::Slash, start, self.pos)),
+                Some(b'@') => tokens.push(Token::new(TokenKind::At, start, self.pos)),
                 Some(ch) if ch.is_ascii_digit() => {
                     tokens.push(self.read_number(start));
                 }

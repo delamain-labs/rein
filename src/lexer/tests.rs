@@ -245,10 +245,10 @@ fn error_unterminated_string_literal() {
 
 #[test]
 fn error_on_invalid_char() {
-    let result = tokenize("agent @ foo");
+    let result = tokenize("agent ~ foo");
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(err.message.contains('@'));
+    assert!(err.message.contains('~'));
 }
 
 #[test]
@@ -261,10 +261,10 @@ fn error_on_unterminated_block_comment() {
 
 #[test]
 fn error_span_points_to_bad_char() {
-    let src = "foo @";
+    let src = "foo ~";
     let result = tokenize(src);
     let err = result.unwrap_err();
-    // '@' is at byte offset 4
+    // '~' is at byte offset 4
     assert_eq!(err.span.start, 4);
 }
 
