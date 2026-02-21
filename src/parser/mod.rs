@@ -4,6 +4,7 @@ use crate::lexer::{Token, TokenKind, tokenize};
 mod agent_parser;
 mod common_parser;
 mod import_parser;
+mod policy_parser;
 mod step_parser;
 mod type_parser;
 mod workflow_parser;
@@ -199,7 +200,10 @@ impl Parser {
             | TokenKind::Parallel
             | TokenKind::Auto
             | TokenKind::Resolve
-            | TokenKind::Is => {
+            | TokenKind::Is
+            | TokenKind::Policy
+            | TokenKind::Tier
+            | TokenKind::Promote => {
                 let name = tok.kind.to_string();
                 self.advance();
                 Ok((name, tok.span))
@@ -282,6 +286,7 @@ impl Parser {
         let mut agents = Vec::new();
         let mut workflows = Vec::new();
         let mut types = Vec::new();
+        let mut policies = Vec::new();
         while self.peek() != &TokenKind::Eof {
             match self.peek() {
                 TokenKind::Import => imports.push(self.parse_import()?),
@@ -300,10 +305,11 @@ impl Parser {
                 TokenKind::Agent => agents.push(self.parse_agent()?),
                 TokenKind::Workflow => workflows.push(self.parse_workflow()?),
                 TokenKind::Type => types.push(self.parse_type_def()?),
+                TokenKind::Policy => policies.push(self.parse_policy()?),
                 other => {
                     return Err(ParseError::new(
                         format!(
-                            "expected top-level declaration (defaults, provider, tool, archetype, agent, workflow, type), got {other}"
+                            "expected top-level declaration (defaults, provider, tool, archetype, agent, workflow, type, policy), got {other}"
                         ),
                         self.current_span(),
                     ));
@@ -320,6 +326,7 @@ impl Parser {
             agents,
             workflows,
             types,
+            policies,
         })
     }
 }
