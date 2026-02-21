@@ -345,6 +345,7 @@ pub async fn run_sequential_resumable(
         stage_results.push(result);
 
         let state = WorkflowState {
+            version: persistence::WORKFLOW_STATE_VERSION,
             workflow_name: workflow.name.clone(),
             completed_stages: stage_results
                 .iter()

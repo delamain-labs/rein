@@ -512,6 +512,7 @@ async fn resumable_resumes_after_first_stage() {
     let state_path = tmp.path().to_path_buf();
     persistence::save_state(
         &persistence::WorkflowState {
+            version: persistence::WORKFLOW_STATE_VERSION,
             workflow_name: "pipe".to_string(),
             completed_stages: vec![persistence::CompletedStage {
                 stage_name: "a".to_string(),
@@ -572,6 +573,7 @@ async fn resumable_resumes_mid_pipeline() {
     let state_path = tmp.path().to_path_buf();
     persistence::save_state(
         &persistence::WorkflowState {
+            version: persistence::WORKFLOW_STATE_VERSION,
             workflow_name: "pipe".to_string(),
             completed_stages: vec![
                 persistence::CompletedStage {
@@ -636,6 +638,7 @@ async fn resumable_different_workflow_name_restarts_fresh() {
     let state_path = tmp.path().to_path_buf();
     persistence::save_state(
         &persistence::WorkflowState {
+            version: persistence::WORKFLOW_STATE_VERSION,
             workflow_name: "workflow_a".to_string(),
             completed_stages: vec![persistence::CompletedStage {
                 stage_name: "a".to_string(),
@@ -683,6 +686,7 @@ async fn resumable_conditional_routing_on_resume() {
     // find_resume_start must replay this condition and route to escalate.
     persistence::save_state(
         &persistence::WorkflowState {
+            version: persistence::WORKFLOW_STATE_VERSION,
             workflow_name: "support".to_string(),
             completed_stages: vec![persistence::CompletedStage {
                 stage_name: "triage".to_string(),
