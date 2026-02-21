@@ -2226,3 +2226,69 @@ fn channel_block() {
     assert_eq!(ch.message_type.as_deref(), Some("PriceChange[]"));
     assert_eq!(ch.retention.as_deref(), Some("7 days"));
 }
+
+#[test]
+fn circuit_breaker_block() {
+    let f = parse_ok(
+        r#"
+        circuit_breaker api_guard {
+            open after: 5 failures in 10 min,
+            half_open after: 2 min
+        }
+    "#,
+    );
+    assert_eq!(f.circuit_breakers.len(), 1);
+    let cb = &f.circuit_breakers[0];
+    assert_eq!(cb.name, "api_guard");
+    assert_eq!(cb.failure_threshold, 5);
+    assert_eq!(cb.window_minutes, 10);
+    assert_eq!(cb.half_open_after_minutes, 2);
+}
+
+#[test]
+fn step_with_send_to() {
+    let f = parse_ok(
+        r#"
+        agent a { model: "gpt-4o" }
+        workflow w {
+            trigger: event
+            step notify {
+                agent: a
+                send to: "slack(#pricing)"
+                message: "{{count}} changes detected"
+            }
+        }
+    "#,
+    );
+    let step = &f.workflows[0].steps[0];
+    let send = step.send_to.as_ref().expect("expected send_to");
+    assert_eq!(send.target, "slack(#pricing)");
+    assert_eq!(
+        send.message.as_deref(),
+        Some("{{count}} changes detected")
+    );
+}
+
+#[test]
+fn within_constraint_block() {
+    let f = parse_ok(
+        r#"
+        agent a { model: "gpt-4o" }
+        workflow w {
+            trigger: event
+            within(cost: $0.05, latency: 2s) {
+                step classify {
+                    agent: a
+                    goal: "Classify"
+                }
+            }
+        }
+    "#,
+    );
+    assert_eq!(f.workflows[0].within_blocks.len(), 1);
+    let wb = &f.workflows[0].within_blocks[0];
+    assert_eq!(wb.cost, Some(5));
+    assert_eq!(wb.latency.as_deref(), Some("2s"));
+    assert_eq!(wb.steps.len(), 1);
+    assert_eq!(wb.steps[0].name, "classify");
+}

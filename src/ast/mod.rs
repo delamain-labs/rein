@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 mod agent;
 mod channel;
+mod circuit_breaker;
 mod fleet;
 mod import;
 mod observe;
@@ -16,6 +17,7 @@ mod workflow;
 
 pub use agent::*;
 pub use channel::*;
+pub use circuit_breaker::*;
 pub use fleet::*;
 pub use import::*;
 pub use observe::*;
@@ -58,6 +60,7 @@ pub struct ReinFile {
     pub observes: Vec<ObserveDef>,
     pub fleets: Vec<FleetDef>,
     pub channels: Vec<ChannelDef>,
+    pub circuit_breakers: Vec<CircuitBreakerDef>,
 }
 
 #[cfg(test)]
