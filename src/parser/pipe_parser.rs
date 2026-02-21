@@ -122,7 +122,7 @@ impl Parser {
     }
 
     /// Parse a u32 value from a Number token.
-    fn parse_u32(&mut self, label: &str) -> Result<u32, ParseError> {
+    pub(super) fn parse_u32(&mut self, label: &str) -> Result<u32, ParseError> {
         match self.peek().clone() {
             TokenKind::Number(n) => {
                 let val = n.parse::<u32>().map_err(|_| {

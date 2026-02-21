@@ -2162,3 +2162,67 @@ fn pipe_expression_select_and_unique() {
         other => panic!("expected Unique, got: {other:?}"),
     }
 }
+
+#[test]
+fn observe_block() {
+    let f = parse_ok(
+        r#"
+        observe support_metrics {
+            trace: all steps
+            metrics: [accuracy, latency, cost]
+            alert when { accuracy < 90% }
+            export: prometheus
+        }
+    "#,
+    );
+    assert_eq!(f.observes.len(), 1);
+    let o = &f.observes[0];
+    assert_eq!(o.name, "support_metrics");
+    assert_eq!(o.trace.as_deref(), Some("all steps"));
+    assert_eq!(o.metrics, vec!["accuracy", "latency", "cost"]);
+    assert!(o.alert_when.is_some());
+    assert_eq!(o.export.as_deref(), Some("prometheus"));
+}
+
+#[test]
+fn fleet_block() {
+    let f = parse_ok(
+        r#"
+        fleet support_team {
+            agents: [agent_a, agent_b]
+            policy: agent_trust
+            budget: $500/day
+            scaling {
+                min: 2,
+                max: 10
+            }
+        }
+    "#,
+    );
+    assert_eq!(f.fleets.len(), 1);
+    let fl = &f.fleets[0];
+    assert_eq!(fl.name, "support_team");
+    assert_eq!(fl.agents, vec!["agent_a", "agent_b"]);
+    assert_eq!(fl.policy.as_deref(), Some("agent_trust"));
+    assert_eq!(fl.budget, Some(50000));
+    let sc = fl.scaling.as_ref().unwrap();
+    assert_eq!(sc.min, 2);
+    assert_eq!(sc.max, 10);
+}
+
+#[test]
+fn channel_block() {
+    let f = parse_ok(
+        r#"
+        channel pricing_updates {
+            type: PriceChange[]
+            retention: 7 days
+        }
+    "#,
+    );
+    assert_eq!(f.channels.len(), 1);
+    let ch = &f.channels[0];
+    assert_eq!(ch.name, "pricing_updates");
+    assert_eq!(ch.message_type.as_deref(), Some("PriceChange[]"));
+    assert_eq!(ch.retention.as_deref(), Some("7 days"));
+}

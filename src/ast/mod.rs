@@ -3,7 +3,10 @@
 use serde::{Deserialize, Serialize};
 
 mod agent;
+mod channel;
+mod fleet;
 mod import;
+mod observe;
 mod pipe;
 mod policy;
 mod provider;
@@ -12,7 +15,10 @@ mod value;
 mod workflow;
 
 pub use agent::*;
+pub use channel::*;
+pub use fleet::*;
 pub use import::*;
+pub use observe::*;
 pub use pipe::*;
 pub use policy::*;
 pub use provider::*;
@@ -49,6 +55,9 @@ pub struct ReinFile {
     pub workflows: Vec<WorkflowDef>,
     pub types: Vec<TypeDef>,
     pub policies: Vec<PolicyDef>,
+    pub observes: Vec<ObserveDef>,
+    pub fleets: Vec<FleetDef>,
+    pub channels: Vec<ChannelDef>,
 }
 
 #[cfg(test)]
