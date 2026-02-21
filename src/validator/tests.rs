@@ -78,12 +78,12 @@ fn zero_budget_detected() {
     // We can't express $0 directly in the grammar, so we build the AST
     // directly. amount is u64 (cents), so 0 is the only invalid value.
     use crate::ast::{AgentDef, Budget, ReinFile, Span};
-    let file = ReinFile {
+    let file = ReinFile { archetypes: vec![],
             imports: vec![],
         defaults: None,
         providers: vec![],
         tools: vec![],
-        agents: vec![AgentDef {
+        agents: vec![AgentDef { from: None,
             name: "bot".into(),
             model: Some(ValueExpr::Literal("anthropic".into())),
             can: vec![],

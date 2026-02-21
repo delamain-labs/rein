@@ -32,7 +32,7 @@ mod permissions_tests {
     }
 
     fn agent(can: Vec<Capability>, cannot: Vec<Capability>) -> AgentDef {
-        AgentDef {
+        AgentDef { from: None,
             name: "test_agent".into(),
             model: None,
             can,

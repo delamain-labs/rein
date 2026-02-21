@@ -5,6 +5,7 @@ use crate::ast::Span;
 pub enum TokenKind {
     // Keywords
     Agent,
+    Archetype,
     Can,
     Cannot,
     Model,
@@ -93,6 +94,7 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Dot => write!(f, "."),
             TokenKind::Comma => write!(f, ","),
             TokenKind::Agent => write!(f, "agent"),
+            TokenKind::Archetype => write!(f, "archetype"),
             TokenKind::Can => write!(f, "can"),
             TokenKind::Cannot => write!(f, "cannot"),
             TokenKind::Model => write!(f, "model"),
@@ -250,6 +252,7 @@ impl<'a> Lexer<'a> {
         let word = std::str::from_utf8(&self.src[start..end]).unwrap();
         let kind = match word {
             "agent" => TokenKind::Agent,
+            "archetype" => TokenKind::Archetype,
             "can" => TokenKind::Can,
             "cannot" => TokenKind::Cannot,
             "model" => TokenKind::Model,

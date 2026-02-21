@@ -11,7 +11,7 @@ fn make_agent(
     cannot: Vec<Capability>,
     budget_cents: Option<u64>,
 ) -> AgentDef {
-    AgentDef {
+    AgentDef { from: None,
         name: "test".to_string(),
         model: Some(ValueExpr::Literal("gpt-4o".into())),
         can,

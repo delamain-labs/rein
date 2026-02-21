@@ -1805,3 +1805,79 @@ fn when_mixed_precedence_complex() {
         other => panic!("expected Or, got {other:?}"),
     }
 }
+
+// ── archetype/from tests ────────────────────────────────────────────────
+
+#[test]
+fn parse_archetype_basic() {
+    let f = parse_ok(
+        r#"
+        archetype base {
+            model: openai
+            can [zendesk.read_ticket]
+        }
+        agent helper from base {
+            budget: $0.05 per request
+        }
+        workflow w {
+            trigger: event
+            step s { agent: helper }
+        }
+    "#,
+    );
+    assert_eq!(f.archetypes.len(), 1);
+    assert_eq!(f.archetypes[0].name, "base");
+    assert_eq!(
+        f.archetypes[0].model.as_ref().unwrap().display_value(),
+        "openai"
+    );
+    assert_eq!(f.archetypes[0].can.len(), 1);
+
+    assert_eq!(f.agents.len(), 1);
+    assert_eq!(f.agents[0].name, "helper");
+    assert_eq!(f.agents[0].from.as_deref(), Some("base"));
+    assert!(f.agents[0].budget.is_some());
+}
+
+#[test]
+fn parse_agent_without_from() {
+    let f = parse_ok(
+        r#"
+        agent standalone { model: openai }
+        workflow w { trigger: event step s { agent: standalone } }
+    "#,
+    );
+    assert!(f.agents[0].from.is_none());
+}
+
+#[test]
+fn parse_archetype_empty_body() {
+    let f = parse_ok(
+        r#"
+        archetype empty {}
+        agent a from empty { model: openai }
+        workflow w { trigger: event step s { agent: a } }
+    "#,
+    );
+    assert_eq!(f.archetypes[0].name, "empty");
+    assert!(f.archetypes[0].model.is_none());
+}
+
+#[test]
+fn parse_archetype_with_guardrails() {
+    let f = parse_ok(
+        r#"
+        archetype guarded {
+            model: anthropic
+            guardrails {
+                output_filter {
+                    pii_detection: redact
+                }
+            }
+        }
+        agent bot from guarded {}
+        workflow w { trigger: event step s { agent: bot } }
+    "#,
+    );
+    assert!(f.archetypes[0].guardrails.is_some());
+}
