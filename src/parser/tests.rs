@@ -2001,3 +2001,16 @@ fn env_default_requires_string_literal() {
     let err = parse_err(r#"provider openai { key: env("API_KEY", 42) }"#);
     assert!(err.message.contains("string literal"), "got: {}", err.message);
 }
+
+#[test]
+fn key_as_identifier_in_agent_name() {
+    // "key" should be usable as an identifier since it's context-sensitive
+    let f = parse_ok(r#"agent key { model: "gpt-4o" }"#);
+    assert_eq!(f.agents[0].name, "key");
+}
+
+#[test]
+fn key_field_still_works_in_provider() {
+    let f = parse_ok(r#"provider openai { key: env("OPENAI_KEY") }"#);
+    assert!(f.providers[0].key.is_some());
+}

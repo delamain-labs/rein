@@ -99,7 +99,7 @@ impl Parser {
                     self.expect(&TokenKind::Colon)?;
                     model = Some(self.parse_value_expr()?);
                 }
-                TokenKind::Key => {
+                TokenKind::Ident(ref k) if k == "key" => {
                     if seen_key {
                         return Err(ParseError::new(
                             format!("duplicate field 'key' in provider '{name}'"),
@@ -174,7 +174,7 @@ impl Parser {
                     self.expect(&TokenKind::Colon)?;
                     provider = Some(self.parse_value_expr()?);
                 }
-                TokenKind::Key => {
+                TokenKind::Ident(ref k) if k == "key" => {
                     if seen_key {
                         return Err(ParseError::new(
                             format!("duplicate field 'key' in tool '{name}'"),
