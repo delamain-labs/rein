@@ -49,9 +49,13 @@ pub fn condition_matches(output: &str, field: &str, matcher: &ConditionMatcher) 
             let Some(val) = extract_field_value(output, field) else {
                 return false;
             };
-            regex::Regex::new(pattern)
-                .map(|re| re.is_match(val))
-                .unwrap_or(false)
+            match regex::Regex::new(pattern) {
+                Ok(re) => re.is_match(val),
+                Err(err) => {
+                    eprintln!("warning: invalid regex pattern '{pattern}': {err}");
+                    false
+                }
+            }
         }
         ConditionMatcher::JsonPath { path, expected } => json_path_matches(output, path, expected),
     }
