@@ -1881,3 +1881,59 @@ fn parse_archetype_with_guardrails() {
     );
     assert!(f.archetypes[0].guardrails.is_some());
 }
+
+// ── policy/trust tests ──────────────────────────────────────────────────
+
+#[test]
+fn parse_policy_basic() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w { trigger: event step s { agent: a } }
+        policy {
+            tier supervised {
+                promote when accuracy > 95%
+            }
+            tier autonomous {}
+        }
+    "#,
+    );
+    assert_eq!(f.policies.len(), 1);
+    assert_eq!(f.policies[0].tiers.len(), 2);
+    assert_eq!(f.policies[0].tiers[0].name, "supervised");
+    assert!(f.policies[0].tiers[0].promote_when.is_some());
+    assert_eq!(f.policies[0].tiers[1].name, "autonomous");
+    assert!(f.policies[0].tiers[1].promote_when.is_none());
+}
+
+#[test]
+fn parse_policy_with_compound_condition() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w { trigger: event step s { agent: a } }
+        policy {
+            tier monitored {
+                promote when accuracy > 90% and errors < 5
+            }
+        }
+    "#,
+    );
+    let tier = &f.policies[0].tiers[0];
+    assert!(matches!(
+        tier.promote_when.as_ref().unwrap(),
+        crate::ast::WhenExpr::And(_)
+    ));
+}
+
+#[test]
+fn parse_policy_empty() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w { trigger: event step s { agent: a } }
+        policy {}
+    "#,
+    );
+    assert_eq!(f.policies[0].tiers.len(), 0);
+}
