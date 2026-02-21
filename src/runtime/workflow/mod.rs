@@ -5,7 +5,10 @@ use super::executor::ToolExecutor;
 use super::permissions::ToolRegistry;
 use super::provider::{Provider, ToolDef};
 
+mod condition;
 pub mod persistence;
+
+use condition::condition_matches;
 
 #[cfg(test)]
 mod tests;
@@ -131,37 +134,6 @@ fn build_result(stage_results: Vec<StageResult>, final_output: String) -> Workfl
     }
 }
 
-/// Check whether a conditional route matches the agent output.
-///
-/// Looks for `field: value` or `field=value` patterns in the output text.
-/// Uses exact value matching (not prefix) to avoid false positives like
-/// "high" matching "higher".
-fn condition_matches(output: &str, field: &str, equals: &str) -> bool {
-    let lower = output.to_lowercase();
-    let field_lower = field.to_lowercase();
-    let equals_lower = equals.to_lowercase();
-
-    for line in lower.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix(&field_lower) {
-            let rest = rest.trim_start();
-            if let Some(val) = rest.strip_prefix(':').or_else(|| rest.strip_prefix('=')) {
-                let val = val.trim();
-                // Exact match: the value equals our target, or is followed
-                // by a non-alphanumeric character (e.g. "high." or "high,")
-                if val == equals_lower
-                    || val.strip_prefix(equals_lower.as_str()).is_some_and(|rest| {
-                        rest.starts_with(|c: char| !c.is_alphanumeric() && c != '_')
-                    })
-                {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
 /// Resolve the next stage given the current stage's route rule and output.
 ///
 /// This is the single source of truth for routing logic, used by both
@@ -178,11 +150,11 @@ fn resolve_next_stage<'a>(
         }
         RouteRule::Conditional {
             field,
-            equals,
+            matcher,
             then_stage,
             else_stage,
         } => {
-            if condition_matches(output, field, equals) {
+            if condition_matches(output, field, matcher) {
                 Ok(Some(workflow.find_stage(then_stage).ok_or_else(|| {
                     WorkflowError::StageNotFound(then_stage.clone())
                 })?))

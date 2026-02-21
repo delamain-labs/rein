@@ -194,6 +194,23 @@ pub struct ToolDef {
 // Workflow types
 // ---------------------------------------------------------------------------
 
+/// How a condition is evaluated against agent output.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "mode", content = "value", rename_all = "snake_case")]
+pub enum ConditionMatcher {
+    /// Exact value match (case-insensitive, word-boundary aware).
+    Equals(String),
+    /// Substring containment (case-insensitive).
+    Contains(String),
+    /// Regular expression match.
+    Regex(String),
+    /// JSON path extraction and comparison (`path=expected`).
+    JsonPath {
+        path: String,
+        expected: String,
+    },
+}
+
 /// How a workflow stage routes to the next stage.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -203,7 +220,7 @@ pub enum RouteRule {
     /// Route based on a condition in the agent's output.
     Conditional {
         field: String,
-        equals: String,
+        matcher: ConditionMatcher,
         then_stage: String,
         else_stage: Option<String>,
     },
@@ -438,7 +455,7 @@ mod tests {
     fn conditional_route_serializes() {
         let route = RouteRule::Conditional {
             field: "sentiment".to_string(),
-            equals: "negative".to_string(),
+            matcher: ConditionMatcher::Equals("negative".to_string()),
             then_stage: "escalate".to_string(),
             else_stage: Some("respond".to_string()),
         };

@@ -1,5 +1,5 @@
 use super::*;
-use crate::ast::{ExecutionMode, RouteRule, Span, Stage, WorkflowDef};
+use crate::ast::{ConditionMatcher, ExecutionMode, RouteRule, Span, Stage, WorkflowDef};
 use crate::runtime::executor::MockExecutor;
 use crate::runtime::provider::{ChatResponse, MockProvider, Usage};
 use tempfile::NamedTempFile;
@@ -333,7 +333,7 @@ fn make_conditional_workflow() -> (ReinFile, WorkflowDef) {
                 agent: "triage".to_string(),
                 route: RouteRule::Conditional {
                     field: "priority".to_string(),
-                    equals: "high".to_string(),
+                    matcher: ConditionMatcher::Equals("high".to_string()),
                     then_stage: "escalate".to_string(),
                     else_stage: Some("respond".to_string()),
                 },
@@ -439,7 +439,7 @@ async fn conditional_no_else_ends_workflow() {
                 agent: "checker".to_string(),
                 route: RouteRule::Conditional {
                     field: "needs_action".to_string(),
-                    equals: "yes".to_string(),
+                    matcher: ConditionMatcher::Equals("yes".to_string()),
                     then_stage: "handler".to_string(),
                     else_stage: None,
                 },
@@ -801,15 +801,61 @@ async fn resumable_corrupt_checkpoint_returns_persistence_error() {
 
 #[tokio::test]
 async fn condition_match_rejects_prefix_false_positive() {
+    let eq_high = ConditionMatcher::Equals("high".to_string());
     // "high" should NOT match "higher"
-    assert!(condition_matches("priority: high", "priority", "high"));
-    assert!(condition_matches("priority: high.", "priority", "high"));
-    assert!(!condition_matches("priority: higher", "priority", "high"));
+    assert!(condition_matches("priority: high", "priority", &eq_high));
+    assert!(condition_matches("priority: high.", "priority", &eq_high));
+    assert!(!condition_matches("priority: higher", "priority", &eq_high));
     assert!(!condition_matches(
         "priority: highlights",
         "priority",
-        "high"
+        &eq_high,
     ));
+
+    // Contains matcher
+    let contains = ConditionMatcher::Contains("bill".to_string());
+    assert!(condition_matches("category: billing issue", "category", &contains));
+    assert!(!condition_matches("category: technical", "category", &contains));
+
+    // Regex matcher
+    let regex = ConditionMatcher::Regex(r"^(high|critical)$".to_string());
+    assert!(condition_matches("priority: high", "priority", &regex));
+    assert!(condition_matches("priority: critical", "priority", &regex));
+    assert!(!condition_matches("priority: low", "priority", &regex));
+
+    // Invalid regex doesn't panic, just returns false
+    let bad_regex = ConditionMatcher::Regex(r"[invalid".to_string());
+    assert!(!condition_matches("priority: high", "priority", &bad_regex));
+}
+
+#[tokio::test]
+async fn condition_match_json_path() {
+    let json_output = r#"{"result": {"status": "escalated", "score": 95}}"#;
+
+    let jp = ConditionMatcher::JsonPath {
+        path: "result.status".to_string(),
+        expected: "escalated".to_string(),
+    };
+    assert!(condition_matches(json_output, "", &jp));
+
+    let jp_num = ConditionMatcher::JsonPath {
+        path: "result.score".to_string(),
+        expected: "95".to_string(),
+    };
+    assert!(condition_matches(json_output, "", &jp_num));
+
+    let jp_miss = ConditionMatcher::JsonPath {
+        path: "result.status".to_string(),
+        expected: "resolved".to_string(),
+    };
+    assert!(!condition_matches(json_output, "", &jp_miss));
+
+    // Non-JSON output returns false
+    let jp2 = ConditionMatcher::JsonPath {
+        path: "status".to_string(),
+        expected: "ok".to_string(),
+    };
+    assert!(!condition_matches("not json at all", "", &jp2));
 }
 
 #[tokio::test]
@@ -828,7 +874,7 @@ async fn conditional_route_to_nonexistent_stage_errors() {
             agent: "triage".to_string(),
             route: RouteRule::Conditional {
                 field: "priority".to_string(),
-                equals: "high".to_string(),
+                matcher: ConditionMatcher::Equals("high".to_string()),
                 then_stage: "nonexistent".to_string(),
                 else_stage: None,
             },
@@ -882,7 +928,7 @@ async fn circular_route_returns_error() {
                 agent: "a".to_string(),
                 route: RouteRule::Conditional {
                     field: "go".to_string(),
-                    equals: "yes".to_string(),
+                    matcher: ConditionMatcher::Equals("yes".to_string()),
                     then_stage: "b".to_string(),
                     else_stage: None,
                 },
@@ -893,7 +939,7 @@ async fn circular_route_returns_error() {
                 agent: "b".to_string(),
                 route: RouteRule::Conditional {
                     field: "go".to_string(),
-                    equals: "yes".to_string(),
+                    matcher: ConditionMatcher::Equals("yes".to_string()),
                     then_stage: "a".to_string(),
                     else_stage: None,
                 },
