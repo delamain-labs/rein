@@ -25,6 +25,7 @@ pub enum TokenKind {
     Defaults,
     One,
     Of,
+    Type,
     // Symbols
     LBrace,
     RBrace,
@@ -34,10 +35,13 @@ pub enum TokenKind {
     RParen,
     Colon,
     Dot,
+    DotDot,
     Comma,
     // Literals
     Ident(String),
     StringLiteral(String),
+    /// A numeric literal (integer or float, stored as string for flexibility).
+    Number(String),
     /// A monetary amount with currency symbol and value in minor units (cents).
     Currency {
         symbol: char,
@@ -81,6 +85,9 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Defaults => write!(f, "defaults"),
             TokenKind::One => write!(f, "one"),
             TokenKind::Of => write!(f, "of"),
+            TokenKind::Type => write!(f, "type"),
+            TokenKind::DotDot => write!(f, ".."),
+            TokenKind::Number(n) => write!(f, "{n}"),
             TokenKind::Ident(s) => write!(f, "{s}"),
             TokenKind::Currency { symbol, amount } => {
                 write!(f, "{symbol}{}.{:02}", amount / 100, amount % 100)
@@ -207,9 +214,26 @@ impl<'a> Lexer<'a> {
             "defaults" => TokenKind::Defaults,
             "one" => TokenKind::One,
             "of" => TokenKind::Of,
+            "type" => TokenKind::Type,
             _ => TokenKind::Ident(word.to_string()),
         };
         Token::new(kind, start, end)
+    }
+
+    fn read_number(&mut self, start: usize) -> Token {
+        while matches!(self.peek(), Some(b'0'..=b'9')) {
+            self.advance();
+        }
+        // Optional decimal part
+        if self.peek() == Some(b'.') && self.peek_at(1).is_some_and(|b| b.is_ascii_digit()) {
+            self.advance(); // consume '.'
+            while matches!(self.peek(), Some(b'0'..=b'9')) {
+                self.advance();
+            }
+        }
+        let end = self.pos;
+        let text = std::str::from_utf8(&self.src[start..end]).unwrap().to_string();
+        Token::new(TokenKind::Number(text), start, end)
     }
 
     fn read_currency(&mut self, symbol: char, start: usize) -> Result<Token, LexError> {
@@ -356,7 +380,14 @@ impl<'a> Lexer<'a> {
                 Some(b'(') => tokens.push(Token::new(TokenKind::LParen, start, self.pos)),
                 Some(b')') => tokens.push(Token::new(TokenKind::RParen, start, self.pos)),
                 Some(b':') => tokens.push(Token::new(TokenKind::Colon, start, self.pos)),
-                Some(b'.') => tokens.push(Token::new(TokenKind::Dot, start, self.pos)),
+                Some(b'.') => {
+                    if self.peek() == Some(b'.') {
+                        self.advance();
+                        tokens.push(Token::new(TokenKind::DotDot, start, self.pos));
+                    } else {
+                        tokens.push(Token::new(TokenKind::Dot, start, self.pos));
+                    }
+                }
                 Some(b',') => tokens.push(Token::new(TokenKind::Comma, start, self.pos)),
                 Some(b'"') => tokens.push(self.read_string(start)?),
                 Some(b'$') => tokens.push(self.read_currency('$', start)?),
@@ -370,6 +401,9 @@ impl<'a> Lexer<'a> {
                 Some(b'/') if self.peek() == Some(b'*') => {
                     self.advance(); // '*'
                     tokens.push(self.skip_block_comment(start)?);
+                }
+                Some(ch) if ch.is_ascii_digit() => {
+                    tokens.push(self.read_number(start));
                 }
                 Some(ch) if ch.is_ascii_alphabetic() || ch == b'_' => {
                     tokens.push(self.read_ident(start));
