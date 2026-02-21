@@ -1446,3 +1446,114 @@ fn parse_parallel_empty_errors() {
     );
     assert!(err.message.contains("at least one"), "got: {}", err.message);
 }
+
+// ── when expression tests ───────────────────────────────────────────────
+
+#[test]
+fn parse_step_with_when_percent() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step x {
+                agent: a
+                when: confidence < 70%
+            }
+        }
+    "#,
+    );
+    let step = &f.workflows[0].steps[0];
+    let when = step.when.as_ref().unwrap();
+    match when {
+        crate::ast::WhenExpr::Comparison(c) => {
+            assert_eq!(c.field, "confidence");
+            assert_eq!(c.op, crate::ast::CompareOp::Lt);
+            assert!(matches!(&c.value, crate::ast::WhenValue::Percent(p) if p == "70"));
+        }
+        other => panic!("expected Comparison, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_step_with_when_currency() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step x {
+                agent: a
+                when: refund > $50.00
+            }
+        }
+    "#,
+    );
+    let step = &f.workflows[0].steps[0];
+    let when = step.when.as_ref().unwrap();
+    match when {
+        crate::ast::WhenExpr::Comparison(c) => {
+            assert_eq!(c.field, "refund");
+            assert_eq!(c.op, crate::ast::CompareOp::Gt);
+            assert!(matches!(&c.value, crate::ast::WhenValue::Currency { symbol: '$', amount: 5000 }));
+        }
+        other => panic!("expected Comparison, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_step_with_when_or() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step x {
+                agent: a
+                when: confidence < 70% or refund > $50.00
+            }
+        }
+    "#,
+    );
+    let step = &f.workflows[0].steps[0];
+    let when = step.when.as_ref().unwrap();
+    match when {
+        crate::ast::WhenExpr::Or(parts) => {
+            assert_eq!(parts.len(), 2);
+        }
+        other => panic!("expected Or, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_step_with_when_and() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step x {
+                agent: a
+                when: score >= 80 and priority < 3
+            }
+        }
+    "#,
+    );
+    let step = &f.workflows[0].steps[0];
+    let when = step.when.as_ref().unwrap();
+    assert!(matches!(when, crate::ast::WhenExpr::And(parts) if parts.len() == 2));
+}
+
+#[test]
+fn parse_step_without_when() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step x { agent: a }
+        }
+    "#,
+    );
+    assert!(f.workflows[0].steps[0].when.is_none());
+}
