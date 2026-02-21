@@ -194,6 +194,17 @@ pub struct ToolDef {
 // Workflow types
 // ---------------------------------------------------------------------------
 
+/// A type expression constraining a field's value.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TypeExpr {
+    /// A union of allowed values: `one of [billing, technical, general]`.
+    OneOf {
+        variants: Vec<String>,
+        span: Span,
+    },
+}
+
 /// How a condition is evaluated against agent output.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode", content = "value", rename_all = "snake_case")]
@@ -254,6 +265,8 @@ pub struct StepDef {
     pub agent: String,
     /// Natural language goal describing what the step should accomplish.
     pub goal: Option<String>,
+    /// Output type constraints (e.g. `category: one of [billing, technical]`).
+    pub output_constraints: Vec<(String, TypeExpr)>,
     pub span: Span,
 }
 
