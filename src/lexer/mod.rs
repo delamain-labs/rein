@@ -35,7 +35,15 @@ pub enum TokenKind {
     Parallel,
     Route,
     On,
+    When,
+    Or,
+    And,
     Underscore,
+    Lt,
+    Gt,
+    LtEq,
+    GtEq,
+    Percent,
     // Symbols
     LBrace,
     RBrace,
@@ -102,6 +110,14 @@ impl std::fmt::Display for TokenKind {
             TokenKind::At => write!(f, "@"),
             TokenKind::Slash => write!(f, "/"),
             TokenKind::Parallel => write!(f, "parallel"),
+            TokenKind::When => write!(f, "when"),
+            TokenKind::Or => write!(f, "or"),
+            TokenKind::And => write!(f, "and"),
+            TokenKind::Lt => write!(f, "<"),
+            TokenKind::Gt => write!(f, ">"),
+            TokenKind::LtEq => write!(f, "<="),
+            TokenKind::GtEq => write!(f, ">="),
+            TokenKind::Percent => write!(f, "%"),
             TokenKind::Arrow => write!(f, "->"),
             TokenKind::Route => write!(f, "route"),
             TokenKind::On => write!(f, "on"),
@@ -239,6 +255,9 @@ impl<'a> Lexer<'a> {
             "from" => TokenKind::From,
             "all" => TokenKind::All,
             "parallel" => TokenKind::Parallel,
+            "when" => TokenKind::When,
+            "or" => TokenKind::Or,
+            "and" => TokenKind::And,
             "route" => TokenKind::Route,
             "on" => TokenKind::On,
             "_" => TokenKind::Underscore,
@@ -435,6 +454,23 @@ impl<'a> Lexer<'a> {
                     self.advance(); // consume '>'
                     tokens.push(Token::new(TokenKind::Arrow, start, self.pos));
                 }
+                Some(b'<') => {
+                    if self.peek() == Some(b'=') {
+                        self.advance();
+                        tokens.push(Token::new(TokenKind::LtEq, start, self.pos));
+                    } else {
+                        tokens.push(Token::new(TokenKind::Lt, start, self.pos));
+                    }
+                }
+                Some(b'>') => {
+                    if self.peek() == Some(b'=') {
+                        self.advance();
+                        tokens.push(Token::new(TokenKind::GtEq, start, self.pos));
+                    } else {
+                        tokens.push(Token::new(TokenKind::Gt, start, self.pos));
+                    }
+                }
+                Some(b'%') => tokens.push(Token::new(TokenKind::Percent, start, self.pos)),
                 Some(ch) if ch.is_ascii_digit() => {
                     tokens.push(self.read_number(start));
                 }

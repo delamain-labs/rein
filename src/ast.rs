@@ -228,6 +228,46 @@ pub struct TypeDef {
     pub span: Span,
 }
 
+/// A comparison operator in a `when` expression.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum CompareOp {
+    Lt,
+    Gt,
+    LtEq,
+    GtEq,
+}
+
+/// A value in a `when` comparison (right-hand side).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WhenValue {
+    /// A percentage like `70%`.
+    Percent(String),
+    /// A currency amount like `$50`.
+    Currency { symbol: char, amount: u64 },
+    /// A plain number.
+    Number(String),
+    /// An identifier reference.
+    Ident(String),
+}
+
+/// A single comparison in a `when` expression: `field op value`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WhenComparison {
+    pub field: String,
+    pub op: CompareOp,
+    pub value: WhenValue,
+}
+
+/// A `when` expression combining comparisons with boolean logic.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WhenExpr {
+    Comparison(WhenComparison),
+    And(Vec<WhenExpr>),
+    Or(Vec<WhenExpr>),
+}
+
 /// A `parallel { step a {...} step b {...} }` block for concurrent execution.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParallelBlock {
@@ -350,6 +390,8 @@ pub struct StepDef {
     pub goal: Option<String>,
     /// Output type constraints (e.g. `category: one of [billing, technical]`).
     pub output_constraints: Vec<(String, TypeExpr)>,
+    /// Optional guard condition: `when: confidence < 70%`.
+    pub when: Option<WhenExpr>,
     pub span: Span,
 }
 

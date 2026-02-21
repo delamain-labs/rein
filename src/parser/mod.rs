@@ -762,6 +762,7 @@ impl Parser {
     }
 
     /// Parse a `step <name> { agent: <ident> goal: <text> }` block.
+    #[allow(clippy::too_many_lines)]
     fn parse_step(&mut self) -> Result<crate::ast::StepDef, ParseError> {
         self.skip_comments();
         let start = self.current_span().start;
@@ -773,6 +774,7 @@ impl Parser {
         let mut agent: Option<String> = None;
         let mut goal: Option<String> = None;
         let mut output_constraints: Vec<(String, TypeExpr)> = Vec::new();
+        let mut when: Option<crate::ast::WhenExpr> = None;
         let mut seen_agent = false;
         let mut seen_goal = false;
 
@@ -795,6 +797,7 @@ impl Parser {
                         agent,
                         goal,
                         output_constraints,
+                        when,
                         span: Span::new(start, end),
                     });
                 }
@@ -833,6 +836,17 @@ impl Parser {
                         }
                     });
                 }
+                TokenKind::When => {
+                    if when.is_some() {
+                        return Err(ParseError::new(
+                            format!("duplicate field 'when' in step '{name}'"),
+                            self.current_span(),
+                        ));
+                    }
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    when = Some(self.parse_when_expr()?);
+                }
                 TokenKind::Ident(ref field_name)
                     if self.peek_at(1).is_some_and(|t| *t == TokenKind::Colon) =>
                 {
@@ -862,6 +876,101 @@ impl Parser {
                     ));
                 }
             }
+        }
+    }
+
+    /// Parse a `when` expression: `field op value [or|and field op value ...]`.
+    fn parse_when_expr(&mut self) -> Result<crate::ast::WhenExpr, ParseError> {
+        let first = self.parse_when_comparison()?;
+        let mut expr = crate::ast::WhenExpr::Comparison(first);
+
+        loop {
+            self.skip_comments();
+            match self.peek() {
+                TokenKind::Or => {
+                    self.advance();
+                    let next = self.parse_when_comparison()?;
+                    expr = match expr {
+                        crate::ast::WhenExpr::Or(mut parts) => {
+                            parts.push(crate::ast::WhenExpr::Comparison(next));
+                            crate::ast::WhenExpr::Or(parts)
+                        }
+                        other => crate::ast::WhenExpr::Or(vec![
+                            other,
+                            crate::ast::WhenExpr::Comparison(next),
+                        ]),
+                    };
+                }
+                TokenKind::And => {
+                    self.advance();
+                    let next = self.parse_when_comparison()?;
+                    expr = match expr {
+                        crate::ast::WhenExpr::And(mut parts) => {
+                            parts.push(crate::ast::WhenExpr::Comparison(next));
+                            crate::ast::WhenExpr::And(parts)
+                        }
+                        other => crate::ast::WhenExpr::And(vec![
+                            other,
+                            crate::ast::WhenExpr::Comparison(next),
+                        ]),
+                    };
+                }
+                _ => break,
+            }
+        }
+        Ok(expr)
+    }
+
+    /// Parse a single comparison: `field op value`.
+    fn parse_when_comparison(&mut self) -> Result<crate::ast::WhenComparison, ParseError> {
+        let (field, _) = self.expect_ident()?;
+
+        let op = match self.peek() {
+            TokenKind::Lt => crate::ast::CompareOp::Lt,
+            TokenKind::Gt => crate::ast::CompareOp::Gt,
+            TokenKind::LtEq => crate::ast::CompareOp::LtEq,
+            TokenKind::GtEq => crate::ast::CompareOp::GtEq,
+            other => {
+                return Err(ParseError::new(
+                    format!("expected comparison operator (<, >, <=, >=), got {other}"),
+                    self.current_span(),
+                ));
+            }
+        };
+        self.advance();
+
+        let value = self.parse_when_value()?;
+
+        Ok(crate::ast::WhenComparison { field, op, value })
+    }
+
+    /// Parse a when value: number, percent, currency, or ident.
+    fn parse_when_value(&mut self) -> Result<crate::ast::WhenValue, ParseError> {
+        match self.peek().clone() {
+            TokenKind::Number(n) => {
+                let n = n.clone();
+                self.advance();
+                // Check for trailing %
+                if *self.peek() == TokenKind::Percent {
+                    self.advance();
+                    Ok(crate::ast::WhenValue::Percent(n))
+                } else {
+                    Ok(crate::ast::WhenValue::Number(n))
+                }
+            }
+            TokenKind::Currency { symbol, amount } => {
+                self.advance();
+                Ok(crate::ast::WhenValue::Currency { symbol, amount })
+            }
+            TokenKind::Ident(name) => {
+                let name = name.clone();
+                self.advance();
+                Ok(crate::ast::WhenValue::Ident(name))
+            }
+            other => Err(ParseError::new(
+                format!("expected value (number, percentage, currency, or identifier), got {other}"),
+                self.current_span(),
+            )),
         }
     }
 
