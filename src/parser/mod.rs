@@ -2,8 +2,11 @@ use crate::ast::{ReinFile, Span, ValueExpr};
 use crate::lexer::{Token, TokenKind, tokenize};
 
 mod agent_parser;
+mod channel_parser;
 mod common_parser;
+mod fleet_parser;
 mod import_parser;
+mod observe_parser;
 mod pipe_parser;
 mod policy_parser;
 mod step_parser;
@@ -239,6 +242,18 @@ impl Parser {
             | TokenKind::Unique
             | TokenKind::Asc
             | TokenKind::Desc
+            | TokenKind::Observe
+            | TokenKind::Fleet
+            | TokenKind::Channel
+            | TokenKind::Trace
+            | TokenKind::Metrics
+            | TokenKind::Alert
+            | TokenKind::Export
+            | TokenKind::Agents
+            | TokenKind::Scaling
+            | TokenKind::Min
+            | TokenKind::Max
+            | TokenKind::Retention
             | TokenKind::Promote => {
                 let name = tok.kind.to_string();
                 self.advance();
@@ -323,6 +338,9 @@ impl Parser {
         let mut workflows = Vec::new();
         let mut types = Vec::new();
         let mut policies = Vec::new();
+        let mut observes = Vec::new();
+        let mut fleets = Vec::new();
+        let mut channels = Vec::new();
         while self.peek() != &TokenKind::Eof {
             match self.peek() {
                 TokenKind::Import => imports.push(self.parse_import()?),
@@ -342,10 +360,13 @@ impl Parser {
                 TokenKind::Workflow => workflows.push(self.parse_workflow()?),
                 TokenKind::Type => types.push(self.parse_type_def()?),
                 TokenKind::Policy => policies.push(self.parse_policy()?),
+                TokenKind::Observe => observes.push(self.parse_observe()?),
+                TokenKind::Fleet => fleets.push(self.parse_fleet()?),
+                TokenKind::Channel => channels.push(self.parse_channel()?),
                 other => {
                     return Err(ParseError::new(
                         format!(
-                            "expected top-level declaration (defaults, provider, tool, archetype, agent, workflow, type, policy), got {other}"
+                            "expected top-level declaration (defaults, provider, tool, archetype, agent, workflow, type, policy, observe, fleet, channel), got {other}"
                         ),
                         self.current_span(),
                     ));
@@ -363,6 +384,9 @@ impl Parser {
             workflows,
             types,
             policies,
+            observes,
+            fleets,
+            channels,
         })
     }
 }
