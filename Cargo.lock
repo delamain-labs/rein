@@ -1052,6 +1052,7 @@ dependencies = [
  "async-trait",
  "clap",
  "dotenvy",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",
