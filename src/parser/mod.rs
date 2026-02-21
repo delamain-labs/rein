@@ -4,6 +4,7 @@ use crate::lexer::{Token, TokenKind, tokenize};
 mod agent_parser;
 mod common_parser;
 mod import_parser;
+mod pipe_parser;
 mod policy_parser;
 mod step_parser;
 mod type_parser;
@@ -229,6 +230,15 @@ impl Parser {
             | TokenKind::Policy
             | TokenKind::Tier
             | TokenKind::Fallback
+            | TokenKind::Where
+            | TokenKind::Sort
+            | TokenKind::By
+            | TokenKind::Take
+            | TokenKind::Skip
+            | TokenKind::Select
+            | TokenKind::Unique
+            | TokenKind::Asc
+            | TokenKind::Desc
             | TokenKind::Promote => {
                 let name = tok.kind.to_string();
                 self.advance();

@@ -2093,3 +2093,72 @@ fn step_duplicate_fallback_errors() {
     );
     assert!(err.message.contains("duplicate 'fallback'"), "got: {}", err.message);
 }
+
+#[test]
+fn pipe_expression_full() {
+    let f = parse_ok(
+        r#"
+        agent a { model: "gpt-4o" }
+        workflow w {
+            trigger: event
+            step analyze {
+                agent: a
+                input: products | where organic_traffic < 100 | sort by score desc | take 10
+            }
+        }
+    "#,
+    );
+    let step = &f.workflows[0].steps[0];
+    let pipe = step.input.as_ref().expect("expected input pipe");
+    assert_eq!(pipe.source, "products");
+    assert_eq!(pipe.transforms.len(), 3);
+    match &pipe.transforms[0] {
+        crate::ast::PipeTransform::Where { field, op, .. } => {
+            assert_eq!(field, "organic_traffic");
+            assert_eq!(*op, crate::ast::CompareOp::Lt);
+        }
+        other => panic!("expected Where, got: {other:?}"),
+    }
+    match &pipe.transforms[1] {
+        crate::ast::PipeTransform::SortBy { field, direction } => {
+            assert_eq!(field, "score");
+            assert_eq!(*direction, crate::ast::SortDirection::Desc);
+        }
+        other => panic!("expected SortBy, got: {other:?}"),
+    }
+    match &pipe.transforms[2] {
+        crate::ast::PipeTransform::Take { count } => assert_eq!(*count, 10),
+        other => panic!("expected Take, got: {other:?}"),
+    }
+}
+
+#[test]
+fn pipe_expression_select_and_unique() {
+    let f = parse_ok(
+        r#"
+        agent a { model: "gpt-4o" }
+        workflow w {
+            trigger: event
+            step s {
+                agent: a
+                input: items | select name, price | unique name | skip 5
+            }
+        }
+    "#,
+    );
+    let pipe = f.workflows[0].steps[0].input.as_ref().unwrap();
+    assert_eq!(pipe.source, "items");
+    assert_eq!(pipe.transforms.len(), 3);
+    match &pipe.transforms[0] {
+        crate::ast::PipeTransform::Select { fields } => {
+            assert_eq!(fields, &["name", "price"]);
+        }
+        other => panic!("expected Select, got: {other:?}"),
+    }
+    match &pipe.transforms[1] {
+        crate::ast::PipeTransform::Unique { field } => {
+            assert_eq!(field.as_deref(), Some("name"));
+        }
+        other => panic!("expected Unique, got: {other:?}"),
+    }
+}

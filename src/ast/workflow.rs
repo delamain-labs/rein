@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use super::pipe::PipeExpr;
 use super::types::TypeExpr;
 use super::Span;
 
@@ -183,6 +184,8 @@ pub struct StepDef {
     pub agent: String,
     /// Natural language goal describing what the step should accomplish.
     pub goal: Option<String>,
+    /// Optional input pipe expression: `input: source | transform | ...`
+    pub input: Option<PipeExpr>,
     /// Output type constraints (e.g. `category: one of [billing, technical]`).
     pub output_constraints: Vec<(String, TypeExpr)>,
     /// Optional guard condition: `when: confidence < 70%`.
