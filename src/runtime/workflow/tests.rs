@@ -34,6 +34,7 @@ fn make_workflow(name: &str, trigger: &str, stage_agents: &[&str]) -> WorkflowDe
             })
             .collect(),
         steps: vec![],
+            route_blocks: vec![],
         mode: ExecutionMode::Sequential,
         span: Span::new(0, 1),
     }
@@ -353,6 +354,7 @@ fn make_conditional_workflow() -> (ReinFile, WorkflowDef) {
             },
         ],
         steps: vec![],
+            route_blocks: vec![],
         mode: ExecutionMode::Sequential,
         span: Span::new(0, 1),
     };
@@ -453,6 +455,7 @@ async fn conditional_no_else_ends_workflow() {
             },
         ],
         steps: vec![],
+            route_blocks: vec![],
         mode: ExecutionMode::Sequential,
         span: Span::new(0, 1),
     };
@@ -881,6 +884,7 @@ async fn conditional_route_to_nonexistent_stage_errors() {
             span: Span::new(0, 1),
         }],
         steps: vec![],
+            route_blocks: vec![],
         mode: ExecutionMode::Sequential,
         span: Span::new(0, 1),
     };
@@ -947,6 +951,7 @@ async fn circular_route_returns_error() {
             },
         ],
         steps: vec![],
+            route_blocks: vec![],
         mode: ExecutionMode::Sequential,
         span: Span::new(0, 1),
     };

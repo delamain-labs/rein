@@ -1310,3 +1310,81 @@ fn parse_import_single_name() {
         other => panic!("expected Named import, got {other:?}"),
     }
 }
+
+// ── route on block tests ────────────────────────────────────────────────
+
+#[test]
+fn parse_route_on_basic() {
+    let f = parse_ok(
+        r#"
+        agent classifier { model: openai }
+        agent billing_handler { model: openai }
+        agent default_handler { model: openai }
+        workflow support {
+            trigger: ticket
+            route on classify.category {
+                billing -> step handle_billing {
+                    agent: billing_handler
+                    goal: "Handle billing"
+                }
+                _ -> step escalate {
+                    agent: default_handler
+                    goal: "Escalate"
+                }
+            }
+        }
+    "#,
+    );
+    let wf = &f.workflows[0];
+    assert_eq!(wf.route_blocks.len(), 1);
+    let rb = &wf.route_blocks[0];
+    assert_eq!(rb.field_path, "classify.category");
+    assert_eq!(rb.arms.len(), 2);
+    assert!(matches!(&rb.arms[0].pattern, crate::ast::RoutePattern::Value(v) if v == "billing"));
+    assert_eq!(rb.arms[0].step.name, "handle_billing");
+    assert!(matches!(&rb.arms[1].pattern, crate::ast::RoutePattern::Wildcard));
+    assert_eq!(rb.arms[1].step.name, "escalate");
+}
+
+#[test]
+fn parse_route_on_multiple_arms() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        agent b { model: openai }
+        agent c { model: openai }
+        workflow w {
+            trigger: event
+            route on result.status {
+                success -> step ok { agent: a }
+                failure -> step fail { agent: b }
+                _ -> step unknown { agent: c }
+            }
+        }
+    "#,
+    );
+    let rb = &f.workflows[0].route_blocks[0];
+    assert_eq!(rb.arms.len(), 3);
+    assert!(matches!(&rb.arms[0].pattern, crate::ast::RoutePattern::Value(v) if v == "success"));
+    assert!(matches!(&rb.arms[1].pattern, crate::ast::RoutePattern::Value(v) if v == "failure"));
+    assert!(matches!(&rb.arms[2].pattern, crate::ast::RoutePattern::Wildcard));
+}
+
+#[test]
+fn parse_route_on_with_steps() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        agent b { model: openai }
+        workflow w {
+            trigger: event
+            step classify { agent: a goal: "Classify" }
+            route on classify.type {
+                billing -> step handle { agent: b }
+            }
+        }
+    "#,
+    );
+    assert_eq!(f.workflows[0].steps.len(), 1);
+    assert_eq!(f.workflows[0].route_blocks.len(), 1);
+}
