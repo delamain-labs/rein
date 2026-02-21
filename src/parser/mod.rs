@@ -196,7 +196,10 @@ impl Parser {
             | TokenKind::From
             | TokenKind::When
             | TokenKind::Route
-            | TokenKind::Parallel => {
+            | TokenKind::Parallel
+            | TokenKind::Auto
+            | TokenKind::Resolve
+            | TokenKind::Is => {
                 let name = tok.kind.to_string();
                 self.advance();
                 Ok((name, tok.span))
@@ -659,6 +662,7 @@ impl Parser {
         let mut steps: Vec<crate::ast::StepDef> = Vec::new();
         let mut route_blocks: Vec<crate::ast::RouteBlock> = Vec::new();
         let mut parallel_blocks: Vec<crate::ast::ParallelBlock> = Vec::new();
+        let mut auto_resolve: Option<crate::ast::AutoResolveBlock> = None;
         let mut seen_trigger = false;
         let mut seen_stages = false;
 
@@ -690,6 +694,7 @@ impl Parser {
                         steps,
                         route_blocks,
                         parallel_blocks,
+                        auto_resolve,
                         mode: ExecutionMode::Sequential,
                         span: Span::new(start, end),
                     });
@@ -726,6 +731,15 @@ impl Parser {
                 }
                 TokenKind::Parallel => {
                     parallel_blocks.push(self.parse_parallel_block()?);
+                }
+                TokenKind::Auto => {
+                    if auto_resolve.is_some() {
+                        return Err(ParseError::new(
+                            format!("duplicate 'auto resolve when' in workflow '{name}'"),
+                            self.current_span(),
+                        ));
+                    }
+                    auto_resolve = Some(self.parse_auto_resolve()?);
                 }
                 TokenKind::Eof => {
                     return Err(ParseError::new(
@@ -1079,6 +1093,79 @@ impl Parser {
                 format!("expected value (number, percentage, currency, or identifier), got {other}"),
                 self.current_span(),
             )),
+        }
+    }
+
+    /// Parse `auto resolve when { condition, condition, ... }`.
+    fn parse_auto_resolve(&mut self) -> Result<crate::ast::AutoResolveBlock, ParseError> {
+        let start = self.current_span().start;
+        self.expect(&TokenKind::Auto)?;
+        self.expect(&TokenKind::Resolve)?;
+        self.expect(&TokenKind::When)?;
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut conditions = Vec::new();
+        loop {
+            self.skip_comments();
+            if *self.peek() == TokenKind::RBrace {
+                break;
+            }
+            conditions.push(self.parse_auto_resolve_condition()?);
+            // Optional comma separator
+            if *self.peek() == TokenKind::Comma {
+                self.advance();
+            }
+        }
+        let end = self.current_span().end;
+        self.expect(&TokenKind::RBrace)?;
+
+        Ok(crate::ast::AutoResolveBlock {
+            conditions,
+            span: Span::new(start, end),
+        })
+    }
+
+    /// Parse a single auto-resolve condition.
+    ///
+    /// Either a comparison (`confidence > 90%`) or a membership check
+    /// (`action is one of [order_status, tracking]`).
+    fn parse_auto_resolve_condition(
+        &mut self,
+    ) -> Result<crate::ast::AutoResolveCondition, ParseError> {
+        let (field, _) = self.expect_ident()?;
+
+        // Check if next is `is one of [...]`
+        if *self.peek() == TokenKind::Is {
+            self.advance(); // is
+            let type_expr = self.parse_one_of()?;
+            match type_expr {
+                TypeExpr::OneOf { variants, .. } => {
+                    Ok(crate::ast::AutoResolveCondition::IsOneOf { field, variants })
+                }
+                _ => Err(ParseError::new(
+                    "expected 'one of [...]' after 'is'",
+                    self.current_span(),
+                )),
+            }
+        } else {
+            // It's a comparison
+            let op = match self.peek() {
+                TokenKind::Lt => crate::ast::CompareOp::Lt,
+                TokenKind::Gt => crate::ast::CompareOp::Gt,
+                TokenKind::LtEq => crate::ast::CompareOp::LtEq,
+                TokenKind::GtEq => crate::ast::CompareOp::GtEq,
+                other => {
+                    return Err(ParseError::new(
+                        format!("expected comparison operator or 'is', got {other}"),
+                        self.current_span(),
+                    ));
+                }
+            };
+            self.advance();
+            let value = self.parse_when_value()?;
+            Ok(crate::ast::AutoResolveCondition::Comparison(
+                crate::ast::WhenComparison { field, op, value },
+            ))
         }
     }
 
