@@ -4,6 +4,7 @@ use tempfile::NamedTempFile;
 
 fn sample_state() -> WorkflowState {
     WorkflowState {
+        version: WORKFLOW_STATE_VERSION,
         workflow_name: "support".to_string(),
         completed_stages: vec![CompletedStage {
             stage_name: "triage".to_string(),
@@ -60,6 +61,7 @@ fn multiple_completed_stages_roundtrip() {
     let path = tmp.path().to_path_buf();
 
     let state = WorkflowState {
+        version: WORKFLOW_STATE_VERSION,
         workflow_name: "pipeline".to_string(),
         completed_stages: vec![
             CompletedStage {
@@ -84,6 +86,24 @@ fn multiple_completed_stages_roundtrip() {
     let loaded = load_state(&path).unwrap().unwrap();
     assert_eq!(loaded.completed_stages.len(), 2);
     assert_eq!(loaded.next_input, "output_b");
+}
+
+#[test]
+fn load_state_without_version_defaults_to_1() {
+    let tmp = NamedTempFile::new().unwrap();
+    let path = tmp.path().to_path_buf();
+
+    // JSON without a "version" field — simulates old state files.
+    let json = r#"{
+        "workflow_name": "legacy",
+        "completed_stages": [],
+        "next_input": "hello"
+    }"#;
+    std::fs::write(&path, json).unwrap();
+
+    let loaded = load_state(&path).unwrap().expect("should load");
+    assert_eq!(loaded.version, 1);
+    assert_eq!(loaded.workflow_name, "legacy");
 }
 
 #[test]

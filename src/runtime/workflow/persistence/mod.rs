@@ -5,14 +5,24 @@ use std::path::Path;
 ///
 /// Written to disk as JSON after each stage completes so a crashed workflow
 /// can resume from the last completed stage.
+/// Current serialization version for `WorkflowState`.
+pub const WORKFLOW_STATE_VERSION: u32 = 1;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorkflowState {
+    /// Schema version for forward compatibility.
+    #[serde(default = "default_version")]
+    pub version: u32,
     /// Name of the workflow.
     pub workflow_name: String,
     /// Names of stages that have already completed (in execution order).
     pub completed_stages: Vec<CompletedStage>,
     /// The input that should be fed to the next stage.
     pub next_input: String,
+}
+
+fn default_version() -> u32 {
+    1
 }
 
 /// A stage that completed successfully, stored for resume.
