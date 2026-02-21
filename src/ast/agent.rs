@@ -27,9 +27,26 @@ pub struct Budget {
     pub span: Span,
 }
 
-/// A single `agent <name> { ... }` definition.
+/// A single `agent <name> { ... }` or `agent <name> from <archetype> { ... }` definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentDef {
+    pub name: String,
+    /// Optional archetype this agent inherits from.
+    pub from: Option<String>,
+    pub model: Option<ValueExpr>,
+    pub can: Vec<Capability>,
+    pub cannot: Vec<Capability>,
+    pub budget: Option<Budget>,
+    pub guardrails: Option<GuardrailsDef>,
+    pub span: Span,
+}
+
+/// An `archetype <name> { ... }` template definition.
+///
+/// Archetypes define reusable agent templates. Agents can inherit from
+/// an archetype using `agent <name> from <archetype> { ... }`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ArchetypeDef {
     pub name: String,
     pub model: Option<ValueExpr>,
     pub can: Vec<Capability>,

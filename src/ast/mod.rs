@@ -40,6 +40,7 @@ pub struct ReinFile {
     pub defaults: Option<DefaultsDef>,
     pub providers: Vec<ProviderDef>,
     pub tools: Vec<ToolDef>,
+    pub archetypes: Vec<ArchetypeDef>,
     pub agents: Vec<AgentDef>,
     pub workflows: Vec<WorkflowDef>,
     pub types: Vec<TypeDef>,

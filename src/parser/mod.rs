@@ -2,6 +2,7 @@ use crate::ast::{ReinFile, Span, ValueExpr};
 use crate::lexer::{Token, TokenKind, tokenize};
 
 mod agent_parser;
+mod common_parser;
 mod import_parser;
 mod step_parser;
 mod type_parser;
@@ -277,6 +278,7 @@ impl Parser {
         let mut defaults = None;
         let mut providers = Vec::new();
         let mut tools = Vec::new();
+        let mut archetypes = Vec::new();
         let mut agents = Vec::new();
         let mut workflows = Vec::new();
         let mut types = Vec::new();
@@ -294,13 +296,14 @@ impl Parser {
                 }
                 TokenKind::Provider => providers.push(self.parse_provider()?),
                 TokenKind::Tool => tools.push(self.parse_tool()?),
+                TokenKind::Archetype => archetypes.push(self.parse_archetype()?),
                 TokenKind::Agent => agents.push(self.parse_agent()?),
                 TokenKind::Workflow => workflows.push(self.parse_workflow()?),
                 TokenKind::Type => types.push(self.parse_type_def()?),
                 other => {
                     return Err(ParseError::new(
                         format!(
-                            "expected top-level declaration (defaults, provider, tool, agent, workflow, type), got {other}"
+                            "expected top-level declaration (defaults, provider, tool, archetype, agent, workflow, type), got {other}"
                         ),
                         self.current_span(),
                     ));
@@ -313,6 +316,7 @@ impl Parser {
             defaults,
             providers,
             tools,
+            archetypes,
             agents,
             workflows,
             types,

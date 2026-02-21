@@ -68,7 +68,7 @@ fn budget_serializes() {
 
 #[test]
 fn agent_def_full_serializes() {
-    let agent = AgentDef {
+    let agent = AgentDef { from: None,
         name: "support_triage".to_string(),
         model: Some(ValueExpr::Literal("anthropic".into())),
         can: vec![Capability {
@@ -102,12 +102,12 @@ fn agent_def_full_serializes() {
 
 #[test]
 fn rein_file_roundtrips_via_json() {
-    let file = ReinFile {
+    let file = ReinFile { archetypes: vec![],
         imports: vec![],
         defaults: None,
         providers: vec![],
         tools: vec![],
-        agents: vec![AgentDef {
+        agents: vec![AgentDef { from: None,
             name: "bot".to_string(),
             model: None,
             can: vec![],
@@ -126,7 +126,7 @@ fn rein_file_roundtrips_via_json() {
 
 #[test]
 fn agent_def_minimal_model_none() {
-    let agent = AgentDef {
+    let agent = AgentDef { from: None,
         name: "minimal".to_string(),
         model: None,
         can: vec![],
@@ -223,7 +223,7 @@ fn workflow_roundtrips_via_json() {
 
 #[test]
 fn rein_file_with_workflows_roundtrips() {
-    let file = ReinFile {
+    let file = ReinFile { archetypes: vec![],
         imports: vec![],
         defaults: None,
         providers: vec![],
