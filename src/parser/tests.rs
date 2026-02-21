@@ -1557,3 +1557,85 @@ fn parse_step_without_when() {
     );
     assert!(f.workflows[0].steps[0].when.is_none());
 }
+
+// ── retry policy tests ──────────────────────────────────────────────────
+
+#[test]
+fn parse_step_with_retry_escalate() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step x {
+                agent: a
+                on failure: retry 3 exponential then escalate
+            }
+        }
+    "#,
+    );
+    let step = &f.workflows[0].steps[0];
+    let policy = step.on_failure.as_ref().unwrap();
+    assert_eq!(policy.max_retries, 3);
+    assert_eq!(policy.backoff, crate::ast::BackoffStrategy::Exponential);
+    assert!(matches!(&policy.then, crate::ast::FailureAction::Escalate));
+}
+
+#[test]
+fn parse_step_with_retry_linear_then_step() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step x {
+                agent: a
+                on failure: retry 5 linear then fallback_handler
+            }
+        }
+    "#,
+    );
+    let policy = f.workflows[0].steps[0].on_failure.as_ref().unwrap();
+    assert_eq!(policy.max_retries, 5);
+    assert_eq!(policy.backoff, crate::ast::BackoffStrategy::Linear);
+    assert!(matches!(&policy.then, crate::ast::FailureAction::Step(s) if s == "fallback_handler"));
+}
+
+#[test]
+fn parse_step_with_retry_fixed() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step x {
+                agent: a
+                on failure: retry 2 fixed then escalate
+            }
+        }
+    "#,
+    );
+    let policy = f.workflows[0].steps[0].on_failure.as_ref().unwrap();
+    assert_eq!(policy.max_retries, 2);
+    assert_eq!(policy.backoff, crate::ast::BackoffStrategy::Fixed);
+}
+
+#[test]
+fn parse_step_with_when_and_retry() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step x {
+                agent: a
+                when: score < 50
+                on failure: retry 3 exponential then escalate
+            }
+        }
+    "#,
+    );
+    let step = &f.workflows[0].steps[0];
+    assert!(step.when.is_some());
+    assert!(step.on_failure.is_some());
+}

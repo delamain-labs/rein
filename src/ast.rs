@@ -228,6 +228,32 @@ pub struct TypeDef {
     pub span: Span,
 }
 
+/// Backoff strategy for retry policies.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum BackoffStrategy {
+    Exponential,
+    Linear,
+    Fixed,
+}
+
+/// Action to take after retries are exhausted.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FailureAction {
+    /// Escalate to a human or higher-level agent.
+    Escalate,
+    /// Execute a named step.
+    Step(String),
+}
+
+/// A retry policy: `on failure: retry N strategy then action`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RetryPolicy {
+    pub max_retries: u32,
+    pub backoff: BackoffStrategy,
+    pub then: FailureAction,
+}
+
 /// A comparison operator in a `when` expression.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CompareOp {
@@ -392,6 +418,8 @@ pub struct StepDef {
     pub output_constraints: Vec<(String, TypeExpr)>,
     /// Optional guard condition: `when: confidence < 70%`.
     pub when: Option<WhenExpr>,
+    /// Optional retry policy: `on failure: retry 3 exponential then escalate`.
+    pub on_failure: Option<RetryPolicy>,
     pub span: Span,
 }
 
