@@ -10,8 +10,12 @@ use super::Span;
 pub enum ValueExpr {
     /// A plain string or identifier value.
     Literal(String),
-    /// An environment variable reference: `env("VAR_NAME")`.
-    EnvRef { var_name: String, span: Span },
+    /// An environment variable reference: `env("VAR_NAME")` or with fallback `env("VAR_NAME", "default")`.
+    EnvRef {
+        var_name: String,
+        default: Option<String>,
+        span: Span,
+    },
 }
 
 /// Error from resolving a `ValueExpr`.
@@ -42,9 +46,11 @@ impl ValueExpr {
     {
         match self {
             Self::Literal(s) => Ok(s.clone()),
-            Self::EnvRef { var_name, .. } => {
-                env_lookup(var_name).ok_or_else(|| ResolveError::EnvVarNotSet(var_name.clone()))
-            }
+            Self::EnvRef {
+                var_name, default, ..
+            } => env_lookup(var_name).or_else(|| default.clone()).ok_or_else(|| {
+                ResolveError::EnvVarNotSet(var_name.clone())
+            }),
         }
     }
 

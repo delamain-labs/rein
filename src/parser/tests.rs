@@ -90,6 +90,7 @@ fn env_missing_rparen_errors() {
 fn env_resolve_with_present_var() {
     let expr = crate::ast::ValueExpr::EnvRef {
         var_name: "MY_KEY".to_string(),
+        default: None,
         span: crate::ast::Span::new(0, 1),
     };
     let lookup = |name: &str| {
@@ -106,6 +107,7 @@ fn env_resolve_with_present_var() {
 fn env_resolve_with_missing_var() {
     let expr = crate::ast::ValueExpr::EnvRef {
         var_name: "MISSING_KEY".to_string(),
+        default: None,
         span: crate::ast::Span::new(0, 1),
     };
     let lookup = |_: &str| None;
@@ -1936,4 +1938,66 @@ fn parse_policy_empty() {
     "#,
     );
     assert_eq!(f.policies[0].tiers.len(), 0);
+}
+
+#[test]
+fn env_with_default_value() {
+    let f = parse_ok(r#"provider openai { key: env("API_KEY", "fallback_key") }"#);
+    match &f.providers[0].key {
+        Some(crate::ast::ValueExpr::EnvRef {
+            var_name, default, ..
+        }) => {
+            assert_eq!(var_name, "API_KEY");
+            assert_eq!(default.as_deref(), Some("fallback_key"));
+        }
+        other => panic!("expected EnvRef with default, got: {other:?}"),
+    }
+}
+
+#[test]
+fn env_without_default_value() {
+    let f = parse_ok(r#"provider openai { key: env("API_KEY") }"#);
+    match &f.providers[0].key {
+        Some(crate::ast::ValueExpr::EnvRef {
+            var_name, default, ..
+        }) => {
+            assert_eq!(var_name, "API_KEY");
+            assert_eq!(*default, None);
+        }
+        other => panic!("expected EnvRef without default, got: {other:?}"),
+    }
+}
+
+#[test]
+fn env_resolve_with_default_missing_var() {
+    let expr = crate::ast::ValueExpr::EnvRef {
+        var_name: "MISSING".to_string(),
+        default: Some("fallback".to_string()),
+        span: crate::ast::Span::new(0, 1),
+    };
+    let result = expr.resolve_with(|_| None).unwrap();
+    assert_eq!(result, "fallback");
+}
+
+#[test]
+fn env_resolve_with_default_present_var() {
+    let expr = crate::ast::ValueExpr::EnvRef {
+        var_name: "MY_VAR".to_string(),
+        default: Some("fallback".to_string()),
+        span: crate::ast::Span::new(0, 1),
+    };
+    let result = expr.resolve_with(|name| {
+        if name == "MY_VAR" {
+            Some("real_value".to_string())
+        } else {
+            None
+        }
+    }).unwrap();
+    assert_eq!(result, "real_value");
+}
+
+#[test]
+fn env_default_requires_string_literal() {
+    let err = parse_err(r#"provider openai { key: env("API_KEY", 42) }"#);
+    assert!(err.message.contains("string literal"), "got: {}", err.message);
 }

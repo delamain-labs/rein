@@ -146,9 +146,34 @@ impl Parser {
                         ));
                     }
                 };
+                // Optional default: env("VAR", "default")
+                let default = if *self.peek() == TokenKind::Comma {
+                    self.advance();
+                    self.skip_comments();
+                    let default_tok = self.current().clone();
+                    match &default_tok.kind {
+                        TokenKind::StringLiteral(s) => {
+                            let s = s.clone();
+                            self.advance();
+                            Some(s)
+                        }
+                        _ => {
+                            return Err(ParseError::new(
+                                format!(
+                                    "env() default must be a string literal, got {}",
+                                    default_tok.kind
+                                ),
+                                default_tok.span,
+                            ));
+                        }
+                    }
+                } else {
+                    None
+                };
                 let end_span = self.expect(&TokenKind::RParen)?;
                 Ok(ValueExpr::EnvRef {
                     var_name,
+                    default,
                     span: Span::new(start, end_span.end),
                 })
             }
