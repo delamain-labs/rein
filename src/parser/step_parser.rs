@@ -1,0 +1,323 @@
+use crate::ast::{
+    BackoffStrategy, CompareOp, FailureAction, RetryPolicy, Span, StepDef, TypeExpr, ValueExpr,
+    WhenComparison, WhenExpr, WhenValue,
+};
+use crate::lexer::TokenKind;
+
+use super::{ParseError, Parser};
+
+impl Parser {
+    /// Parse a `step <name> { agent: <ident> goal: <text> }` block.
+    pub(super) fn parse_step(&mut self) -> Result<StepDef, ParseError> {
+        self.skip_comments();
+        let start = self.current_span().start;
+
+        self.expect(&TokenKind::Step)?;
+        let (name, _) = self.expect_ident()?;
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut agent: Option<String> = None;
+        let mut goal: Option<String> = None;
+        let mut output_constraints: Vec<(String, TypeExpr)> = Vec::new();
+        let mut when: Option<WhenExpr> = None;
+        let mut on_failure: Option<RetryPolicy> = None;
+        let mut seen_agent = false;
+        let mut seen_goal = false;
+
+        loop {
+            self.skip_comments();
+            match self.peek().clone() {
+                TokenKind::RBrace => {
+                    let end = self.current_span().end;
+                    self.advance();
+
+                    let agent = agent.ok_or_else(|| {
+                        ParseError::new(
+                            format!("step '{name}' is missing required field 'agent'"),
+                            Span::new(start, end),
+                        )
+                    })?;
+
+                    return Ok(StepDef {
+                        name,
+                        agent,
+                        goal,
+                        output_constraints,
+                        when,
+                        on_failure,
+                        span: Span::new(start, end),
+                    });
+                }
+                TokenKind::Agent => {
+                    self.parse_step_agent_field(&name, &mut agent, &mut seen_agent)?;
+                }
+                TokenKind::Goal => {
+                    self.parse_step_goal_field(&name, &mut goal, &mut seen_goal)?;
+                }
+                TokenKind::On => {
+                    if on_failure.is_some() {
+                        return Err(ParseError::new(
+                            format!("duplicate 'on failure' in step '{name}'"),
+                            self.current_span(),
+                        ));
+                    }
+                    on_failure = Some(self.parse_retry_policy()?);
+                }
+                TokenKind::When => {
+                    if when.is_some() {
+                        return Err(ParseError::new(
+                            format!("duplicate field 'when' in step '{name}'"),
+                            self.current_span(),
+                        ));
+                    }
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    when = Some(self.parse_when_expr()?);
+                }
+                TokenKind::Ident(ref field_name)
+                    if self.peek_at(1).is_some_and(|t| *t == TokenKind::Colon) =>
+                {
+                    let field_name = field_name.clone();
+                    self.advance(); // consume ident
+                    self.expect(&TokenKind::Colon)?;
+                    if *self.peek() == TokenKind::One {
+                        let type_expr = self.parse_one_of()?;
+                        output_constraints.push((field_name, type_expr));
+                    } else {
+                        return Err(ParseError::new(
+                            format!("unexpected field '{field_name}' in step '{name}'"),
+                            self.current_span(),
+                        ));
+                    }
+                }
+                TokenKind::Eof => {
+                    return Err(ParseError::new(
+                        "unexpected end of file: expected `}`",
+                        self.current_span(),
+                    ));
+                }
+                other => {
+                    return Err(ParseError::new(
+                        format!("unexpected token in step '{name}': {other}"),
+                        self.current_span(),
+                    ));
+                }
+            }
+        }
+    }
+
+    fn parse_step_agent_field(
+        &mut self,
+        step_name: &str,
+        agent: &mut Option<String>,
+        seen: &mut bool,
+    ) -> Result<(), ParseError> {
+        if *seen {
+            return Err(ParseError::new(
+                format!("duplicate field 'agent' in step '{step_name}'"),
+                self.current_span(),
+            ));
+        }
+        *seen = true;
+        self.advance();
+        self.expect(&TokenKind::Colon)?;
+        let (value, _) = self.expect_ident()?;
+        *agent = Some(value);
+        Ok(())
+    }
+
+    fn parse_step_goal_field(
+        &mut self,
+        step_name: &str,
+        goal: &mut Option<String>,
+        seen: &mut bool,
+    ) -> Result<(), ParseError> {
+        if *seen {
+            return Err(ParseError::new(
+                format!("duplicate field 'goal' in step '{step_name}'"),
+                self.current_span(),
+            ));
+        }
+        *seen = true;
+        self.advance();
+        self.expect(&TokenKind::Colon)?;
+        let value = self.parse_value_expr()?;
+        *goal = Some(match value {
+            ValueExpr::Literal(s) => s,
+            ValueExpr::EnvRef { span, .. } => {
+                return Err(ParseError::new(
+                    "goal must be a string literal, not env()",
+                    span,
+                ));
+            }
+        });
+        Ok(())
+    }
+
+    /// Parse `on failure: retry N strategy then action`.
+    pub(super) fn parse_retry_policy(&mut self) -> Result<RetryPolicy, ParseError> {
+        self.expect(&TokenKind::On)?;
+        self.expect(&TokenKind::Failure)?;
+        self.expect(&TokenKind::Colon)?;
+        self.expect(&TokenKind::Retry)?;
+
+        let max_retries = self.parse_retry_count()?;
+        let backoff = self.parse_backoff_strategy()?;
+
+        self.expect(&TokenKind::Then)?;
+
+        let then = self.parse_failure_action()?;
+
+        Ok(RetryPolicy {
+            max_retries,
+            backoff,
+            then,
+        })
+    }
+
+    fn parse_retry_count(&mut self) -> Result<u32, ParseError> {
+        match self.peek().clone() {
+            TokenKind::Number(n) => {
+                let val = n.parse::<u32>().map_err(|_| {
+                    ParseError::new(format!("invalid retry count: {n}"), self.current_span())
+                })?;
+                self.advance();
+                Ok(val)
+            }
+            other => Err(ParseError::new(
+                format!("expected retry count (number), got {other}"),
+                self.current_span(),
+            )),
+        }
+    }
+
+    fn parse_backoff_strategy(&mut self) -> Result<BackoffStrategy, ParseError> {
+        match self.peek() {
+            TokenKind::Exponential => {
+                self.advance();
+                Ok(BackoffStrategy::Exponential)
+            }
+            TokenKind::Linear => {
+                self.advance();
+                Ok(BackoffStrategy::Linear)
+            }
+            TokenKind::Fixed => {
+                self.advance();
+                Ok(BackoffStrategy::Fixed)
+            }
+            other => Err(ParseError::new(
+                format!("expected backoff strategy (exponential, linear, fixed), got {other}"),
+                self.current_span(),
+            )),
+        }
+    }
+
+    fn parse_failure_action(&mut self) -> Result<FailureAction, ParseError> {
+        match self.peek() {
+            TokenKind::Escalate => {
+                self.advance();
+                Ok(FailureAction::Escalate)
+            }
+            TokenKind::Ident(name) => {
+                let name = name.clone();
+                self.advance();
+                Ok(FailureAction::Step(name))
+            }
+            other => Err(ParseError::new(
+                format!("expected failure action (escalate or step name), got {other}"),
+                self.current_span(),
+            )),
+        }
+    }
+
+    /// Parse a `when` expression: `field op value [or|and field op value ...]`.
+    pub(super) fn parse_when_expr(&mut self) -> Result<WhenExpr, ParseError> {
+        let first = self.parse_when_comparison()?;
+        let mut expr = WhenExpr::Comparison(first);
+
+        loop {
+            self.skip_comments();
+            match self.peek() {
+                TokenKind::Or => {
+                    self.advance();
+                    let next = self.parse_when_comparison()?;
+                    expr = match expr {
+                        WhenExpr::Or(mut parts) => {
+                            parts.push(WhenExpr::Comparison(next));
+                            WhenExpr::Or(parts)
+                        }
+                        other => WhenExpr::Or(vec![other, WhenExpr::Comparison(next)]),
+                    };
+                }
+                TokenKind::And => {
+                    self.advance();
+                    let next = self.parse_when_comparison()?;
+                    expr = match expr {
+                        WhenExpr::And(mut parts) => {
+                            parts.push(WhenExpr::Comparison(next));
+                            WhenExpr::And(parts)
+                        }
+                        other => WhenExpr::And(vec![other, WhenExpr::Comparison(next)]),
+                    };
+                }
+                _ => break,
+            }
+        }
+        Ok(expr)
+    }
+
+    /// Parse a single comparison: `field op value`.
+    fn parse_when_comparison(&mut self) -> Result<WhenComparison, ParseError> {
+        let (field, _) = self.expect_ident()?;
+
+        let op = match self.peek() {
+            TokenKind::Lt => CompareOp::Lt,
+            TokenKind::Gt => CompareOp::Gt,
+            TokenKind::LtEq => CompareOp::LtEq,
+            TokenKind::GtEq => CompareOp::GtEq,
+            other => {
+                return Err(ParseError::new(
+                    format!("expected comparison operator (<, >, <=, >=), got {other}"),
+                    self.current_span(),
+                ));
+            }
+        };
+        self.advance();
+
+        let value = self.parse_when_value()?;
+
+        Ok(WhenComparison { field, op, value })
+    }
+
+    /// Parse a when value: number, percent, currency, or ident.
+    pub(super) fn parse_when_value(&mut self) -> Result<WhenValue, ParseError> {
+        match self.peek().clone() {
+            TokenKind::Number(n) => {
+                let n = n.clone();
+                self.advance();
+                // Check for trailing %
+                if *self.peek() == TokenKind::Percent {
+                    self.advance();
+                    Ok(WhenValue::Percent(n))
+                } else {
+                    Ok(WhenValue::Number(n))
+                }
+            }
+            TokenKind::Currency { symbol, amount } => {
+                self.advance();
+                Ok(WhenValue::Currency { symbol, amount })
+            }
+            TokenKind::Ident(name) => {
+                let name = name.clone();
+                self.advance();
+                Ok(WhenValue::Ident(name))
+            }
+            other => Err(ParseError::new(
+                format!(
+                    "expected value (number, percentage, currency, or identifier), got {other}"
+                ),
+                self.current_span(),
+            )),
+        }
+    }
+}
