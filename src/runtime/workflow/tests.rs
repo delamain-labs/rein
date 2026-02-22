@@ -990,3 +990,55 @@ async fn circular_route_returns_error() {
         "expected CircularRoute, got: {err}"
     );
 }
+
+#[tokio::test]
+async fn step_execution_runs_agent_with_goal() {
+    use crate::ast::StepDef;
+    let file = parse_file(
+        r#"
+        agent writer { model: openai can [ docs.write ] }
+    "#,
+    );
+
+    let workflow = WorkflowDef {
+        name: "test_wf".to_string(),
+        trigger: "new_doc".to_string(),
+        stages: vec![],
+        steps: vec![StepDef {
+            name: "draft".to_string(),
+            agent: "writer".to_string(),
+            goal: Some("Write a first draft".to_string()),
+            input: None,
+            output_constraints: vec![],
+            when: None,
+            on_failure: None,
+            send_to: None,
+            fallback: None,
+            span: Span::new(0, 1),
+        }],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        span: Span::new(0, 1),
+    };
+
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+    };
+
+    provider.push_response(simple_response("Draft complete!"));
+
+    let result = run_workflow(&workflow, &ctx).await.unwrap();
+    assert_eq!(result.stage_results.len(), 1);
+    assert_eq!(result.stage_results[0].stage_name, "draft");
+    assert_eq!(result.stage_results[0].agent_name, "writer");
+    assert_eq!(result.final_output, "Draft complete!");
+}
