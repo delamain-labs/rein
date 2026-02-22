@@ -37,6 +37,10 @@ fn step_typed_output() {
     let step = &f.workflows[0].steps[0];
     assert_eq!(step.typed_outputs.len(), 1);
     assert_eq!(step.typed_outputs[0].0, "items");
+    assert!(matches!(
+        &step.typed_outputs[0].1,
+        crate::ast::TypeExpr::Named { name, array: true } if name == "Product"
+    ));
 }
 
 #[test]
