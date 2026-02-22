@@ -128,3 +128,55 @@ hot_reload = true
     assert!(config.dev.watch);
     assert!(config.dev.hot_reload);
 }
+
+#[test]
+fn load_env_override_merges() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::write(
+        tmp.path().join("rein.toml"),
+        r#"
+[project]
+name = "base"
+
+[runtime]
+default_model = "gpt-4o"
+timeout_secs = 30
+"#,
+    )
+    .unwrap();
+
+    std::fs::write(
+        tmp.path().join("rein.env.staging.toml"),
+        r#"
+[runtime]
+default_model = "gpt-4o-mini"
+timeout_secs = 60
+
+[deploy]
+target = "aws"
+region = "eu-west-1"
+"#,
+    )
+    .unwrap();
+
+    let config = Config::load_for_env(tmp.path(), "staging");
+    assert_eq!(config.default_model, "gpt-4o-mini");
+    assert_eq!(config.request_timeout, Duration::from_secs(60));
+    assert_eq!(config.project.name, "base"); // not overridden
+}
+
+#[test]
+fn load_env_override_missing_file_uses_base() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::write(
+        tmp.path().join("rein.toml"),
+        r#"
+[runtime]
+default_model = "claude-3"
+"#,
+    )
+    .unwrap();
+
+    let config = Config::load_for_env(tmp.path(), "production");
+    assert_eq!(config.default_model, "claude-3");
+}

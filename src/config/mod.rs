@@ -114,12 +114,64 @@ impl Config {
 
     /// Load configuration from a specific directory.
     pub fn load_from_dir(dir: &Path) -> Self {
-        // Load .env file if present
+        let _ = dotenvy::dotenv();
+        let toml_config = Self::load_toml(dir);
+        Self::from_toml(toml_config)
+    }
+
+    /// Load config for a specific environment (e.g. "dev", "staging", "production").
+    /// Merges `rein.toml` base with `rein.env.<env>.toml` overrides.
+    pub fn load_for_env(dir: &Path, env_name: &str) -> Self {
         let _ = dotenvy::dotenv();
 
-        // Load rein.toml if present
-        let toml_config = Self::load_toml(dir);
+        let mut toml_config = Self::load_toml(dir);
+        let env_path = dir.join(format!("rein.env.{env_name}.toml"));
+        if let Ok(content) = std::fs::read_to_string(&env_path) {
+            if let Ok(overrides) = toml::from_str::<ReinToml>(&content) {
+                Self::merge_toml(&mut toml_config, &overrides);
+            }
+        }
 
+        Self::from_toml(toml_config)
+    }
+
+    fn load_toml(dir: &Path) -> ReinToml {
+        let path = dir.join("rein.toml");
+        match std::fs::read_to_string(&path) {
+            Ok(content) => toml::from_str(&content).unwrap_or_default(),
+            Err(_) => ReinToml::default(),
+        }
+    }
+
+    /// Merge overrides into base config. Non-default values from overrides win.
+    fn merge_toml(base: &mut ReinToml, overrides: &ReinToml) {
+        if !overrides.project.name.is_empty() {
+            base.project.name.clone_from(&overrides.project.name);
+        }
+        if overrides.runtime.default_model.is_some() {
+            base.runtime.default_model.clone_from(&overrides.runtime.default_model);
+        }
+        if overrides.runtime.timeout_secs.is_some() {
+            base.runtime.timeout_secs = overrides.runtime.timeout_secs;
+        }
+        if !overrides.runtime.log_level.is_empty() && overrides.runtime.log_level != "info" {
+            base.runtime.log_level.clone_from(&overrides.runtime.log_level);
+        }
+        if overrides.runtime.max_retries != 3 {
+            base.runtime.max_retries = overrides.runtime.max_retries;
+        }
+        if overrides.observability.trace_output.is_some() {
+            base.observability.trace_output.clone_from(&overrides.observability.trace_output);
+        }
+        if overrides.deploy.target.is_some() {
+            base.deploy.target.clone_from(&overrides.deploy.target);
+        }
+        if overrides.deploy.region.is_some() {
+            base.deploy.region.clone_from(&overrides.deploy.region);
+        }
+    }
+
+    fn from_toml(toml_config: ReinToml) -> Self {
         let default_model = toml_config
             .runtime
             .default_model
@@ -149,14 +201,6 @@ impl Config {
                 log_level: toml_config.runtime.log_level,
                 trace_output: toml_config.observability.trace_output,
             },
-        }
-    }
-
-    fn load_toml(dir: &Path) -> ReinToml {
-        let path = dir.join("rein.toml");
-        match std::fs::read_to_string(&path) {
-            Ok(content) => toml::from_str(&content).unwrap_or_default(),
-            Err(_) => ReinToml::default(),
         }
     }
 
