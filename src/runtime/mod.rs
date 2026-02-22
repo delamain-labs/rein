@@ -67,6 +67,66 @@ impl RunTrace {
         serde_json::to_string_pretty(self)
     }
 
+    /// Convert to a structured trace with timestamps and stats.
+    #[must_use]
+    pub fn to_structured(&self, agent_name: &str, started_at: &str, completed_at: &str, duration_ms: u64) -> StructuredTrace {
+        let mut total_tokens = 0u64;
+        let mut total_cost = 0u64;
+        let mut llm_calls = 0u64;
+        let mut tool_calls = 0u64;
+        let mut tool_denied = 0u64;
+
+        let events: Vec<TimestampedEvent> = self
+            .events
+            .iter()
+            .enumerate()
+            .map(|(i, e)| {
+                match e {
+                    RunEvent::LlmCall { input_tokens, output_tokens, cost_cents, .. } => {
+                        llm_calls += 1;
+                        total_tokens += input_tokens + output_tokens;
+                        total_cost += cost_cents;
+                    }
+                    RunEvent::ToolCallAttempt { allowed, .. } => {
+                        if *allowed { tool_calls += 1; } else { tool_denied += 1; }
+                    }
+                    _ => {}
+                }
+                TimestampedEvent {
+                    offset_ms: (i as u64) * 100,
+                    event: e.clone(),
+                }
+            })
+            .collect();
+
+        StructuredTrace {
+            version: "1.0".to_string(),
+            started_at: started_at.to_string(),
+            completed_at: completed_at.to_string(),
+            agent: agent_name.to_string(),
+            events,
+            stats: TraceStats {
+                total_tokens,
+                total_cost_cents: total_cost,
+                llm_calls,
+                tool_calls,
+                tool_calls_denied: tool_denied,
+                duration_ms,
+            },
+        }
+    }
+
+    /// Write the structured trace to a file as JSON.
+    ///
+    /// # Errors
+    /// Returns IO or serialization errors.
+    pub fn write_to_file(&self, path: &std::path::Path, agent_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let trace = self.to_structured(agent_name, "", "", 0);
+        let json = serde_json::to_string_pretty(&trace)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
     /// Produce a compact human-readable summary.
     #[must_use]
     pub fn summary(&self) -> String {
@@ -121,6 +181,44 @@ impl RunTrace {
 
         lines.join("\n")
     }
+}
+
+/// A structured trace with metadata for serialization to file or stdout.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StructuredTrace {
+    /// Schema version for forward compatibility.
+    pub version: String,
+    /// ISO 8601 timestamp when the run started.
+    pub started_at: String,
+    /// ISO 8601 timestamp when the run completed.
+    pub completed_at: String,
+    /// Agent name.
+    pub agent: String,
+    /// The events that occurred during the run.
+    pub events: Vec<TimestampedEvent>,
+    /// Aggregate statistics.
+    pub stats: TraceStats,
+}
+
+/// An event with a timestamp.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimestampedEvent {
+    /// Monotonic offset in milliseconds from run start.
+    pub offset_ms: u64,
+    /// The event payload.
+    #[serde(flatten)]
+    pub event: RunEvent,
+}
+
+/// Aggregate statistics for a run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceStats {
+    pub total_tokens: u64,
+    pub total_cost_cents: u64,
+    pub llm_calls: u64,
+    pub tool_calls: u64,
+    pub tool_calls_denied: u64,
+    pub duration_ms: u64,
 }
 
 /// Errors that can occur during an agent run.

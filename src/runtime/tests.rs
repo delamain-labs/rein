@@ -603,3 +603,53 @@ fn trace_summary_empty_trace() {
     let summary = trace.summary();
     assert!(summary.is_empty());
 }
+
+#[test]
+fn structured_trace_has_stats() {
+    let trace = RunTrace {
+        events: vec![
+            RunEvent::LlmCall {
+                model: "gpt-4o".into(),
+                input_tokens: 100,
+                output_tokens: 50,
+                cost_cents: 2,
+            },
+            RunEvent::ToolCallAttempt {
+                tool: ToolCall {
+                    namespace: "fs".into(),
+                    action: "read".into(),
+                    arguments: serde_json::Value::Null,
+                },
+                allowed: true,
+                reason: None,
+            },
+            RunEvent::ToolCallAttempt {
+                tool: ToolCall {
+                    namespace: "fs".into(),
+                    action: "delete".into(),
+                    arguments: serde_json::Value::Null,
+                },
+                allowed: false,
+                reason: Some("denied".into()),
+            },
+        ],
+    };
+    let structured = trace.to_structured("test_agent", "2024-01-01T00:00:00Z", "2024-01-01T00:01:00Z", 60000);
+    assert_eq!(structured.version, "1.0");
+    assert_eq!(structured.agent, "test_agent");
+    assert_eq!(structured.stats.total_tokens, 150);
+    assert_eq!(structured.stats.total_cost_cents, 2);
+    assert_eq!(structured.stats.llm_calls, 1);
+    assert_eq!(structured.stats.tool_calls, 1);
+    assert_eq!(structured.stats.tool_calls_denied, 1);
+    assert_eq!(structured.stats.duration_ms, 60000);
+}
+
+#[test]
+fn structured_trace_serializes_to_json() {
+    let trace = RunTrace { events: vec![] };
+    let structured = trace.to_structured("agent", "t0", "t1", 0);
+    let json = serde_json::to_string(&structured).unwrap();
+    assert!(json.contains("\"version\":\"1.0\""));
+    assert!(json.contains("\"agent\":\"agent\""));
+}
