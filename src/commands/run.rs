@@ -1,4 +1,4 @@
-pub fn run_agent(path: &std::path::Path, message: Option<&str>, dry_run: bool) -> i32 {
+pub fn run_agent(path: &std::path::Path, message: Option<&str>, dry_run: bool, otel: bool) -> i32 {
     let filename = path.to_string_lossy();
 
     let source = match std::fs::read_to_string(path) {
@@ -34,6 +34,10 @@ pub fn run_agent(path: &std::path::Path, message: Option<&str>, dry_run: bool) -
 
     if let Some(msg) = message {
         println!("Message: {msg}");
+    }
+
+    if otel {
+        println!("Note: --otel flag is available. After execution, traces will be exported as OTLP JSON.");
     }
 
     println!("Runtime not yet implemented");
