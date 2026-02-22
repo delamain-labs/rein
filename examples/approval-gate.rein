@@ -1,0 +1,41 @@
+// Human-in-the-loop approval gate.
+// The agent generates a deployment plan, then a human must approve it.
+// Try: rein validate examples/approval-gate.rein
+
+agent deploy_planner {
+    model: openai
+
+    can [
+        infra.read
+        infra.plan
+    ]
+
+    cannot [
+        infra.apply
+        infra.destroy
+    ]
+
+    budget: $5 per request
+
+    guardrails {
+        safety {
+            code_execution: block
+            prompt_injection: block
+        }
+    }
+}
+
+workflow deploy_pipeline {
+    trigger: deploy_requested
+
+    step plan {
+        agent: deploy_planner
+        goal: "Generate a deployment plan for the requested changes"
+        approve: human via slack("#deployments") timeout "4h"
+    }
+
+    step execute {
+        agent: deploy_planner
+        goal: "Apply the approved deployment plan"
+    }
+}

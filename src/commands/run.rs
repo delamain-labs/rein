@@ -41,27 +41,9 @@ pub fn run_agent(path: &std::path::Path, message: Option<&str>, dry_run: bool, o
 
     let user_message = message.unwrap_or("Hello");
 
-    // Resolve model to a provider.
-    let model_field = agent
-        .model
-        .as_ref()
-        .map_or("openai".to_string(), format_value_expr);
-
-    let provider_config = rein::runtime::provider::resolver::ProviderConfig {
-        openai_api_key: std::env::var("OPENAI_API_KEY").ok(),
-        openai_base_url: std::env::var("OPENAI_BASE_URL").ok(),
-        anthropic_api_key: std::env::var("ANTHROPIC_API_KEY").ok(),
-        anthropic_base_url: std::env::var("ANTHROPIC_BASE_URL").ok(),
-    };
-
-    let provider = match rein::runtime::provider::resolver::resolve(&model_field, &provider_config)
-    {
+    let provider = match resolve_provider(agent) {
         Ok(p) => p,
-        Err(e) => {
-            eprintln!("error: {e}");
-            eprintln!("hint: set OPENAI_API_KEY or ANTHROPIC_API_KEY environment variable");
-            return 1;
-        }
+        Err(code) => return code,
     };
 
     // Build permission registry from agent capabilities.
@@ -97,6 +79,16 @@ pub fn run_agent(path: &std::path::Path, message: Option<&str>, dry_run: bool, o
         engine = engine.with_circuit_breaker(cb);
     }
 
+    // Log policy tier if defined.
+    if let Some(policy_def) = file.policies.first() {
+        let policy = rein::runtime::policy::PolicyEngine::from_def(policy_def);
+        eprintln!(
+            "Policy: starting at tier '{}' ({} tiers defined)",
+            policy.current_tier(),
+            policy.tier_count()
+        );
+    }
+
     // Execute.
     let start = Instant::now();
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -121,6 +113,28 @@ pub fn run_agent(path: &std::path::Path, message: Option<&str>, dry_run: bool, o
             1
         }
     }
+}
+
+fn resolve_provider(
+    agent: &rein::ast::AgentDef,
+) -> Result<Box<dyn rein::runtime::provider::Provider>, i32> {
+    let model_field = agent
+        .model
+        .as_ref()
+        .map_or("openai".to_string(), format_value_expr);
+
+    let config = rein::runtime::provider::resolver::ProviderConfig {
+        openai_api_key: std::env::var("OPENAI_API_KEY").ok(),
+        openai_base_url: std::env::var("OPENAI_BASE_URL").ok(),
+        anthropic_api_key: std::env::var("ANTHROPIC_API_KEY").ok(),
+        anthropic_base_url: std::env::var("ANTHROPIC_BASE_URL").ok(),
+    };
+
+    rein::runtime::provider::resolver::resolve(&model_field, &config).map_err(|e| {
+        eprintln!("error: {e}");
+        eprintln!("hint: set OPENAI_API_KEY or ANTHROPIC_API_KEY environment variable");
+        1
+    })
 }
 
 fn write_otel_trace(

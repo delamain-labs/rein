@@ -1,4 +1,5 @@
 pub mod alerting;
+pub mod approval;
 pub mod audit;
 pub mod budget;
 pub mod circuit_breaker;
@@ -80,6 +81,11 @@ pub enum RunEvent {
         from_tier: String,
         to_tier: String,
         reason: String,
+    },
+    ApprovalRequested {
+        step: String,
+        channel: String,
+        status: String,
     },
     EvalResult {
         metric: String,
@@ -254,6 +260,15 @@ impl RunTrace {
                 } => {
                     lines.push(format!(
                         "  ⬇ policy: demoted {from_tier} → {to_tier} ({reason})"
+                    ));
+                }
+                RunEvent::ApprovalRequested {
+                    step,
+                    channel,
+                    status,
+                } => {
+                    lines.push(format!(
+                        "  🛑 approval: step '{step}' via {channel}: {status}"
                     ));
                 }
                 RunEvent::EvalResult {
