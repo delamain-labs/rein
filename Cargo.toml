@@ -1,5 +1,5 @@
 [package]
-name = "rein"
+name = "rein-lang"
 version = "0.1.0"
 edition = "2024"
 description = "A declarative language and runtime for AI agent orchestration"
