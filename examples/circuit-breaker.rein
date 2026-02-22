@@ -1,0 +1,20 @@
+// Circuit breaker that trips after 3 failures in 5 minutes.
+// Try: rein validate examples/circuit-breaker.rein --strict
+
+agent api_agent {
+    model: openai
+
+    can [
+        api.call
+        api.retry
+    ]
+
+    cannot [api.delete]
+
+    budget: $20 per hour
+}
+
+circuit_breaker api_protection {
+    open after: 3 failures in 5 min
+    half_open after: 2 min
+}

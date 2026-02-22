@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 pub fn run_agent(path: &std::path::Path, message: Option<&str>, dry_run: bool, otel: bool) -> i32 {
     let filename = path.to_string_lossy();
 
@@ -32,18 +34,119 @@ pub fn run_agent(path: &std::path::Path, message: Option<&str>, dry_run: bool, o
         return print_execution_plan(&file, message);
     }
 
-    if let Some(msg) = message {
-        println!("Message: {msg}");
+    let Some(agent) = file.agents.first() else {
+        eprintln!("error: no agents defined in '{filename}'");
+        return 1;
+    };
+
+    let user_message = message.unwrap_or("Hello");
+
+    // Resolve model to a provider.
+    let model_field = agent
+        .model
+        .as_ref()
+        .map_or("openai".to_string(), format_value_expr);
+
+    let provider_config = rein::runtime::provider::resolver::ProviderConfig {
+        openai_api_key: std::env::var("OPENAI_API_KEY").ok(),
+        openai_base_url: std::env::var("OPENAI_BASE_URL").ok(),
+        anthropic_api_key: std::env::var("ANTHROPIC_API_KEY").ok(),
+        anthropic_base_url: std::env::var("ANTHROPIC_BASE_URL").ok(),
+    };
+
+    let provider = match rein::runtime::provider::resolver::resolve(&model_field, &provider_config)
+    {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: {e}");
+            eprintln!("hint: set OPENAI_API_KEY or ANTHROPIC_API_KEY environment variable");
+            return 1;
+        }
+    };
+
+    // Build permission registry from agent capabilities.
+    let registry = rein::runtime::permissions::ToolRegistry::from_agent(agent);
+
+    // Build run config.
+    let config = rein::runtime::engine::RunConfig {
+        system_prompt: None,
+        max_turns: 10,
+        budget_cents: agent.budget.as_ref().map_or(0, |b| b.amount),
+    };
+
+    // Build engine with enforcement.
+    let executor = rein::runtime::executor::NoopExecutor;
+    let mut engine = rein::runtime::engine::AgentEngine::new(
+        provider.as_ref(),
+        &executor,
+        &registry,
+        Vec::new(),
+        config,
+    )
+    .with_stream(Box::new(rein::runtime::engine::StdoutStream));
+
+    // Attach guardrails if defined.
+    if let Some(ref guardrails_def) = agent.guardrails {
+        let guardrail_engine = rein::runtime::guardrails::GuardrailEngine::from_def(guardrails_def);
+        engine = engine.with_guardrails(guardrail_engine);
     }
 
-    if otel {
-        println!(
-            "Note: --otel flag is available. After execution, traces will be exported as OTLP JSON."
-        );
+    // Attach circuit breaker if defined.
+    if let Some(cb_def) = file.circuit_breakers.first() {
+        let cb = rein::runtime::circuit_breaker::CircuitBreaker::from_def(cb_def);
+        engine = engine.with_circuit_breaker(cb);
     }
 
-    println!("Runtime not yet implemented");
-    0
+    // Execute.
+    let start = Instant::now();
+    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+    let result = rt.block_on(engine.run(user_message));
+
+    match result {
+        Ok(run_result) => {
+            let duration = start.elapsed();
+            eprintln!();
+            eprintln!("--- Run complete ---");
+            eprintln!("{}", run_result.trace.summary());
+            eprintln!("Duration: {duration:.2?}");
+
+            if otel {
+                write_otel_trace(&run_result.trace, &agent.name, duration);
+            }
+            0
+        }
+        Err(e) => {
+            eprintln!();
+            eprintln!("Run failed: {e:?}");
+            1
+        }
+    }
+}
+
+fn write_otel_trace(
+    trace: &rein::runtime::RunTrace,
+    agent_name: &str,
+    duration: std::time::Duration,
+) {
+    let now = chrono::Utc::now();
+    let started = now - duration;
+    let structured = trace.to_structured(
+        agent_name,
+        &started.to_rfc3339(),
+        &now.to_rfc3339(),
+        duration.as_millis().try_into().unwrap_or(u64::MAX),
+    );
+
+    match rein::runtime::otel_export::to_otlp_json(&structured) {
+        Ok(json) => {
+            let path = format!("rein-trace-{}.json", now.format("%Y%m%d-%H%M%S"));
+            match std::fs::write(&path, &json) {
+                Ok(()) => eprintln!("OTLP trace written to {path}"),
+                Err(e) => eprintln!("Failed to write OTLP trace: {e}"),
+            }
+        }
+        Err(e) => eprintln!("Failed to serialize OTLP trace: {e}"),
+    }
 }
 
 fn format_value_expr(v: &rein::ast::ValueExpr) -> String {
