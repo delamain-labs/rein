@@ -1,0 +1,60 @@
+// Content moderation with progressive trust tiers.
+
+provider anthropic {
+    model: "claude-sonnet-4-20250514"
+    key: env("ANTHROPIC_API_KEY")
+}
+
+type ModerationResult {
+    verdict: one of [safe, flagged, blocked]
+    confidence: percentage
+    category: one of [spam, harassment, nsfw, misinformation, clean]
+}
+
+agent moderator {
+    model: anthropic
+
+    can [
+        content.read
+        content.classify
+        content.flag
+    ]
+
+    cannot [
+        content.delete
+        content.ban_user
+        users.modify
+    ]
+
+    budget: $100 per day
+}
+
+agent senior_moderator {
+    model: anthropic
+
+    can [
+        content.read
+        content.classify
+        content.flag
+        content.delete
+        content.ban_user
+    ]
+
+    cannot [
+        users.modify
+        billing.refund
+    ]
+
+    budget: $200 per day
+}
+
+policy {
+    tier supervised {
+        promote when accuracy > 95%
+    }
+}
+
+workflow moderation_pipeline {
+    trigger: new_content
+    stages: [moderator, senior_moderator]
+}
