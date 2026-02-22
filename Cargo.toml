@@ -29,6 +29,9 @@ async-trait = "0.1.89"
 regex = "1.12.3"
 toml = "0.8"
 chrono = { version = "0.4.43", features = ["serde"] }
+axum = { version = "0.8.8", features = ["json"] }
+tower-http = { version = "0.6.8", features = ["cors"] }
+tower = { version = "0.5.3", features = ["util"] }
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
