@@ -1,0 +1,75 @@
+// Customer support system with tiered agents and budget controls.
+
+provider anthropic {
+    model: "claude-sonnet-4-20250514"
+    key: env("ANTHROPIC_API_KEY")
+}
+
+type TicketCategory {
+    label: one of [billing, technical, account, general]
+    confidence: percentage
+}
+
+agent classifier {
+    model: anthropic
+
+    can [
+        zendesk.read_ticket
+    ]
+
+    cannot [
+        zendesk.reply_ticket
+        zendesk.delete_ticket
+    ]
+
+    budget: $0.01 per ticket
+}
+
+agent support_rep {
+    model: anthropic
+
+    can [
+        zendesk.read_ticket
+        zendesk.reply_ticket
+        zendesk.add_internal_note
+        stripe.lookup_customer
+    ]
+
+    cannot [
+        zendesk.delete_ticket
+        stripe.refund
+        stripe.modify_subscription
+    ]
+
+    budget: $0.05 per ticket
+
+    guardrails {
+        output_filter {
+            pii: redact
+            toxicity: block
+        }
+    }
+}
+
+agent billing_specialist {
+    model: anthropic
+
+    can [
+        zendesk.read_ticket
+        zendesk.reply_ticket
+        stripe.lookup_customer
+        stripe.refund up to $50
+    ]
+
+    cannot [
+        stripe.modify_subscription
+        zendesk.delete_ticket
+    ]
+
+    budget: $25 per day
+}
+
+workflow support_pipeline {
+    trigger: incoming_ticket
+    stages: [classifier, support_rep, billing_specialist]
+}

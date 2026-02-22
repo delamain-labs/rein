@@ -1,0 +1,55 @@
+// Automated code review with parallel security scanning.
+
+provider openai {
+    model: "gpt-4o"
+    key: env("OPENAI_API_KEY")
+}
+
+agent code_reviewer {
+    model: openai
+
+    can [
+        github.read_pr
+        github.read_diff
+        github.post_comment
+        github.request_changes
+    ]
+
+    cannot [
+        github.merge_pr
+        github.delete_branch
+        github.push_code
+        github.approve_pr
+    ]
+
+    budget: $5 per day
+}
+
+agent security_scanner {
+    model: openai
+
+    can [
+        github.read_pr
+        github.read_diff
+        github.post_comment
+    ]
+
+    cannot [
+        github.merge_pr
+        github.approve_pr
+        github.push_code
+    ]
+
+    budget: $3 per day
+
+    guardrails {
+        output_filter {
+            sensitive_data: block
+        }
+    }
+}
+
+workflow review_pipeline {
+    trigger: pull_request
+    stages: [code_reviewer, security_scanner]
+}
