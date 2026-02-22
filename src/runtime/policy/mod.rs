@@ -48,7 +48,7 @@ impl PolicyEngine {
                 let (metric, threshold) = t
                     .promote_when
                     .as_ref()
-                    .map_or((None, None), |when| extract_simple_comparison(when));
+                    .map_or((None, None), extract_simple_comparison);
                 TierState {
                     name: t.name.clone(),
                     promote_metric: metric,

@@ -1,0 +1,25 @@
+// An agent with guardrails that block PII and toxicity.
+// Try: rein run examples/safe-agent.rein -m "What is 2+2?"
+
+agent support_bot {
+    model: openai
+
+    can [
+        chat.respond
+    ]
+
+    cannot [
+        admin.delete
+        admin.modify
+    ]
+
+    budget: $5 per request
+
+    guardrails {
+        output_filter {
+            pii_detection: redact
+            toxicity: block
+            prompt_injection: block
+        }
+    }
+}

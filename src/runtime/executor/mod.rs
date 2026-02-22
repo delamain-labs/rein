@@ -39,6 +39,23 @@ pub trait ToolExecutor: Send + Sync {
 }
 
 // ---------------------------------------------------------------------------
+// Noop executor (for agents with no tools)
+// ---------------------------------------------------------------------------
+
+/// An executor that denies all tool calls. Use for chat-only agents.
+pub struct NoopExecutor;
+
+#[async_trait::async_trait]
+impl ToolExecutor for NoopExecutor {
+    async fn execute(&self, tool_call: &ToolCall) -> Result<ToolOutput, ExecutorError> {
+        Err(ExecutorError::NotFound(format!(
+            "{}.{}",
+            tool_call.namespace, tool_call.action
+        )))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Mock executor
 // ---------------------------------------------------------------------------
 

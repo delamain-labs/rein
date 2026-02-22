@@ -1,34 +1,42 @@
-// A support pipeline workflow with three stages.
+// A multi-step workflow with conditional routing.
+// Try: rein validate examples/workflow.rein --ast
 
 agent triage {
-    model: openai
-    can [
-        zendesk.read_ticket
-        zendesk.classify_ticket
-    ]
-    cannot [
-        zendesk.delete_ticket
-    ]
-}
-
-agent responder {
-    model: openai
-    can [
-        zendesk.read_ticket
-        zendesk.reply_ticket
-    ]
-}
-
-agent escalator {
     model: anthropic
+
     can [
-        zendesk.read_ticket
-        zendesk.escalate_ticket
-        slack.send_message
+        tickets.read
+        tickets.classify
     ]
+
+    cannot [tickets.delete]
+}
+
+agent resolver {
+    model: anthropic
+
+    can [
+        tickets.read
+        tickets.update
+        kb.search
+    ]
+
+    cannot [tickets.delete]
+
+    budget: $10 per request
 }
 
 workflow support_pipeline {
-    trigger: incoming_ticket
-    stages: [triage, responder, escalator]
+    trigger: ticket_created
+
+    step classify {
+        agent: triage
+        goal: "Classify the incoming support ticket by priority"
+    }
+
+    step resolve {
+        agent: resolver
+        goal: "Attempt to resolve the ticket automatically"
+        when: priority > 3
+    }
 }

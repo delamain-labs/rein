@@ -1,0 +1,5 @@
+// A minimal agent. Run with: rein run examples/hello.rein -m "Hello!"
+agent hello {
+    model: openai
+    can [chat.respond]
+}

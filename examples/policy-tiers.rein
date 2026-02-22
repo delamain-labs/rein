@@ -1,0 +1,25 @@
+// Progressive trust: agents start supervised and earn autonomy.
+// Try: rein explain examples/policy-tiers.rein
+
+agent trading_bot {
+    model: anthropic
+
+    can [
+        market.read
+        market.analyze
+    ]
+
+    cannot [market.trade]
+
+    budget: $100 per day
+}
+
+policy {
+    tier supervised {
+        promote when accuracy > 95%
+    }
+    tier autonomous {
+        promote when accuracy > 99%
+    }
+    tier fully_autonomous {}
+}
