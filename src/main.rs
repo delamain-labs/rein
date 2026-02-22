@@ -21,6 +21,15 @@ enum Command {
         #[arg(long)]
         ast: bool,
     },
+    /// Auto-format .rein files to canonical style
+    Fmt {
+        /// .rein files to format
+        #[arg(required = true)]
+        files: Vec<std::path::PathBuf>,
+        /// Check formatting without writing changes
+        #[arg(long)]
+        check: bool,
+    },
     /// Initialize a new Rein project
     Init {
         /// Directory name for the new project
@@ -43,6 +52,10 @@ async fn main() {
     match cli.command {
         Command::Validate { file, ast } => {
             let exit_code = commands::validate::run_validate(&file, ast);
+            process::exit(exit_code);
+        }
+        Command::Fmt { files, check } => {
+            let exit_code = commands::fmt::run_fmt(&files, check);
             process::exit(exit_code);
         }
         Command::Init { name } => {
