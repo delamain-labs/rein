@@ -39,10 +39,15 @@ pub fn run_fmt(files: &[std::path::PathBuf], check: bool) -> i32 {
     }
 
     if any_error {
-        2
-    } else {
-        i32::from(check && any_changed)
+        return 2;
     }
+    if check && any_changed {
+        return 1;
+    }
+    if !any_changed && !check {
+        println!("All {} files already formatted", files.len());
+    }
+    0
 }
 
 /// Format a .rein file source to canonical style.

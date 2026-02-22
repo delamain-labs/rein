@@ -20,6 +20,9 @@ enum Command {
         /// Print AST as JSON instead of validating
         #[arg(long)]
         ast: bool,
+        /// Output format: human (default) or json
+        #[arg(long, default_value = "human")]
+        format: String,
     },
     /// Aggregate and display cost statistics from trace files
     Cost {
@@ -56,8 +59,8 @@ enum Command {
 async fn main() {
     let cli = Cli::parse();
     match cli.command {
-        Command::Validate { file, ast } => {
-            let exit_code = commands::validate::run_validate(&file, ast);
+        Command::Validate { file, ast, format } => {
+            let exit_code = commands::validate::run_validate(&file, ast, &format);
             process::exit(exit_code);
         }
         Command::Cost { paths } => {
