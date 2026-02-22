@@ -45,7 +45,7 @@ impl MetricsCollector {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis().try_into().unwrap_or(u64::MAX);
-        self.metrics.lock().unwrap().push(Metric {
+        self.metrics.lock().expect("metrics mutex poisoned").push(Metric {
             name: name.into(),
             value,
             labels,
@@ -55,7 +55,7 @@ impl MetricsCollector {
 
     /// Export all metrics in the given format.
     pub fn export(&self, format: &ExportFormat) -> String {
-        let metrics = self.metrics.lock().unwrap();
+        let metrics = self.metrics.lock().expect("metrics mutex poisoned");
         match format {
             ExportFormat::Prometheus => export_prometheus(&metrics),
             ExportFormat::Json => serde_json::to_string_pretty(&*metrics).unwrap_or_default(),
@@ -68,12 +68,12 @@ impl MetricsCollector {
 
     /// Number of recorded metrics.
     pub fn len(&self) -> usize {
-        self.metrics.lock().unwrap().len()
+        self.metrics.lock().expect("metrics mutex poisoned").len()
     }
 
     /// Whether any metrics have been recorded.
     pub fn is_empty(&self) -> bool {
-        self.metrics.lock().unwrap().is_empty()
+        self.metrics.lock().expect("metrics mutex poisoned").is_empty()
     }
 }
 

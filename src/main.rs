@@ -53,6 +53,17 @@ enum Command {
         /// Path to the .rein file
         file: std::path::PathBuf,
     },
+    /// Start the Rein API server
+    Serve {
+        /// Path to the .rein file to serve
+        file: std::path::PathBuf,
+        /// Host to bind to
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        /// Port to listen on
+        #[arg(short, long, default_value_t = 3000)]
+        port: u16,
+    },
     /// Run an agent defined in a .rein file
     Run {
         /// Path to the .rein file
@@ -90,6 +101,10 @@ async fn main() {
         }
         Command::Explain { file } => {
             let exit_code = commands::explain::run_explain(&file);
+            process::exit(exit_code);
+        }
+        Command::Serve { file, host, port } => {
+            let exit_code = commands::serve::run_serve(&file, &host, port);
             process::exit(exit_code);
         }
         Command::Run { file, message } => {

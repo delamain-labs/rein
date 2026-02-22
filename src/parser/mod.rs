@@ -204,7 +204,7 @@ impl Parser {
             }
             // Keywords that can appear as values in certain contexts
             kind if kind.keyword_as_ident().is_some() => {
-                let name = kind.keyword_as_ident().unwrap().to_string();
+                let name = kind.keyword_as_ident().expect("guarded by is_some check").to_string();
                 self.advance();
                 Ok(ValueExpr::Literal(name))
             }
