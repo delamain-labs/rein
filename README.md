@@ -36,10 +36,10 @@ AI agents are shipping to production, but **trust** is the bottleneck, not capab
 ## Install
 
 ```bash
-# From source
-cargo install --path .
+# From crates.io
+cargo install rein-lang
 
-# Or build from the repo
+# Or from source
 git clone https://github.com/delamain-labs/rein.git
 cd rein && cargo build --release
 ```

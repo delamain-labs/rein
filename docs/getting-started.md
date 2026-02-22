@@ -6,7 +6,13 @@ Define governance for an AI agent in 5 minutes. No API keys required.
 
 ## Install
 
-**From source (requires Rust):**
+**From crates.io (requires Rust):**
+
+```bash
+cargo install rein-lang
+```
+
+**Or from source:**
 
 ```bash
 git clone https://github.com/delamain-labs/rein.git
@@ -212,7 +218,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rein
-        run: cargo install --git https://github.com/delamain-labs/rein.git
+        run: cargo install rein-lang
       - name: Validate
         run: rein validate agents/*.rein
       - name: Check formatting
