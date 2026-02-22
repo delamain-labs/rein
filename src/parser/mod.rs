@@ -409,3 +409,13 @@ impl Parser {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod eval_parser_tests;
+#[cfg(test)]
+mod memory_parser_tests;
+#[cfg(test)]
+mod schedule_parser_tests;
+#[cfg(test)]
+mod step_ext_tests;
+#[cfg(test)]
+mod secrets_parser_tests;
