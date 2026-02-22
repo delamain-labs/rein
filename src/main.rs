@@ -21,6 +21,12 @@ enum Command {
         #[arg(long)]
         ast: bool,
     },
+    /// Initialize a new Rein project
+    Init {
+        /// Directory name for the new project
+        #[arg(default_value = "my-rein-project")]
+        name: std::path::PathBuf,
+    },
     /// Run an agent defined in a .rein file
     Run {
         /// Path to the .rein file
@@ -37,6 +43,10 @@ async fn main() {
     match cli.command {
         Command::Validate { file, ast } => {
             let exit_code = commands::validate::run_validate(&file, ast);
+            process::exit(exit_code);
+        }
+        Command::Init { name } => {
+            let exit_code = commands::init::run_init(&name);
             process::exit(exit_code);
         }
         Command::Run { file, message } => {

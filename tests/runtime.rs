@@ -273,6 +273,7 @@ fn make_workflow(name: &str, trigger: &str, agents: &[&str]) -> WorkflowDef {
             route_blocks: vec![],
             parallel_blocks: vec![],
             auto_resolve: None,
+            within_blocks: vec![],
         mode: ExecutionMode::Sequential,
         span: Span::new(0, 1),
     }
