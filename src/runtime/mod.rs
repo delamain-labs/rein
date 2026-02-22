@@ -2,6 +2,8 @@ pub mod alerting;
 pub mod audit;
 pub mod budget;
 pub mod engine;
+pub mod eval;
+pub mod memory;
 pub mod events;
 pub mod execution;
 pub mod executor;
@@ -13,6 +15,7 @@ pub mod permissions;
 pub mod provider;
 pub mod registry;
 pub mod sandbox;
+pub mod schedule;
 pub mod webhook;
 pub mod workflow;
 
