@@ -149,19 +149,25 @@ impl Config {
             base.project.name.clone_from(&overrides.project.name);
         }
         if overrides.runtime.default_model.is_some() {
-            base.runtime.default_model.clone_from(&overrides.runtime.default_model);
+            base.runtime
+                .default_model
+                .clone_from(&overrides.runtime.default_model);
         }
         if overrides.runtime.timeout_secs.is_some() {
             base.runtime.timeout_secs = overrides.runtime.timeout_secs;
         }
         if !overrides.runtime.log_level.is_empty() && overrides.runtime.log_level != "info" {
-            base.runtime.log_level.clone_from(&overrides.runtime.log_level);
+            base.runtime
+                .log_level
+                .clone_from(&overrides.runtime.log_level);
         }
         if overrides.runtime.max_retries != 3 {
             base.runtime.max_retries = overrides.runtime.max_retries;
         }
         if overrides.observability.trace_output.is_some() {
-            base.observability.trace_output.clone_from(&overrides.observability.trace_output);
+            base.observability
+                .trace_output
+                .clone_from(&overrides.observability.trace_output);
         }
         if overrides.deploy.target.is_some() {
             base.deploy.target.clone_from(&overrides.deploy.target);

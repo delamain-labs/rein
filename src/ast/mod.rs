@@ -24,10 +24,10 @@ mod value;
 mod workflow;
 
 pub use agent::*;
+pub use approval::*;
 pub use channel::*;
 pub use circuit_breaker::*;
 pub use consensus::*;
-pub use approval::*;
 pub use escalate::*;
 pub use eval::*;
 pub use fleet::*;

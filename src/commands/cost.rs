@@ -68,9 +68,7 @@ fn print_summary(traces: &[StructuredTrace]) {
     let mut agent_costs: std::collections::HashMap<String, (u64, u64, u64)> =
         std::collections::HashMap::new();
     for trace in traces {
-        let entry = agent_costs
-            .entry(trace.agent.clone())
-            .or_insert((0, 0, 0));
+        let entry = agent_costs.entry(trace.agent.clone()).or_insert((0, 0, 0));
         entry.0 += trace.stats.total_cost_cents;
         entry.1 += trace.stats.total_tokens;
         entry.2 += 1;
@@ -98,7 +96,7 @@ fn print_summary(traces: &[StructuredTrace]) {
         println!("Per Agent");
         println!("---------");
         let mut agents: Vec<_> = agent_costs.into_iter().collect();
-        agents.sort_by(|a, b| b.1 .0.cmp(&a.1 .0));
+        agents.sort_by(|a, b| b.1.0.cmp(&a.1.0));
         for (agent, (cost, tokens, runs)) in agents {
             println!(
                 "  {agent}: ${}.{:02} ({tokens} tokens, {runs} runs)",

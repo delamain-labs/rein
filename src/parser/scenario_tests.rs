@@ -42,5 +42,8 @@ fn scenario_ident_values() {
     .unwrap();
     let s = &f.scenarios[0];
     assert_eq!(s.given[0], ("priority".to_string(), "low".to_string()));
-    assert_eq!(s.expect[0], ("action".to_string(), "auto_respond".to_string()));
+    assert_eq!(
+        s.expect[0],
+        ("action".to_string(), "auto_respond".to_string())
+    );
 }

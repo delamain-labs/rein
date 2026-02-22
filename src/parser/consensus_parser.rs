@@ -79,5 +79,4 @@ impl Parser {
         self.expect(&TokenKind::Agree)?;
         Ok(ConsensusRequirement { required, total })
     }
-
 }

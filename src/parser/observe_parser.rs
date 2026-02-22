@@ -108,10 +108,7 @@ impl Parser {
             self.advance();
         }
         if parts.is_empty() {
-            return Err(ParseError::new(
-                "expected value",
-                self.current_span(),
-            ));
+            return Err(ParseError::new("expected value", self.current_span()));
         }
         Ok(parts.join(" "))
     }

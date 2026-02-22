@@ -64,9 +64,7 @@ impl RbacEngine {
         let mut engine = Self::new();
         engine.add_role(Role {
             name: "admin".to_string(),
-            permissions: HashSet::from([
-                "*:*".to_string(),
-            ]),
+            permissions: HashSet::from(["*:*".to_string()]),
         });
         engine.add_role(Role {
             name: "operator".to_string(),

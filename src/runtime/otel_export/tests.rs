@@ -40,7 +40,12 @@ fn sample_trace() -> StructuredTrace {
     ];
 
     let trace = RunTrace { events };
-    trace.to_structured("test_agent", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", 1000)
+    trace.to_structured(
+        "test_agent",
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T00:00:01Z",
+        1000,
+    )
 }
 
 #[test]
@@ -103,9 +108,17 @@ fn otlp_root_span_has_stats() {
     let resource_spans = to_otlp(&trace);
     let root = &resource_spans.scope_spans[0].spans[0];
 
-    let tokens = root.attributes.iter().find(|a| a.key == "rein.tokens.total").unwrap();
+    let tokens = root
+        .attributes
+        .iter()
+        .find(|a| a.key == "rein.tokens.total")
+        .unwrap();
     assert_eq!(tokens.value.int_value, Some(150));
 
-    let cost = root.attributes.iter().find(|a| a.key == "rein.cost.cents").unwrap();
+    let cost = root
+        .attributes
+        .iter()
+        .find(|a| a.key == "rein.cost.cents")
+        .unwrap();
     assert_eq!(cost.value.int_value, Some(5));
 }

@@ -34,9 +34,10 @@ fn make_workflow(name: &str, trigger: &str, stage_agents: &[&str]) -> WorkflowDe
             })
             .collect(),
         steps: vec![],
-            route_blocks: vec![],
-            parallel_blocks: vec![],
-            auto_resolve: None, within_blocks: vec![],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
         mode: ExecutionMode::Sequential,
         schedule: None,
         span: Span::new(0, 1),
@@ -63,12 +64,9 @@ async fn single_stage_workflow() {
 
     provider.push_response(simple_response("Triaged: low priority"));
 
-    let result = run_sequential(
-        &workflow,
-        &ctx,
-    )
-    .await
-    .expect("should succeed");
+    let result = run_sequential(&workflow, &ctx)
+        .await
+        .expect("should succeed");
 
     assert_eq!(result.stage_results.len(), 1);
     assert_eq!(result.final_output, "Triaged: low priority");
@@ -101,12 +99,9 @@ async fn two_stage_pipeline_passes_output() {
         "Dear customer, we've fixed your billing issue.",
     ));
 
-    let result = run_sequential(
-        &workflow,
-        &ctx,
-    )
-    .await
-    .expect("should succeed");
+    let result = run_sequential(&workflow, &ctx)
+        .await
+        .expect("should succeed");
 
     assert_eq!(result.stage_results.len(), 2);
     assert_eq!(
@@ -147,12 +142,9 @@ async fn three_stage_pipeline() {
     provider.push_response(simple_response("output_b"));
     provider.push_response(simple_response("output_c"));
 
-    let result = run_sequential(
-        &workflow,
-        &ctx,
-    )
-    .await
-    .expect("should succeed");
+    let result = run_sequential(&workflow, &ctx)
+        .await
+        .expect("should succeed");
 
     assert_eq!(result.stage_results.len(), 3);
     assert_eq!(result.final_output, "output_c");
@@ -174,12 +166,7 @@ async fn unknown_agent_returns_error() {
 
     provider.push_response(simple_response("ok"));
 
-    let err = run_sequential(
-        &workflow,
-        &ctx,
-    )
-    .await
-    .unwrap_err();
+    let err = run_sequential(&workflow, &ctx).await.unwrap_err();
 
     assert!(err.to_string().contains("nonexistent"), "err: {err}");
 }
@@ -200,12 +187,7 @@ async fn stage_failure_returns_error() {
 
     provider.push_error("provider down");
 
-    let err = run_sequential(
-        &workflow,
-        &ctx,
-    )
-    .await
-    .unwrap_err();
+    let err = run_sequential(&workflow, &ctx).await.unwrap_err();
 
     assert!(matches!(err, WorkflowError::StageFailed { .. }));
 }
@@ -236,12 +218,7 @@ async fn parallel_workflow_runs_all_stages() {
     provider.push_response(simple_response("output_a"));
     provider.push_response(simple_response("output_b"));
 
-    let result = run_parallel(
-        &workflow,
-        &ctx,
-    )
-    .await
-    .expect("should succeed");
+    let result = run_parallel(&workflow, &ctx).await.expect("should succeed");
 
     assert_eq!(result.stage_results.len(), 2);
     assert_eq!(result.stage_results[0].output, "output_a");
@@ -269,12 +246,7 @@ async fn parallel_unknown_agent_errors() {
     // Queue response for agent "a" so it doesn't fail first
     provider.push_response(simple_response("ok"));
 
-    let err = run_parallel(
-        &workflow,
-        &ctx,
-    )
-    .await
-    .unwrap_err();
+    let err = run_parallel(&workflow, &ctx).await.unwrap_err();
 
     assert!(err.to_string().contains("missing"), "err: {err}");
 }
@@ -296,24 +268,14 @@ async fn run_workflow_dispatches_by_mode() {
     let mut seq = make_workflow("seq", "event", &["a"]);
     seq.mode = ExecutionMode::Sequential;
     provider.push_response(simple_response("sequential"));
-    let r1 = run_workflow(
-        &seq,
-        &ctx,
-    )
-    .await
-    .expect("ok");
+    let r1 = run_workflow(&seq, &ctx).await.expect("ok");
     assert_eq!(r1.final_output, "sequential");
 
     // Parallel
     let mut par = make_workflow("par", "event", &["a"]);
     par.mode = ExecutionMode::Parallel;
     provider.push_response(simple_response("parallel"));
-    let r2 = run_workflow(
-        &par,
-        &ctx,
-    )
-    .await
-    .expect("ok");
+    let r2 = run_workflow(&par, &ctx).await.expect("ok");
     assert!(r2.final_output.contains("parallel"));
 }
 
@@ -357,10 +319,12 @@ fn make_conditional_workflow() -> (ReinFile, WorkflowDef) {
             },
         ],
         steps: vec![],
-            route_blocks: vec![],
-            parallel_blocks: vec![],
-            auto_resolve: None, within_blocks: vec![],
-        mode: ExecutionMode::Sequential, schedule: None,
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
         span: Span::new(0, 1),
     };
 
@@ -385,12 +349,7 @@ async fn conditional_routes_to_then_stage() {
     provider.push_response(simple_response("Escalated to manager."));
     provider.push_response(simple_response("Final response after escalation."));
 
-    let result = run_sequential(
-        &workflow,
-        &ctx,
-    )
-    .await
-    .expect("ok");
+    let result = run_sequential(&workflow, &ctx).await.expect("ok");
 
     assert_eq!(result.stage_results.len(), 3);
     assert_eq!(result.stage_results[0].stage_name, "triage");
@@ -415,12 +374,7 @@ async fn conditional_routes_to_else_stage() {
     provider.push_response(simple_response("Priority: low. Simple question."));
     provider.push_response(simple_response("Here's your answer."));
 
-    let result = run_sequential(
-        &workflow,
-        &ctx,
-    )
-    .await
-    .expect("ok");
+    let result = run_sequential(&workflow, &ctx).await.expect("ok");
 
     assert_eq!(result.stage_results.len(), 2);
     assert_eq!(result.stage_results[0].stage_name, "triage");
@@ -460,10 +414,12 @@ async fn conditional_no_else_ends_workflow() {
             },
         ],
         steps: vec![],
-            route_blocks: vec![],
-            parallel_blocks: vec![],
-            auto_resolve: None, within_blocks: vec![],
-        mode: ExecutionMode::Sequential, schedule: None,
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
         span: Span::new(0, 1),
     };
 
@@ -479,12 +435,7 @@ async fn conditional_no_else_ends_workflow() {
 
     provider.push_response(simple_response("needs_action: no. All clear."));
 
-    let result = run_sequential(
-        &workflow,
-        &ctx,
-    )
-    .await
-    .expect("ok");
+    let result = run_sequential(&workflow, &ctx).await.expect("ok");
 
     assert_eq!(result.stage_results.len(), 1);
     assert_eq!(result.stage_results[0].stage_name, "checker");
@@ -518,13 +469,9 @@ async fn resumable_fresh_run_no_checkpoint() {
     let state_path = tmp.path().to_path_buf();
     drop(tmp); // no checkpoint — path now points to a nonexistent file
 
-    let result = run_sequential_resumable(
-        &workflow,
-        &ctx,
-        &state_path,
-    )
-    .await
-    .expect("should succeed");
+    let result = run_sequential_resumable(&workflow, &ctx, &state_path)
+        .await
+        .expect("should succeed");
 
     assert_eq!(result.stage_results.len(), 2);
     assert_eq!(result.final_output, "output_b");
@@ -576,13 +523,9 @@ async fn resumable_resumes_after_first_stage() {
     )
     .unwrap();
 
-    let result = run_sequential_resumable(
-        &workflow,
-        &ctx,
-        &state_path,
-    )
-    .await
-    .expect("should succeed");
+    let result = run_sequential_resumable(&workflow, &ctx, &state_path)
+        .await
+        .expect("should succeed");
 
     assert_eq!(result.stage_results.len(), 2);
     assert_eq!(result.stage_results[0].stage_name, "a");
@@ -649,13 +592,9 @@ async fn resumable_resumes_mid_pipeline() {
     )
     .unwrap();
 
-    let result = run_sequential_resumable(
-        &workflow,
-        &ctx,
-        &state_path,
-    )
-    .await
-    .expect("should succeed");
+    let result = run_sequential_resumable(&workflow, &ctx, &state_path)
+        .await
+        .expect("should succeed");
 
     assert_eq!(result.stage_results.len(), 4);
     assert_eq!(result.stage_results[0].stage_name, "a");
@@ -708,13 +647,9 @@ async fn resumable_different_workflow_name_restarts_fresh() {
     )
     .unwrap();
 
-    let result = run_sequential_resumable(
-        &workflow,
-        &ctx,
-        &state_path,
-    )
-    .await
-    .expect("should succeed");
+    let result = run_sequential_resumable(&workflow, &ctx, &state_path)
+        .await
+        .expect("should succeed");
 
     assert_eq!(result.stage_results.len(), 2);
     assert_eq!(result.stage_results[0].output, "output_a");
@@ -759,13 +694,9 @@ async fn resumable_conditional_routing_on_resume() {
     )
     .unwrap();
 
-    let result = run_sequential_resumable(
-        &workflow,
-        &ctx,
-        &state_path,
-    )
-    .await
-    .expect("should succeed");
+    let result = run_sequential_resumable(&workflow, &ctx, &state_path)
+        .await
+        .expect("should succeed");
 
     // triage (checkpoint) → escalate (condition matched) → respond (Next)
     assert_eq!(result.stage_results.len(), 3);
@@ -793,13 +724,9 @@ async fn resumable_corrupt_checkpoint_returns_persistence_error() {
     let state_path = tmp.path().to_path_buf();
     std::fs::write(&state_path, "not valid json {{{").unwrap();
 
-    let err = run_sequential_resumable(
-        &workflow,
-        &ctx,
-        &state_path,
-    )
-    .await
-    .unwrap_err();
+    let err = run_sequential_resumable(&workflow, &ctx, &state_path)
+        .await
+        .unwrap_err();
 
     assert!(
         matches!(err, WorkflowError::PersistenceFailure(_)),
@@ -824,8 +751,16 @@ async fn condition_match_rejects_prefix_false_positive() {
 
     // Contains matcher
     let contains = ConditionMatcher::Contains("bill".to_string());
-    assert!(condition_matches("category: billing issue", "category", &contains));
-    assert!(!condition_matches("category: technical", "category", &contains));
+    assert!(condition_matches(
+        "category: billing issue",
+        "category",
+        &contains
+    ));
+    assert!(!condition_matches(
+        "category: technical",
+        "category",
+        &contains
+    ));
 
     // Regex matcher
     let regex = ConditionMatcher::Regex(r"^(high|critical)$".to_string());
@@ -891,10 +826,12 @@ async fn conditional_route_to_nonexistent_stage_errors() {
             span: Span::new(0, 1),
         }],
         steps: vec![],
-            route_blocks: vec![],
-            parallel_blocks: vec![],
-            auto_resolve: None, within_blocks: vec![],
-        mode: ExecutionMode::Sequential, schedule: None,
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
         span: Span::new(0, 1),
     };
 
@@ -909,12 +846,7 @@ async fn conditional_route_to_nonexistent_stage_errors() {
     };
     provider.push_response(simple_response("priority: high"));
 
-    let err = run_sequential(
-        &workflow,
-        &ctx,
-    )
-    .await
-    .unwrap_err();
+    let err = run_sequential(&workflow, &ctx).await.unwrap_err();
 
     assert!(
         matches!(err, WorkflowError::StageNotFound(ref name) if name == "nonexistent"),
@@ -960,10 +892,12 @@ async fn circular_route_returns_error() {
             },
         ],
         steps: vec![],
-            route_blocks: vec![],
-            parallel_blocks: vec![],
-            auto_resolve: None, within_blocks: vec![],
-        mode: ExecutionMode::Sequential, schedule: None,
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
         span: Span::new(0, 1),
     };
 
@@ -979,12 +913,7 @@ async fn circular_route_returns_error() {
     provider.push_response(simple_response("go: yes"));
     provider.push_response(simple_response("go: yes"));
 
-    let err = run_sequential(
-        &workflow,
-        &ctx,
-    )
-    .await
-    .unwrap_err();
+    let err = run_sequential(&workflow, &ctx).await.unwrap_err();
 
     assert!(
         matches!(err, WorkflowError::CircularRoute(ref name) if name == "a"),

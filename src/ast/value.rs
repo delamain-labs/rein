@@ -57,9 +57,9 @@ impl ValueExpr {
             Self::Literal(s) => Ok(s.clone()),
             Self::EnvRef {
                 var_name, default, ..
-            } => env_lookup(var_name).or_else(|| default.clone()).ok_or_else(|| {
-                ResolveError::EnvVarNotSet(var_name.clone())
-            }),
+            } => env_lookup(var_name)
+                .or_else(|| default.clone())
+                .ok_or_else(|| ResolveError::EnvVarNotSet(var_name.clone())),
         }
     }
 

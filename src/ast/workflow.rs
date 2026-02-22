@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+use super::Span;
 use super::escalate::EscalateDef;
 use super::pipe::PipeExpr;
 use super::types::TypeExpr;
-use super::Span;
 
 /// A `send to` notification target with optional message template.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

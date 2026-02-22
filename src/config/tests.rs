@@ -75,10 +75,7 @@ trace_output = "traces/"
     assert_eq!(config.project.name, "my-project");
     assert_eq!(config.project.version, "1.0.0");
     assert_eq!(config.project.max_retries, 5);
-    assert_eq!(
-        config.project.trace_output,
-        Some("traces/".to_string())
-    );
+    assert_eq!(config.project.trace_output, Some("traces/".to_string()));
 }
 
 #[test]
@@ -123,7 +120,10 @@ hot_reload = true
 "#;
     let config: ReinToml = toml::from_str(toml_str).unwrap();
     assert_eq!(config.project.name, "test");
-    assert_eq!(config.registry.url, Some("https://registry.rein.dev".to_string()));
+    assert_eq!(
+        config.registry.url,
+        Some("https://registry.rein.dev".to_string())
+    );
     assert_eq!(config.deploy.target, Some("aws".to_string()));
     assert!(config.dev.watch);
     assert!(config.dev.hot_reload);

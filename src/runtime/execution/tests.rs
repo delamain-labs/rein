@@ -35,9 +35,9 @@ fn dedup_key_different_inputs() {
 #[test]
 fn retry_tracker_allows_up_to_max() {
     let mut tracker = RetryTracker::new(3);
-    assert!(tracker.attempt("step1"));  // 1
-    assert!(tracker.attempt("step1"));  // 2
-    assert!(tracker.attempt("step1"));  // 3
+    assert!(tracker.attempt("step1")); // 1
+    assert!(tracker.attempt("step1")); // 2
+    assert!(tracker.attempt("step1")); // 3
     assert!(!tracker.attempt("step1")); // 4 — exceeds
 }
 

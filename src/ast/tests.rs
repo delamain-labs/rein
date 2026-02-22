@@ -68,7 +68,8 @@ fn budget_serializes() {
 
 #[test]
 fn agent_def_full_serializes() {
-    let agent = AgentDef { from: None,
+    let agent = AgentDef {
+        from: None,
         name: "support_triage".to_string(),
         model: Some(ValueExpr::Literal("anthropic".into())),
         can: vec![Capability {
@@ -102,12 +103,24 @@ fn agent_def_full_serializes() {
 
 #[test]
 fn rein_file_roundtrips_via_json() {
-    let file = ReinFile { archetypes: vec![], policies: vec![], observes: vec![], fleets: vec![], channels: vec![], circuit_breakers: vec![], evals: vec![], memories: vec![], secrets: vec![], consensus_blocks: vec![], scenarios: vec![],
+    let file = ReinFile {
+        archetypes: vec![],
+        policies: vec![],
+        observes: vec![],
+        fleets: vec![],
+        channels: vec![],
+        circuit_breakers: vec![],
+        evals: vec![],
+        memories: vec![],
+        secrets: vec![],
+        consensus_blocks: vec![],
+        scenarios: vec![],
         imports: vec![],
         defaults: None,
         providers: vec![],
         tools: vec![],
-        agents: vec![AgentDef { from: None,
+        agents: vec![AgentDef {
+            from: None,
             name: "bot".to_string(),
             model: None,
             can: vec![],
@@ -126,7 +139,8 @@ fn rein_file_roundtrips_via_json() {
 
 #[test]
 fn agent_def_minimal_model_none() {
-    let agent = AgentDef { from: None,
+    let agent = AgentDef {
+        from: None,
         name: "minimal".to_string(),
         model: None,
         can: vec![],
@@ -192,8 +206,10 @@ fn workflow_def_serializes() {
         steps: vec![],
         route_blocks: vec![],
         parallel_blocks: vec![],
-        auto_resolve: None, within_blocks: vec![],
-        mode: ExecutionMode::Sequential, schedule: None,
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
         span: dummy_span(),
     };
     let json = serde_json::to_value(&workflow).unwrap();
@@ -212,8 +228,10 @@ fn workflow_roundtrips_via_json() {
         steps: vec![],
         route_blocks: vec![],
         parallel_blocks: vec![],
-        auto_resolve: None, within_blocks: vec![],
-        mode: ExecutionMode::Parallel, schedule: None,
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Parallel,
+        schedule: None,
         span: dummy_span(),
     };
     let json = serde_json::to_string(&workflow).unwrap();
@@ -223,7 +241,18 @@ fn workflow_roundtrips_via_json() {
 
 #[test]
 fn rein_file_with_workflows_roundtrips() {
-    let file = ReinFile { archetypes: vec![], policies: vec![], observes: vec![], fleets: vec![], channels: vec![], circuit_breakers: vec![], evals: vec![], memories: vec![], secrets: vec![], consensus_blocks: vec![], scenarios: vec![],
+    let file = ReinFile {
+        archetypes: vec![],
+        policies: vec![],
+        observes: vec![],
+        fleets: vec![],
+        channels: vec![],
+        circuit_breakers: vec![],
+        evals: vec![],
+        memories: vec![],
+        secrets: vec![],
+        consensus_blocks: vec![],
+        scenarios: vec![],
         imports: vec![],
         defaults: None,
         providers: vec![],
@@ -236,8 +265,10 @@ fn rein_file_with_workflows_roundtrips() {
             steps: vec![],
             route_blocks: vec![],
             parallel_blocks: vec![],
-            auto_resolve: None, within_blocks: vec![],
-            mode: ExecutionMode::Sequential, schedule: None,
+            auto_resolve: None,
+            within_blocks: vec![],
+            mode: ExecutionMode::Sequential,
+            schedule: None,
             span: dummy_span(),
         }],
         types: vec![],
@@ -269,8 +300,10 @@ fn workflow_def_find_stage() {
         steps: vec![],
         route_blocks: vec![],
         parallel_blocks: vec![],
-        auto_resolve: None, within_blocks: vec![],
-        mode: ExecutionMode::Sequential, schedule: None,
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
         span: dummy_span(),
     };
 

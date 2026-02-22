@@ -21,10 +21,13 @@ fn append_and_read() {
 #[test]
 fn multiple_entries() {
     let (_tmp, log) = test_log();
-    log.append(&entry(AuditKind::WorkflowStart, "start")).unwrap();
+    log.append(&entry(AuditKind::WorkflowStart, "start"))
+        .unwrap();
     log.append(&entry(AuditKind::StepStart, "step 1")).unwrap();
-    log.append(&entry(AuditKind::StepComplete, "step 1 done")).unwrap();
-    log.append(&entry(AuditKind::WorkflowComplete, "done")).unwrap();
+    log.append(&entry(AuditKind::StepComplete, "step 1 done"))
+        .unwrap();
+    log.append(&entry(AuditKind::WorkflowComplete, "done"))
+        .unwrap();
 
     let entries = log.read_all().unwrap();
     assert_eq!(entries.len(), 4);
@@ -33,9 +36,12 @@ fn multiple_entries() {
 #[test]
 fn query_by_kind() {
     let (_tmp, log) = test_log();
-    log.append(&entry(AuditKind::ToolCall, "called search")).unwrap();
-    log.append(&entry(AuditKind::GuardrailViolation, "PII detected")).unwrap();
-    log.append(&entry(AuditKind::ToolCall, "called write")).unwrap();
+    log.append(&entry(AuditKind::ToolCall, "called search"))
+        .unwrap();
+    log.append(&entry(AuditKind::GuardrailViolation, "PII detected"))
+        .unwrap();
+    log.append(&entry(AuditKind::ToolCall, "called write"))
+        .unwrap();
 
     let tool_calls = log.query_by_kind(&AuditKind::ToolCall).unwrap();
     assert_eq!(tool_calls.len(), 2);

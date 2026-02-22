@@ -106,7 +106,10 @@ impl Parser {
         }
 
         if parts.len() == 1 {
-            Ok(parts.into_iter().next().expect("parts vec must have at least one element"))
+            Ok(parts
+                .into_iter()
+                .next()
+                .expect("parts vec must have at least one element"))
         } else {
             Ok(WhenExpr::Or(parts))
         }
@@ -128,7 +131,10 @@ impl Parser {
         }
 
         if parts.len() == 1 {
-            Ok(parts.into_iter().next().expect("parts vec must have at least one element"))
+            Ok(parts
+                .into_iter()
+                .next()
+                .expect("parts vec must have at least one element"))
         } else {
             Ok(WhenExpr::And(parts))
         }

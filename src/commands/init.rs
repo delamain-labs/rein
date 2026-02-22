@@ -62,9 +62,10 @@ rein run agents/assistant.rein --message "Hello!"
 
 /// Run the `rein init` command. Creates a new project scaffold in the given directory.
 pub fn run_init(dir: &Path) -> i32 {
-    let project_name = dir
-        .file_name()
-        .map_or_else(|| "my-rein-project".to_string(), |n| n.to_string_lossy().to_string());
+    let project_name = dir.file_name().map_or_else(
+        || "my-rein-project".to_string(),
+        |n| n.to_string_lossy().to_string(),
+    );
 
     if dir.exists() && dir.read_dir().is_ok_and(|mut d| d.next().is_some()) {
         eprintln!("Error: directory '{}' is not empty", dir.display());

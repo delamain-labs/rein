@@ -32,7 +32,10 @@ fn schedule_every_n_hours() {
     )
     .unwrap();
     let sched = f.workflows[0].schedule.as_ref().unwrap();
-    assert!(matches!(&sched.expr, ScheduleExpr::EveryNHours { hours: 6 }));
+    assert!(matches!(
+        &sched.expr,
+        ScheduleExpr::EveryNHours { hours: 6 }
+    ));
 }
 
 #[test]

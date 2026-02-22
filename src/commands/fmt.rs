@@ -136,7 +136,11 @@ pub fn format_source(source: &str) -> String {
         let opens = trimmed.chars().filter(|&c| c == '{' || c == '[').count();
         let closes = trimmed.chars().filter(|&c| c == '}' || c == ']').count();
         // We already decremented for leading close, so only count non-leading closes
-        let effective_closes = if starts_with_close { closes - 1 } else { closes };
+        let effective_closes = if starts_with_close {
+            closes - 1
+        } else {
+            closes
+        };
         depth += i32::try_from(opens).unwrap_or(0) - i32::try_from(effective_closes).unwrap_or(0);
         if depth < 0 {
             depth = 0;
@@ -282,8 +286,8 @@ mod tests {
 
     #[test]
     fn test_check_mode() {
-        use tempfile::NamedTempFile;
         use std::io::Write;
+        use tempfile::NamedTempFile;
 
         let mut f = NamedTempFile::new().unwrap();
         write!(f, "agent foo {{\n  model:openai\n}}\n").unwrap();
@@ -299,8 +303,8 @@ mod tests {
 
     #[test]
     fn test_write_mode() {
-        use tempfile::NamedTempFile;
         use std::io::Write;
+        use tempfile::NamedTempFile;
 
         let mut f = NamedTempFile::new().unwrap();
         write!(f, "agent foo {{\n  model:openai\n}}\n").unwrap();

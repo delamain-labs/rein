@@ -43,11 +43,7 @@ async fn health_endpoint() {
 async fn list_agents_endpoint() {
     let app = build_router(test_state());
     let resp = app
-        .oneshot(
-            Request::get("/api/v1/agents")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::get("/api/v1/agents").body(Body::empty()).unwrap())
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -81,11 +77,7 @@ async fn list_workflows_endpoint() {
 async fn audit_empty() {
     let app = build_router(test_state());
     let resp = app
-        .oneshot(
-            Request::get("/api/v1/audit")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::get("/api/v1/audit").body(Body::empty()).unwrap())
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -98,11 +90,7 @@ async fn audit_empty() {
 async fn not_found() {
     let app = build_router(test_state());
     let resp = app
-        .oneshot(
-            Request::get("/nonexistent")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::get("/nonexistent").body(Body::empty()).unwrap())
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);

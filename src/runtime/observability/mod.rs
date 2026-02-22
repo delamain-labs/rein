@@ -44,13 +44,18 @@ impl MetricsCollector {
         let ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
-            .as_millis().try_into().unwrap_or(u64::MAX);
-        self.metrics.lock().expect("metrics mutex poisoned").push(Metric {
-            name: name.into(),
-            value,
-            labels,
-            timestamp_ms: ts,
-        });
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX);
+        self.metrics
+            .lock()
+            .expect("metrics mutex poisoned")
+            .push(Metric {
+                name: name.into(),
+                value,
+                labels,
+                timestamp_ms: ts,
+            });
     }
 
     /// Export all metrics in the given format.
@@ -73,7 +78,10 @@ impl MetricsCollector {
 
     /// Whether any metrics have been recorded.
     pub fn is_empty(&self) -> bool {
-        self.metrics.lock().expect("metrics mutex poisoned").is_empty()
+        self.metrics
+            .lock()
+            .expect("metrics mutex poisoned")
+            .is_empty()
     }
 }
 

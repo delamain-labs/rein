@@ -32,7 +32,8 @@ mod permissions_tests {
     }
 
     fn agent(can: Vec<Capability>, cannot: Vec<Capability>) -> AgentDef {
-        AgentDef { from: None,
+        AgentDef {
+            from: None,
             name: "test_agent".into(),
             model: None,
             can,
@@ -634,7 +635,12 @@ fn structured_trace_has_stats() {
             },
         ],
     };
-    let structured = trace.to_structured("test_agent", "2024-01-01T00:00:00Z", "2024-01-01T00:01:00Z", 60000);
+    let structured = trace.to_structured(
+        "test_agent",
+        "2024-01-01T00:00:00Z",
+        "2024-01-01T00:01:00Z",
+        60000,
+    );
     assert_eq!(structured.version, "1.0");
     assert_eq!(structured.agent, "test_agent");
     assert_eq!(structured.stats.total_tokens, 150);

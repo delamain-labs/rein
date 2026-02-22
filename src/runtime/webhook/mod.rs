@@ -45,7 +45,8 @@ impl WebhookConfig {
 
     /// Check if this webhook should fire for the given event.
     pub fn matches_event(&self, event: &str) -> bool {
-        self.active && (self.events.contains(&"*".to_string()) || self.events.iter().any(|e| e == event))
+        self.active
+            && (self.events.contains(&"*".to_string()) || self.events.iter().any(|e| e == event))
     }
 
     /// Compute HMAC signature for a payload.
@@ -76,7 +77,10 @@ impl WebhookRegistry {
 
     /// Get all webhooks that match an event.
     pub fn matching(&self, event: &str) -> Vec<&WebhookConfig> {
-        self.hooks.iter().filter(|h| h.matches_event(event)).collect()
+        self.hooks
+            .iter()
+            .filter(|h| h.matches_event(event))
+            .collect()
     }
 
     pub fn len(&self) -> usize {

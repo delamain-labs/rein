@@ -81,26 +81,24 @@ impl Parser {
                         "ttl" => {
                             ttl = Some(self.expect_string()?);
                         }
-                        "max_entries" => {
-                            match self.peek().clone() {
-                                TokenKind::Number(n) => {
-                                    let val = n.parse::<u64>().map_err(|_| {
-                                        ParseError::new(
-                                            "max_entries must be a positive integer",
-                                            self.current_span(),
-                                        )
-                                    })?;
-                                    self.advance();
-                                    max_entries = Some(val);
-                                }
-                                other => {
-                                    return Err(ParseError::new(
-                                        format!("expected number for max_entries, got {other}"),
+                        "max_entries" => match self.peek().clone() {
+                            TokenKind::Number(n) => {
+                                let val = n.parse::<u64>().map_err(|_| {
+                                    ParseError::new(
+                                        "max_entries must be a positive integer",
                                         self.current_span(),
-                                    ));
-                                }
+                                    )
+                                })?;
+                                self.advance();
+                                max_entries = Some(val);
                             }
-                        }
+                            other => {
+                                return Err(ParseError::new(
+                                    format!("expected number for max_entries, got {other}"),
+                                    self.current_span(),
+                                ));
+                            }
+                        },
                         "backend" => {
                             backend = Some(self.expect_string()?);
                         }

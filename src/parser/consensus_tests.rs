@@ -1,4 +1,4 @@
-use crate::ast::{ConsensusStrategy};
+use crate::ast::ConsensusStrategy;
 use crate::parser::parse;
 
 #[test]

@@ -37,7 +37,9 @@ pub fn list_tools() -> Vec<McpTool> {
     vec![
         McpTool {
             name: "rein_validate".to_string(),
-            description: "Validate a .rein policy file. Returns parse errors and validation diagnostics.".to_string(),
+            description:
+                "Validate a .rein policy file. Returns parse errors and validation diagnostics."
+                    .to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -71,7 +73,9 @@ pub fn list_tools() -> Vec<McpTool> {
         },
         McpTool {
             name: "rein_list_agents".to_string(),
-            description: "List all agents defined in a .rein policy with their capabilities and budgets.".to_string(),
+            description:
+                "List all agents defined in a .rein policy with their capabilities and budgets."
+                    .to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -82,7 +86,8 @@ pub fn list_tools() -> Vec<McpTool> {
         },
         McpTool {
             name: "rein_list_workflows".to_string(),
-            description: "List all workflows defined in a .rein policy with their steps.".to_string(),
+            description: "List all workflows defined in a .rein policy with their steps."
+                .to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -97,13 +102,15 @@ pub fn list_tools() -> Vec<McpTool> {
 /// Call an MCP tool by name with the given arguments.
 #[must_use]
 pub fn call_tool(name: &str, args: &serde_json::Value) -> McpResult {
-    let source = args
-        .get("source")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let source = args.get("source").and_then(|v| v.as_str()).unwrap_or("");
 
     match name {
-        "rein_validate" => tool_validate(source, args.get("strict").and_then(serde_json::Value::as_bool).unwrap_or(false)),
+        "rein_validate" => tool_validate(
+            source,
+            args.get("strict")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+        ),
         "rein_explain" => tool_explain(source),
         "rein_fmt" => tool_fmt(source),
         "rein_list_agents" => tool_list_agents(source),
@@ -137,7 +144,10 @@ fn tool_validate(source: &str, strict: bool) -> McpResult {
             text: "✓ Valid".to_string(),
         }
     } else {
-        let messages: Vec<String> = diags.iter().map(|d| format!("[{}] {}", d.code, d.message)).collect();
+        let messages: Vec<String> = diags
+            .iter()
+            .map(|d| format!("[{}] {}", d.code, d.message))
+            .collect();
         McpResult {
             result_type: "text".to_string(),
             text: messages.join("\n"),
@@ -161,14 +171,25 @@ fn tool_explain(source: &str) -> McpResult {
     if !file.agents.is_empty() {
         lines.push(format!("Agents ({}):", file.agents.len()));
         for a in &file.agents {
-            let model = a.model.as_ref().map_or("default".to_string(), |m| format!("{m:?}"));
+            let model = a
+                .model
+                .as_ref()
+                .map_or("default".to_string(), |m| format!("{m:?}"));
             lines.push(format!("  • {} (model: {model})", a.name));
             if !a.can.is_empty() {
-                let caps: Vec<String> = a.can.iter().map(|c| format!("{}.{}", c.namespace, c.action)).collect();
+                let caps: Vec<String> = a
+                    .can
+                    .iter()
+                    .map(|c| format!("{}.{}", c.namespace, c.action))
+                    .collect();
                 lines.push(format!("    can: {}", caps.join(", ")));
             }
             if !a.cannot.is_empty() {
-                let caps: Vec<String> = a.cannot.iter().map(|c| format!("{}.{}", c.namespace, c.action)).collect();
+                let caps: Vec<String> = a
+                    .cannot
+                    .iter()
+                    .map(|c| format!("{}.{}", c.namespace, c.action))
+                    .collect();
                 lines.push(format!("    cannot: {}", caps.join(", ")));
             }
         }
@@ -177,7 +198,12 @@ fn tool_explain(source: &str) -> McpResult {
     if !file.workflows.is_empty() {
         lines.push(format!("\nWorkflows ({}):", file.workflows.len()));
         for w in &file.workflows {
-            lines.push(format!("  • {} (trigger: {}, steps: {})", w.name, w.trigger, w.steps.len()));
+            lines.push(format!(
+                "  • {} (trigger: {}, steps: {})",
+                w.name,
+                w.trigger,
+                w.steps.len()
+            ));
             for s in &w.steps {
                 lines.push(format!("    → {} (agent: {})", s.name, s.agent));
             }

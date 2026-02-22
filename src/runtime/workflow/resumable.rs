@@ -4,8 +4,8 @@ use crate::ast::WorkflowDef;
 
 use super::persistence;
 use super::{
-    WorkflowContext, WorkflowError, WorkflowResult, build_result, resolve_next_stage, run_stage,
-    StageResult,
+    StageResult, WorkflowContext, WorkflowError, WorkflowResult, build_result, resolve_next_stage,
+    run_stage,
 };
 
 fn build_resume_context(

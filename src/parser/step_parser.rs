@@ -1,4 +1,6 @@
-use crate::ast::{EscalateDef, PipeExpr, RetryPolicy, SendTarget, Span, StepDef, TypeExpr, ValueExpr, WhenExpr};
+use crate::ast::{
+    EscalateDef, PipeExpr, RetryPolicy, SendTarget, Span, StepDef, TypeExpr, ValueExpr, WhenExpr,
+};
 use crate::lexer::TokenKind;
 
 use super::{ParseError, Parser};
@@ -43,11 +45,7 @@ impl Parser {
     }
 
     /// Parse the body of a block-form step (after the opening `{`).
-    fn parse_step_block_body(
-        &mut self,
-        name: String,
-        start: usize,
-    ) -> Result<StepDef, ParseError> {
+    fn parse_step_block_body(&mut self, name: String, start: usize) -> Result<StepDef, ParseError> {
         let mut f = StepFields::default();
 
         loop {
@@ -107,9 +105,7 @@ impl Parser {
                 TokenKind::Input => {
                     self.advance(); // consume `input`
                     self.expect(&TokenKind::Colon)?;
-                    self.parse_step_input_field(
-                        &name, &mut f.input, &mut f.typed_input,
-                    )?;
+                    self.parse_step_input_field(&name, &mut f.input, &mut f.typed_input)?;
                 }
                 TokenKind::Output => {
                     self.parse_step_typed_output(&name, &mut f.typed_outputs)?;
@@ -380,5 +376,4 @@ impl Parser {
         });
         Ok(())
     }
-
 }

@@ -5,7 +5,8 @@ use crate::ast::ValueExpr;
 use crate::ast::{AgentDef, Capability, Constraint, Span};
 
 fn make_agent(can: Vec<Capability>, cannot: Vec<Capability>) -> AgentDef {
-    AgentDef { from: None,
+    AgentDef {
+        from: None,
         name: "test_agent".to_string(),
         model: Some(ValueExpr::Literal("openai".into())),
         can,

@@ -1,21 +1,54 @@
-use crate::ast::{ReinFile, Span};
 use super::Diagnostic;
+use crate::ast::{ReinFile, Span};
 
 /// Features that parse and validate but are NOT enforced by the runtime.
 /// In strict mode, we warn users about each one so they don't get a
 /// false sense of security.
 const UNENFORCED_FEATURES: &[(&str, &str)] = &[
-    ("guardrails", "Guardrails blocks are parsed but not enforced at runtime. Output filtering, PII redaction, and toxicity blocking will not be applied."),
-    ("policy", "Policy/trust tier blocks are parsed but not enforced. Progressive trust (promote/demote) will not take effect."),
-    ("circuit_breaker", "Circuit breaker blocks are parsed but not enforced. Failure thresholds and half-open recovery will not activate."),
-    ("consensus", "Consensus blocks are parsed but not enforced. Multi-agent verification will not occur."),
-    ("eval", "Eval blocks are parsed but not enforced. Quality gates and dataset assertions will not run."),
-    ("observe", "Observe blocks are parsed but not enforced. Custom metrics, alerts, and trace exports will not activate."),
-    ("approval", "Approval workflow blocks are parsed but not enforced. Human-in-the-loop approvals will not gate execution."),
-    ("secrets", "Secrets blocks are parsed but not enforced. Vault references will not be resolved."),
-    ("fleet", "Fleet blocks are parsed but not enforced. Agent group scaling and policies will not apply."),
-    ("channel", "Channel blocks are parsed but not enforced. Async agent messaging will not activate."),
-    ("scenario", "Scenario blocks are parsed but not enforced. Declarative tests will not execute."),
+    (
+        "guardrails",
+        "Guardrails blocks are parsed but not enforced at runtime. Output filtering, PII redaction, and toxicity blocking will not be applied.",
+    ),
+    (
+        "policy",
+        "Policy/trust tier blocks are parsed but not enforced. Progressive trust (promote/demote) will not take effect.",
+    ),
+    (
+        "circuit_breaker",
+        "Circuit breaker blocks are parsed but not enforced. Failure thresholds and half-open recovery will not activate.",
+    ),
+    (
+        "consensus",
+        "Consensus blocks are parsed but not enforced. Multi-agent verification will not occur.",
+    ),
+    (
+        "eval",
+        "Eval blocks are parsed but not enforced. Quality gates and dataset assertions will not run.",
+    ),
+    (
+        "observe",
+        "Observe blocks are parsed but not enforced. Custom metrics, alerts, and trace exports will not activate.",
+    ),
+    (
+        "approval",
+        "Approval workflow blocks are parsed but not enforced. Human-in-the-loop approvals will not gate execution.",
+    ),
+    (
+        "secrets",
+        "Secrets blocks are parsed but not enforced. Vault references will not be resolved.",
+    ),
+    (
+        "fleet",
+        "Fleet blocks are parsed but not enforced. Agent group scaling and policies will not apply.",
+    ),
+    (
+        "channel",
+        "Channel blocks are parsed but not enforced. Async agent messaging will not activate.",
+    ),
+    (
+        "scenario",
+        "Scenario blocks are parsed but not enforced. Declarative tests will not execute.",
+    ),
 ];
 
 /// Check for parsed-but-unenforced safety features and return warnings.
@@ -72,7 +105,10 @@ pub fn check_unenforced(file: &ReinFile) -> Vec<Diagnostic> {
 }
 
 fn add_warning(diags: &mut Vec<Diagnostic>, feature: &str, span: &Span) {
-    if let Some((_, msg)) = UNENFORCED_FEATURES.iter().find(|(name, _)| *name == feature) {
+    if let Some((_, msg)) = UNENFORCED_FEATURES
+        .iter()
+        .find(|(name, _)| *name == feature)
+    {
         diags.push(Diagnostic::warning("W_UNENFORCED", *msg, span.clone()));
     }
 }

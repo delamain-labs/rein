@@ -8,8 +8,8 @@ use std::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DiagnosticSeverity, Hover, HoverContents, HoverParams, HoverProviderCapability,
+    DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, Hover, HoverContents, HoverParams, HoverProviderCapability,
     InitializeParams, InitializeResult, InitializedParams, MarkupContent, MarkupKind, MessageType,
     Position, Range, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
 };
@@ -228,7 +228,10 @@ fn word_at_position(text: &str, pos: Position) -> String {
 }
 
 const KEYWORD_COMPLETIONS: &[(&str, &str)] = &[
-    ("agent", "Define an AI agent with capabilities and constraints"),
+    (
+        "agent",
+        "Define an AI agent with capabilities and constraints",
+    ),
     ("workflow", "Define a multi-step workflow"),
     ("step", "A unit of work within a workflow"),
     ("provider", "Configure an AI model provider"),
@@ -264,14 +267,30 @@ const KEYWORD_COMPLETIONS: &[(&str, &str)] = &[
 
 fn keyword_docs(word: &str) -> Option<String> {
     let docs = match word {
-        "agent" => "## agent\n\nDefine an AI agent with model, capabilities, and constraints.\n\n```rein\nagent name {\n    model: gpt-4\n    can: action1, action2\n    cannot: action3\n    budget: $100 per day\n}\n```",
-        "workflow" => "## workflow\n\nDefine a multi-step workflow with triggers and steps.\n\n```rein\nworkflow name {\n    trigger: event\n    step classify { agent: bot, goal: \"...\" }\n}\n```",
-        "step" => "## step\n\nA unit of work within a workflow.\n\n```rein\nstep name {\n    agent: agent_name\n    goal: \"Task description\"\n    when: condition\n}\n```",
-        "provider" => "## provider\n\nConfigure an AI model provider.\n\n```rein\nprovider openai {\n    model: gpt-4\n    key: env(\"OPENAI_API_KEY\")\n}\n```",
-        "budget" => "## budget\n\nSpending constraint with currency and time period.\n\n```rein\nbudget: $100 per day\nbudget: €500 per month\n```",
-        "can" | "cannot" => "## can / cannot\n\nCapability lists. Use `up_to` for constrained capabilities.\n\n```rein\ncan: read_files, search_web\ncan: issue_refunds up_to $500\ncannot: delete_data\n```",
-        "when" => "## when\n\nGuard condition on steps. Supports comparison operators and boolean logic.\n\n```rein\nwhen: confidence < 70%\nwhen: status == \"critical\" and priority > 3\n```",
-        "env" => "## env()\n\nReference an environment variable with optional default.\n\n```rein\nkey: env(\"API_KEY\")\nkey: env(\"API_KEY\", \"default_value\")\n```",
+        "agent" => {
+            "## agent\n\nDefine an AI agent with model, capabilities, and constraints.\n\n```rein\nagent name {\n    model: gpt-4\n    can: action1, action2\n    cannot: action3\n    budget: $100 per day\n}\n```"
+        }
+        "workflow" => {
+            "## workflow\n\nDefine a multi-step workflow with triggers and steps.\n\n```rein\nworkflow name {\n    trigger: event\n    step classify { agent: bot, goal: \"...\" }\n}\n```"
+        }
+        "step" => {
+            "## step\n\nA unit of work within a workflow.\n\n```rein\nstep name {\n    agent: agent_name\n    goal: \"Task description\"\n    when: condition\n}\n```"
+        }
+        "provider" => {
+            "## provider\n\nConfigure an AI model provider.\n\n```rein\nprovider openai {\n    model: gpt-4\n    key: env(\"OPENAI_API_KEY\")\n}\n```"
+        }
+        "budget" => {
+            "## budget\n\nSpending constraint with currency and time period.\n\n```rein\nbudget: $100 per day\nbudget: €500 per month\n```"
+        }
+        "can" | "cannot" => {
+            "## can / cannot\n\nCapability lists. Use `up_to` for constrained capabilities.\n\n```rein\ncan: read_files, search_web\ncan: issue_refunds up_to $500\ncannot: delete_data\n```"
+        }
+        "when" => {
+            "## when\n\nGuard condition on steps. Supports comparison operators and boolean logic.\n\n```rein\nwhen: confidence < 70%\nwhen: status == \"critical\" and priority > 3\n```"
+        }
+        "env" => {
+            "## env()\n\nReference an environment variable with optional default.\n\n```rein\nkey: env(\"API_KEY\")\nkey: env(\"API_KEY\", \"default_value\")\n```"
+        }
         _ => return None,
     };
     Some(docs.to_string())

@@ -1,9 +1,4 @@
-use axum::{
-    Json, Router,
-    extract::State,
-    http::StatusCode,
-    routing::get,
-};
+use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -48,7 +43,11 @@ async fn list_agents(State(state): State<Arc<AppState>>) -> Json<AgentsResponse>
                 crate::ast::ValueExpr::Literal(s) => s.clone(),
                 crate::ast::ValueExpr::EnvRef { var_name, .. } => format!("env({var_name})"),
             }),
-            capabilities: a.can.iter().map(|c| format!("{}.{}", c.namespace, c.action)).collect(),
+            capabilities: a
+                .can
+                .iter()
+                .map(|c| format!("{}.{}", c.namespace, c.action))
+                .collect(),
         })
         .collect();
     Json(AgentsResponse { agents })

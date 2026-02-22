@@ -80,7 +80,9 @@ pub fn validate(expr: &ScheduleExpr) -> Result<(), String> {
         }
         ScheduleExpr::EveryNMinutes { minutes } => {
             if *minutes == 0 || *minutes > 10_080 {
-                return Err(format!("invalid interval: {minutes} minutes (must be 1-10080)"));
+                return Err(format!(
+                    "invalid interval: {minutes} minutes (must be 1-10080)"
+                ));
             }
             Ok(())
         }

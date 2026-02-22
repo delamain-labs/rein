@@ -79,6 +79,8 @@ pub fn make_event(kind: EventKind, source: impl Into<String>, data: serde_json::
         timestamp_ms: SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
-            .as_millis().try_into().unwrap_or(u64::MAX),
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX),
     }
 }

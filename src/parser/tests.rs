@@ -1100,11 +1100,7 @@ fn parse_one_of_empty_variants_errors() {
         }
     "#,
     );
-    assert!(
-        err.message.contains("at least one"),
-        "got: {}",
-        err.message
-    );
+    assert!(err.message.contains("at least one"), "got: {}", err.message);
 }
 
 #[test]
@@ -1150,13 +1146,19 @@ fn parse_type_def_basic() {
     assert_eq!(td.fields.len(), 3);
 
     assert_eq!(td.fields[0].name, "category");
-    assert!(matches!(&td.fields[0].type_expr, TypeExpr::OneOf { variants, .. } if variants.len() == 3));
+    assert!(
+        matches!(&td.fields[0].type_expr, TypeExpr::OneOf { variants, .. } if variants.len() == 3)
+    );
 
     assert_eq!(td.fields[1].name, "confidence");
-    assert!(matches!(&td.fields[1].type_expr, TypeExpr::Named { name, array: false } if name == "percent"));
+    assert!(
+        matches!(&td.fields[1].type_expr, TypeExpr::Named { name, array: false } if name == "percent")
+    );
 
     assert_eq!(td.fields[2].name, "tags");
-    assert!(matches!(&td.fields[2].type_expr, TypeExpr::Named { name, array: true } if name == "string"));
+    assert!(
+        matches!(&td.fields[2].type_expr, TypeExpr::Named { name, array: true } if name == "string")
+    );
 }
 
 #[test]
@@ -1176,7 +1178,10 @@ fn parse_type_def_builtins() {
     let td = &f.types[0];
     assert_eq!(td.fields.len(), 6);
     let names: Vec<&str> = td.fields.iter().map(|f| f.name.as_str()).collect();
-    assert_eq!(names, &["name", "age", "score", "active", "price", "elapsed"]);
+    assert_eq!(
+        names,
+        &["name", "age", "score", "active", "price", "elapsed"]
+    );
 }
 
 #[test]
@@ -1189,7 +1194,9 @@ fn parse_type_def_with_range() {
     "#,
     );
     let td = &f.types[0];
-    assert!(matches!(&td.fields[0].type_expr, TypeExpr::Range { min, max } if min == "0" && max == "100"));
+    assert!(
+        matches!(&td.fields[0].type_expr, TypeExpr::Range { min, max } if min == "0" && max == "100")
+    );
 }
 
 #[test]
@@ -1202,7 +1209,9 @@ fn parse_type_def_float_range() {
     "#,
     );
     let td = &f.types[0];
-    assert!(matches!(&td.fields[0].type_expr, TypeExpr::Range { min, max } if min == "0.0" && max == "1.0"));
+    assert!(
+        matches!(&td.fields[0].type_expr, TypeExpr::Range { min, max } if min == "0.0" && max == "1.0")
+    );
 }
 
 #[test]
@@ -1344,7 +1353,10 @@ fn parse_route_on_basic() {
     assert_eq!(rb.arms.len(), 2);
     assert!(matches!(&rb.arms[0].pattern, crate::ast::RoutePattern::Value(v) if v == "billing"));
     assert_eq!(rb.arms[0].step.name, "handle_billing");
-    assert!(matches!(&rb.arms[1].pattern, crate::ast::RoutePattern::Wildcard));
+    assert!(matches!(
+        &rb.arms[1].pattern,
+        crate::ast::RoutePattern::Wildcard
+    ));
     assert_eq!(rb.arms[1].step.name, "escalate");
 }
 
@@ -1369,7 +1381,10 @@ fn parse_route_on_multiple_arms() {
     assert_eq!(rb.arms.len(), 3);
     assert!(matches!(&rb.arms[0].pattern, crate::ast::RoutePattern::Value(v) if v == "success"));
     assert!(matches!(&rb.arms[1].pattern, crate::ast::RoutePattern::Value(v) if v == "failure"));
-    assert!(matches!(&rb.arms[2].pattern, crate::ast::RoutePattern::Wildcard));
+    assert!(matches!(
+        &rb.arms[2].pattern,
+        crate::ast::RoutePattern::Wildcard
+    ));
 }
 
 #[test]
@@ -1497,7 +1512,13 @@ fn parse_step_with_when_currency() {
         crate::ast::WhenExpr::Comparison(c) => {
             assert_eq!(c.field, "refund");
             assert_eq!(c.op, crate::ast::CompareOp::Gt);
-            assert!(matches!(&c.value, crate::ast::WhenValue::Currency { symbol: '$', amount: 5000 }));
+            assert!(matches!(
+                &c.value,
+                crate::ast::WhenValue::Currency {
+                    symbol: '$',
+                    amount: 5000
+                }
+            ));
         }
         other => panic!("expected Comparison, got {other:?}"),
     }
@@ -1748,7 +1769,9 @@ fn parse_auto_resolve_comparison_only() {
     );
     let ar = f.workflows[0].auto_resolve.as_ref().unwrap();
     assert_eq!(ar.conditions.len(), 1);
-    assert!(matches!(&ar.conditions[0], crate::ast::AutoResolveCondition::Comparison(c) if c.field == "score"));
+    assert!(
+        matches!(&ar.conditions[0], crate::ast::AutoResolveCondition::Comparison(c) if c.field == "score")
+    );
 }
 
 #[test]
@@ -2038,20 +2061,26 @@ fn env_resolve_with_default_present_var() {
         default: Some("fallback".to_string()),
         span: crate::ast::Span::new(0, 1),
     };
-    let result = expr.resolve_with(|name| {
-        if name == "MY_VAR" {
-            Some("real_value".to_string())
-        } else {
-            None
-        }
-    }).unwrap();
+    let result = expr
+        .resolve_with(|name| {
+            if name == "MY_VAR" {
+                Some("real_value".to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap();
     assert_eq!(result, "real_value");
 }
 
 #[test]
 fn env_default_requires_string_literal() {
     let err = parse_err(r#"provider openai { key: env("API_KEY", 42) }"#);
-    assert!(err.message.contains("string literal"), "got: {}", err.message);
+    assert!(
+        err.message.contains("string literal"),
+        "got: {}",
+        err.message
+    );
 }
 
 #[test]
@@ -2143,7 +2172,11 @@ fn step_duplicate_fallback_errors() {
         }
     "#,
     );
-    assert!(err.message.contains("duplicate 'fallback'"), "got: {}", err.message);
+    assert!(
+        err.message.contains("duplicate 'fallback'"),
+        "got: {}",
+        err.message
+    );
 }
 
 #[test]
@@ -2315,10 +2348,7 @@ fn step_with_send_to() {
     let step = &f.workflows[0].steps[0];
     let send = step.send_to.as_ref().expect("expected send_to");
     assert_eq!(send.target, "slack(#pricing)");
-    assert_eq!(
-        send.message.as_deref(),
-        Some("{{count}} changes detected")
-    );
+    assert_eq!(send.message.as_deref(), Some("{{count}} changes detected"));
 }
 
 #[test]

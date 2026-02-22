@@ -21,7 +21,12 @@ impl ExecutionId {
             .as_nanos();
         let mut hasher = Sha256::new();
         hasher.update(format!("{workflow}:{trigger}:{nanos}"));
-        Self(format!("exec-{:x}", hasher.finalize()).chars().take(24).collect())
+        Self(
+            format!("exec-{:x}", hasher.finalize())
+                .chars()
+                .take(24)
+                .collect(),
+        )
     }
 }
 
@@ -41,7 +46,10 @@ impl DeduplicationCache {
     pub fn compute_key(step: &str, tool: &str, args: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(format!("{step}:{tool}:{args}"));
-        format!("{:x}", hasher.finalize()).chars().take(16).collect()
+        format!("{:x}", hasher.finalize())
+            .chars()
+            .take(16)
+            .collect()
     }
 
     /// Check if a result is cached. Returns the cached result if found.

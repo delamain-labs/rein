@@ -125,7 +125,10 @@ pub(super) async fn run_stage(
 }
 
 /// Collect stage results into a `WorkflowResult`.
-pub(super) fn build_result(stage_results: Vec<StageResult>, final_output: String) -> WorkflowResult {
+pub(super) fn build_result(
+    stage_results: Vec<StageResult>,
+    final_output: String,
+) -> WorkflowResult {
     let total_cost = stage_results.iter().map(|r| r.cost_cents).sum();
     let total_tokens = stage_results.iter().map(|r| r.tokens).sum();
     WorkflowResult {

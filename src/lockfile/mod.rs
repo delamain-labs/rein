@@ -95,7 +95,12 @@ impl LockFile {
     }
 
     /// Pin a tool with its version and SHA-256 hash.
-    pub fn pin_tool(&mut self, name: impl Into<String>, version: impl Into<String>, sha256: impl Into<String>) {
+    pub fn pin_tool(
+        &mut self,
+        name: impl Into<String>,
+        version: impl Into<String>,
+        sha256: impl Into<String>,
+    ) {
         self.tools.insert(
             name.into(),
             ToolPin {
@@ -107,7 +112,12 @@ impl LockFile {
     }
 
     /// Pin a model with its version and provider.
-    pub fn pin_model(&mut self, name: impl Into<String>, version: impl Into<String>, provider: impl Into<String>) {
+    pub fn pin_model(
+        &mut self,
+        name: impl Into<String>,
+        version: impl Into<String>,
+        provider: impl Into<String>,
+    ) {
         self.models.insert(
             name.into(),
             ModelPin {

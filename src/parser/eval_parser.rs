@@ -90,39 +90,39 @@ impl Parser {
             self.advance();
             return Ok(s);
         }
-                // Parse as a sequence of path-like tokens: ./evals/data.yaml
-                let mut path = String::new();
-                if *self.peek() == TokenKind::Dot {
+        // Parse as a sequence of path-like tokens: ./evals/data.yaml
+        let mut path = String::new();
+        if *self.peek() == TokenKind::Dot {
+            path.push('.');
+            self.advance();
+        }
+        if *self.peek() == TokenKind::Slash {
+            path.push('/');
+            self.advance();
+        }
+        loop {
+            match self.peek().clone() {
+                TokenKind::Ident(s) => {
+                    path.push_str(&s);
+                    self.advance();
+                }
+                TokenKind::Dot => {
                     path.push('.');
                     self.advance();
                 }
-                if *self.peek() == TokenKind::Slash {
+                TokenKind::Slash => {
                     path.push('/');
                     self.advance();
                 }
-                loop {
-                    match self.peek().clone() {
-                        TokenKind::Ident(s) => {
-                            path.push_str(&s);
-                            self.advance();
-                        }
-                        TokenKind::Dot => {
-                            path.push('.');
-                            self.advance();
-                        }
-                        TokenKind::Slash => {
-                            path.push('/');
-                            self.advance();
-                        }
-                        _ => break,
-                    }
-                }
-                if path.is_empty() {
-                    return Err(ParseError::new(
-                        "expected dataset path or string",
-                        self.current_span(),
-                    ));
-                }
+                _ => break,
+            }
+        }
+        if path.is_empty() {
+            return Err(ParseError::new(
+                "expected dataset path or string",
+                self.current_span(),
+            ));
+        }
         Ok(path)
     }
 

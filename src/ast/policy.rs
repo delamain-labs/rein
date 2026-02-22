@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use super::workflow::WhenExpr;
 use super::Span;
+use super::workflow::WhenExpr;
 
 /// A single tier within a policy block.
 ///

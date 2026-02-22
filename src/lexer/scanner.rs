@@ -93,7 +93,9 @@ impl<'a> Lexer<'a> {
             }
         }
         let end = self.pos;
-        let text = std::str::from_utf8(&self.src[start..end]).expect("input should be valid UTF-8").to_string();
+        let text = std::str::from_utf8(&self.src[start..end])
+            .expect("input should be valid UTF-8")
+            .to_string();
         Token::new(TokenKind::Number(text), start, end)
     }
 
@@ -161,7 +163,8 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        let num_str = std::str::from_utf8(&self.src[num_start..self.pos]).expect("numeric literal should be valid UTF-8");
+        let num_str = std::str::from_utf8(&self.src[num_start..self.pos])
+            .expect("numeric literal should be valid UTF-8");
         let cents = parse_cents(num_str).map_err(|()| LexError {
             message: format!("invalid currency amount: '{symbol}{num_str}'"),
             span: Span::new(start, self.pos),
@@ -227,12 +230,24 @@ impl<'a> Lexer<'a> {
     /// Lex a comparison or equality operator starting with `<`, `>`, `=`, or `!`.
     fn read_comparison(&mut self, ch: u8, start: usize) -> Option<Token> {
         match ch {
-            b'<' if self.peek() == Some(b'=') => { self.advance(); Some(Token::new(TokenKind::LtEq, start, self.pos)) }
+            b'<' if self.peek() == Some(b'=') => {
+                self.advance();
+                Some(Token::new(TokenKind::LtEq, start, self.pos))
+            }
             b'<' => Some(Token::new(TokenKind::Lt, start, self.pos)),
-            b'>' if self.peek() == Some(b'=') => { self.advance(); Some(Token::new(TokenKind::GtEq, start, self.pos)) }
+            b'>' if self.peek() == Some(b'=') => {
+                self.advance();
+                Some(Token::new(TokenKind::GtEq, start, self.pos))
+            }
             b'>' => Some(Token::new(TokenKind::Gt, start, self.pos)),
-            b'=' if self.peek() == Some(b'=') => { self.advance(); Some(Token::new(TokenKind::EqEq, start, self.pos)) }
-            b'!' if self.peek() == Some(b'=') => { self.advance(); Some(Token::new(TokenKind::BangEq, start, self.pos)) }
+            b'=' if self.peek() == Some(b'=') => {
+                self.advance();
+                Some(Token::new(TokenKind::EqEq, start, self.pos))
+            }
+            b'!' if self.peek() == Some(b'=') => {
+                self.advance();
+                Some(Token::new(TokenKind::BangEq, start, self.pos))
+            }
             _ => None,
         }
     }

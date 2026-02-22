@@ -37,7 +37,9 @@ pub fn run_agent(path: &std::path::Path, message: Option<&str>, dry_run: bool, o
     }
 
     if otel {
-        println!("Note: --otel flag is available. After execution, traces will be exported as OTLP JSON.");
+        println!(
+            "Note: --otel flag is available. After execution, traces will be exported as OTLP JSON."
+        );
     }
 
     println!("Runtime not yet implemented");
@@ -47,12 +49,12 @@ pub fn run_agent(path: &std::path::Path, message: Option<&str>, dry_run: bool, o
 fn format_value_expr(v: &rein::ast::ValueExpr) -> String {
     match v {
         rein::ast::ValueExpr::Literal(s) => s.clone(),
-        rein::ast::ValueExpr::EnvRef { var_name, default, .. } => {
-            match default {
-                Some(d) => format!("env(\"{var_name}\", \"{d}\")"),
-                None => format!("env(\"{var_name}\")"),
-            }
-        }
+        rein::ast::ValueExpr::EnvRef {
+            var_name, default, ..
+        } => match default {
+            Some(d) => format!("env(\"{var_name}\", \"{d}\")"),
+            None => format!("env(\"{var_name}\")"),
+        },
     }
 }
 
@@ -62,7 +64,10 @@ fn print_execution_plan(file: &rein::ast::ReinFile, message: Option<&str>) -> i3
     if !file.providers.is_empty() {
         println!("Providers ({}):", file.providers.len());
         for p in &file.providers {
-            let model = p.model.as_ref().map_or("default".to_string(), format_value_expr);
+            let model = p
+                .model
+                .as_ref()
+                .map_or("default".to_string(), format_value_expr);
             println!("  • {} (model: {model})", p.name);
         }
         println!();
@@ -77,9 +82,14 @@ fn print_execution_plan(file: &rein::ast::ReinFile, message: Option<&str>) -> i3
                 || "none".to_string(),
                 |b| format!("{}{} per {}", b.currency, b.amount, b.unit),
             );
-            let model = a.model.as_ref().map_or("default".to_string(), format_value_expr);
-            println!("  • {} (model: {model}, can: {can_count}, cannot: {cannot_count}, budget: {budget_str})",
-                a.name);
+            let model = a
+                .model
+                .as_ref()
+                .map_or("default".to_string(), format_value_expr);
+            println!(
+                "  • {} (model: {model}, can: {can_count}, cannot: {cannot_count}, budget: {budget_str})",
+                a.name
+            );
         }
         println!();
     }
@@ -88,9 +98,16 @@ fn print_execution_plan(file: &rein::ast::ReinFile, message: Option<&str>) -> i3
         println!("Workflows ({}):", file.workflows.len());
         for w in &file.workflows {
             let trigger = &w.trigger;
-            println!("  • {} (trigger: {trigger}, steps: {})", w.name, w.steps.len());
+            println!(
+                "  • {} (trigger: {trigger}, steps: {})",
+                w.name,
+                w.steps.len()
+            );
             for s in &w.steps {
-                let guard = s.when.as_ref().map_or(String::new(), |_| " [guarded]".to_string());
+                let guard = s
+                    .when
+                    .as_ref()
+                    .map_or(String::new(), |_| " [guarded]".to_string());
                 println!("    → {} (agent: {}){guard}", s.name, s.agent);
             }
         }

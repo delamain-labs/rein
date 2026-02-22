@@ -48,9 +48,7 @@ impl Parser {
             && body.within_blocks.is_empty()
         {
             return Err(ParseError::new(
-                format!(
-                    "workflow '{name}' must have at least one stage, step, or route block"
-                ),
+                format!("workflow '{name}' must have at least one stage, step, or route block"),
                 Span::new(start, end),
             ));
         }

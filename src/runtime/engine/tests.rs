@@ -11,7 +11,8 @@ fn make_agent(
     cannot: Vec<Capability>,
     budget_cents: Option<u64>,
 ) -> AgentDef {
-    AgentDef { from: None,
+    AgentDef {
+        from: None,
         name: "test".to_string(),
         model: Some(ValueExpr::Literal("gpt-4o".into())),
         can,
@@ -306,7 +307,10 @@ async fn stream_callback_receives_text() {
     provider.push_response(ChatResponse {
         content: "Hello streamed!".to_string(),
         tool_calls: vec![],
-        usage: Usage { input_tokens: 10, output_tokens: 5 },
+        usage: Usage {
+            input_tokens: 10,
+            output_tokens: 5,
+        },
         model: "gpt-4o".to_string(),
     });
 

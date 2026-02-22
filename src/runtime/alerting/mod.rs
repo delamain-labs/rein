@@ -66,7 +66,9 @@ impl AlertEngine {
         let ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
-            .as_millis().try_into().unwrap_or(u64::MAX);
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX);
 
         for rule in &self.rules {
             if let AlertCondition::ThresholdExceeded {

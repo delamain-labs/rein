@@ -31,8 +31,16 @@ fn sign_payload() {
 #[test]
 fn registry_matching() {
     let mut reg = WebhookRegistry::new();
-    reg.register(WebhookConfig::new("a", "https://a.com", vec!["wf.start".into()]));
-    reg.register(WebhookConfig::new("b", "https://b.com", vec!["wf.complete".into()]));
+    reg.register(WebhookConfig::new(
+        "a",
+        "https://a.com",
+        vec!["wf.start".into()],
+    ));
+    reg.register(WebhookConfig::new(
+        "b",
+        "https://b.com",
+        vec!["wf.complete".into()],
+    ));
     assert_eq!(reg.matching("wf.start").len(), 1);
     assert_eq!(reg.matching("wf.start")[0].name, "a");
 }

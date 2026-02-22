@@ -112,7 +112,10 @@ fn pseudo_id(seed: u64, len: usize) -> String {
 /// Convert a structured trace to OTLP-compatible JSON.
 pub fn to_otlp(trace: &StructuredTrace) -> OtelResourceSpans {
     let trace_id = pseudo_id(
-        trace.stats.total_tokens.wrapping_add(trace.stats.duration_ms),
+        trace
+            .stats
+            .total_tokens
+            .wrapping_add(trace.stats.duration_ms),
         16,
     );
     let root_span_id = pseudo_id(trace.stats.total_cost_cents.wrapping_add(1), 8);
@@ -125,16 +128,22 @@ pub fn to_otlp(trace: &StructuredTrace) -> OtelResourceSpans {
         span_id: root_span_id.clone(),
         parent_span_id: None,
         name: format!("rein.run.{}", trace.agent),
-        kind: 1, // INTERNAL
+        kind: 1,                 // INTERNAL
         start_time_unix_nano: 0, // Would use real timestamps in production
         end_time_unix_nano: trace.stats.duration_ms * 1_000_000,
         attributes: vec![
             attr_str("rein.agent.name", &trace.agent),
             attr_int("rein.tokens.total", trace.stats.total_tokens.cast_signed()),
-            attr_int("rein.cost.cents", trace.stats.total_cost_cents.cast_signed()),
+            attr_int(
+                "rein.cost.cents",
+                trace.stats.total_cost_cents.cast_signed(),
+            ),
             attr_int("rein.llm.calls", trace.stats.llm_calls.cast_signed()),
             attr_int("rein.tool.calls", trace.stats.tool_calls.cast_signed()),
-            attr_int("rein.tool.denied", trace.stats.tool_calls_denied.cast_signed()),
+            attr_int(
+                "rein.tool.denied",
+                trace.stats.tool_calls_denied.cast_signed(),
+            ),
         ],
         status: OtelStatus {
             code: 1, // OK
@@ -204,7 +213,10 @@ fn event_to_span_data(event: &super::RunEvent) -> (String, Vec<OtelAttribute>) {
             reason,
         } => {
             let mut attrs = vec![
-                attr_str("rein.tool.name", &format!("{}.{}", tool.namespace, tool.action)),
+                attr_str(
+                    "rein.tool.name",
+                    &format!("{}.{}", tool.namespace, tool.action),
+                ),
                 attr_str("rein.tool.allowed", &allowed.to_string()),
             ];
             if let Some(r) = reason {
@@ -215,7 +227,10 @@ fn event_to_span_data(event: &super::RunEvent) -> (String, Vec<OtelAttribute>) {
         RunEvent::ToolCallResult { tool, result } => (
             "rein.tool.result".to_string(),
             vec![
-                attr_str("rein.tool.name", &format!("{}.{}", tool.namespace, tool.action)),
+                attr_str(
+                    "rein.tool.name",
+                    &format!("{}.{}", tool.namespace, tool.action),
+                ),
                 attr_str("rein.tool.success", &result.success.to_string()),
             ],
         ),
@@ -235,7 +250,10 @@ fn event_to_span_data(event: &super::RunEvent) -> (String, Vec<OtelAttribute>) {
         } => (
             "rein.run.complete".to_string(),
             vec![
-                attr_int("rein.run.total_cost_cents", (*total_cost_cents).cast_signed()),
+                attr_int(
+                    "rein.run.total_cost_cents",
+                    (*total_cost_cents).cast_signed(),
+                ),
                 attr_int("rein.run.total_tokens", (*total_tokens).cast_signed()),
             ],
         ),

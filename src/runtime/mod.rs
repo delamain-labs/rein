@@ -3,12 +3,12 @@ pub mod audit;
 pub mod budget;
 pub mod engine;
 pub mod eval;
-pub mod memory;
 pub mod events;
 pub mod execution;
 pub mod executor;
 pub mod injection;
 pub mod interceptor;
+pub mod memory;
 pub mod observability;
 pub mod otel_export;
 pub mod permissions;
@@ -82,7 +82,13 @@ impl RunTrace {
 
     /// Convert to a structured trace with timestamps and stats.
     #[must_use]
-    pub fn to_structured(&self, agent_name: &str, started_at: &str, completed_at: &str, duration_ms: u64) -> StructuredTrace {
+    pub fn to_structured(
+        &self,
+        agent_name: &str,
+        started_at: &str,
+        completed_at: &str,
+        duration_ms: u64,
+    ) -> StructuredTrace {
         let mut total_tokens = 0u64;
         let mut total_cost = 0u64;
         let mut llm_calls = 0u64;
@@ -95,13 +101,22 @@ impl RunTrace {
             .enumerate()
             .map(|(i, e)| {
                 match e {
-                    RunEvent::LlmCall { input_tokens, output_tokens, cost_cents, .. } => {
+                    RunEvent::LlmCall {
+                        input_tokens,
+                        output_tokens,
+                        cost_cents,
+                        ..
+                    } => {
                         llm_calls += 1;
                         total_tokens += input_tokens + output_tokens;
                         total_cost += cost_cents;
                     }
                     RunEvent::ToolCallAttempt { allowed, .. } => {
-                        if *allowed { tool_calls += 1; } else { tool_denied += 1; }
+                        if *allowed {
+                            tool_calls += 1;
+                        } else {
+                            tool_denied += 1;
+                        }
                     }
                     _ => {}
                 }
@@ -133,7 +148,11 @@ impl RunTrace {
     ///
     /// # Errors
     /// Returns IO or serialization errors.
-    pub fn write_to_file(&self, path: &std::path::Path, agent_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn write_to_file(
+        &self,
+        path: &std::path::Path,
+        agent_name: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let trace = self.to_structured(agent_name, "", "", 0);
         let json = serde_json::to_string_pretty(&trace)?;
         std::fs::write(path, json)?;

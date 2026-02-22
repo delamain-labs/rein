@@ -2,11 +2,11 @@ use crate::ast::{ReinFile, Span, ValueExpr};
 use crate::lexer::{Token, TokenKind, tokenize};
 
 mod agent_parser;
+mod approval_parser;
 mod channel_parser;
 mod circuit_breaker_parser;
 mod common_parser;
 mod condition_parser;
-mod approval_parser;
 mod consensus_parser;
 mod eval_parser;
 mod fleet_parser;
@@ -15,8 +15,8 @@ mod memory_parser;
 mod observe_parser;
 mod pipe_parser;
 mod policy_parser;
-mod schedule_parser;
 mod scenario_parser;
+mod schedule_parser;
 mod secrets_parser;
 mod step_extensions;
 mod step_parser;
@@ -204,7 +204,10 @@ impl Parser {
             }
             // Keywords that can appear as values in certain contexts
             kind if kind.keyword_as_ident().is_some() => {
-                let name = kind.keyword_as_ident().expect("guarded by is_some check").to_string();
+                let name = kind
+                    .keyword_as_ident()
+                    .expect("guarded by is_some check")
+                    .to_string();
                 self.advance();
                 Ok(ValueExpr::Literal(name))
             }
@@ -407,21 +410,21 @@ impl Parser {
 }
 
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
-mod eval_parser_tests;
-#[cfg(test)]
-mod memory_parser_tests;
-#[cfg(test)]
-mod schedule_parser_tests;
-#[cfg(test)]
 #[cfg(test)]
 mod approval_tests;
 #[cfg(test)]
 mod consensus_tests;
 #[cfg(test)]
+mod eval_parser_tests;
+#[cfg(test)]
+mod memory_parser_tests;
+#[cfg(test)]
 mod scenario_tests;
+#[cfg(test)]
+mod schedule_parser_tests;
+#[cfg(test)]
+mod secrets_parser_tests;
 #[cfg(test)]
 mod step_ext_tests;
 #[cfg(test)]
-mod secrets_parser_tests;
+mod tests;
