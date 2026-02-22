@@ -1,0 +1,59 @@
+name: Rein Validate (Reusable)
+
+# This workflow can be called from other repos to validate .rein files.
+# Usage in another repo:
+#
+#   jobs:
+#     validate:
+#       uses: delamain-labs/rein/.github/workflows/validate-action.yml@master
+#       with:
+#         files: 'policies/*.rein'
+#         strict: true
+
+on:
+  workflow_call:
+    inputs:
+      files:
+        description: 'Glob pattern for .rein files to validate'
+        required: true
+        type: string
+      strict:
+        description: 'Enable strict mode (warn on unenforced features)'
+        required: false
+        type: boolean
+        default: false
+      check-fmt:
+        description: 'Check formatting'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install rein
+        run: cargo install --git https://github.com/delamain-labs/rein.git
+
+      - name: Validate
+        run: |
+          flags=""
+          if [ "${{ inputs.strict }}" = "true" ]; then
+            flags="--strict"
+          fi
+          for f in ${{ inputs.files }}; do
+            echo "Validating $f..."
+            rein validate $flags "$f"
+          done
+
+      - name: Check formatting
+        if: inputs.check-fmt
+        run: |
+          for f in ${{ inputs.files }}; do
+            rein fmt --check "$f"
+          done
