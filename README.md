@@ -150,7 +150,8 @@ Rein is in active development. Here's what works today:
 - ✅ **Error messages** — precise diagnostics with source spans (powered by ariadne)
 - ✅ **Tree-sitter grammar** — syntax highlighting for editors
 - 🔧 **Runtime** — basic agent execution and workflow engine functional, advanced features in progress
-- 📋 **Docs** — language reference coming soon
+- 📋 **[Language Reference](docs/language-reference.md)** — every block type and feature
+- 🚀 **[Getting Started](docs/getting-started.md)** — zero to validated policy in 5 minutes
 
 ## Architecture
 
