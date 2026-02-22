@@ -14,10 +14,6 @@ const UNENFORCED_FEATURES: &[(&str, &str)] = &[
         "Observe blocks are parsed but not enforced. Custom metrics, alerts, and trace exports will not activate.",
     ),
     (
-        "approval",
-        "Approval workflow blocks are parsed but not enforced. Human-in-the-loop approvals will not gate execution.",
-    ),
-    (
         "secrets",
         "Secrets blocks are parsed but not enforced. Vault references will not be resolved.",
     ),

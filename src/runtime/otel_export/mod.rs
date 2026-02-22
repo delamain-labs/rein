@@ -301,6 +301,18 @@ fn event_to_span_data(event: &super::RunEvent) -> (String, Vec<OtelAttribute>) {
                 attr_str("rein.policy.reason", reason),
             ],
         ),
+        RunEvent::ApprovalRequested {
+            step,
+            channel,
+            status,
+        } => (
+            "rein.approval.requested".to_string(),
+            vec![
+                attr_str("rein.approval.step", step),
+                attr_str("rein.approval.channel", channel),
+                attr_str("rein.approval.status", status),
+            ],
+        ),
         RunEvent::EvalResult {
             metric,
             passed,
