@@ -254,6 +254,7 @@ Verify the path to your `.rein` file. Rein does not recursively search directori
 | `rein explain <file>` | Human-readable policy summary |
 | `rein cost <paths...>` | Aggregate cost stats from traces |
 | `rein run <file> [-m "msg"]` | Run an agent (requires API key) |
+| `rein run --dry-run <file>` | Show execution plan without API calls |
 | `rein serve <file> [--port N]` | Start the REST API server |
 
 ---
