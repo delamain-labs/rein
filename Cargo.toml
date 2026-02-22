@@ -33,6 +33,7 @@ axum = { version = "0.8.8", features = ["json"] }
 tower-http = { version = "0.6.8", features = ["cors"] }
 tower = { version = "0.5.3", features = ["util"] }
 sha2 = "0.10.9"
+tower-lsp = "0.20"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }

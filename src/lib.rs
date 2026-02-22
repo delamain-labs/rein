@@ -4,6 +4,7 @@ pub mod auth;
 pub mod config;
 pub mod error;
 pub mod lexer;
+pub mod lsp;
 pub mod lockfile;
 pub mod parser;
 pub mod runtime;

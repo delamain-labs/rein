@@ -53,6 +53,8 @@ enum Command {
         /// Path to the .rein file
         file: std::path::PathBuf,
     },
+    /// Start the Rein Language Server (LSP)
+    Lsp,
     /// Start the Rein API server
     Serve {
         /// Path to the .rein file to serve
@@ -108,6 +110,10 @@ async fn main() {
         Command::Explain { file } => {
             let exit_code = commands::explain::run_explain(&file);
             process::exit(exit_code);
+        }
+        Command::Lsp => {
+            let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+            rt.block_on(rein::lsp::run_lsp());
         }
         Command::Serve { file, host, port } => {
             let exit_code = commands::serve::run_serve(&file, &host, port);
