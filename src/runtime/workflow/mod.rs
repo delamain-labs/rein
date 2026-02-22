@@ -352,7 +352,48 @@ pub async fn run_parallel(
     Ok(build_result(stage_results, final_output))
 }
 
+/// Execute a single step definition, running its referenced agent with the
+/// step's goal as additional context.
+///
+/// # Errors
+/// Returns `WorkflowError` if the agent is not found or execution fails.
+pub async fn run_step(
+    step: &crate::ast::StepDef,
+    input: &str,
+    ctx: &WorkflowContext<'_>,
+) -> Result<StageResult, WorkflowError> {
+    // Build the effective input: original input + goal context
+    let effective_input = if let Some(ref goal) = step.goal {
+        format!("{input}\n\nGoal: {goal}")
+    } else {
+        input.to_string()
+    };
+
+    run_stage(&step.name, &step.agent, &effective_input, ctx).await
+}
+
+/// Execute all step blocks in a workflow sequentially, chaining outputs.
+///
+/// # Errors
+/// Returns `WorkflowError` if any step fails.
+pub async fn run_steps(
+    workflow: &WorkflowDef,
+    ctx: &WorkflowContext<'_>,
+) -> Result<Vec<StageResult>, WorkflowError> {
+    let mut results = Vec::new();
+    let mut current_input = format!("Trigger: {}", workflow.trigger);
+
+    for step in &workflow.steps {
+        let result = run_step(step, &current_input, ctx).await?;
+        current_input.clone_from(&result.output);
+        results.push(result);
+    }
+
+    Ok(results)
+}
+
 /// Execute a workflow using its declared execution mode.
+/// If the workflow has step blocks, those are executed after stages.
 ///
 /// # Errors
 /// Returns `WorkflowError` if execution fails.
@@ -360,8 +401,21 @@ pub async fn run_workflow(
     workflow: &WorkflowDef,
     ctx: &WorkflowContext<'_>,
 ) -> Result<WorkflowResult, WorkflowError> {
-    match workflow.mode {
-        ExecutionMode::Sequential => run_sequential(workflow, ctx).await,
-        ExecutionMode::Parallel => run_parallel(workflow, ctx).await,
+    let mut result = match workflow.mode {
+        ExecutionMode::Sequential => run_sequential(workflow, ctx).await?,
+        ExecutionMode::Parallel => run_parallel(workflow, ctx).await?,
+    };
+
+    // Execute step blocks if present
+    if !workflow.steps.is_empty() {
+        let step_results = run_steps(workflow, ctx).await?;
+        for sr in step_results {
+            result.total_cost_cents += sr.cost_cents;
+            result.total_tokens += sr.tokens;
+            result.final_output.clone_from(&sr.output);
+            result.stage_results.push(sr);
+        }
     }
+
+    Ok(result)
 }
