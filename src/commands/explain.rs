@@ -40,7 +40,15 @@ fn format_model(model: Option<&rein::ast::ValueExpr>) -> String {
 }
 
 fn format_budget(budget: &rein::ast::Budget) -> String {
-    format!("{}{} per {}", budget.currency, budget.amount, budget.unit)
+    let symbol = match budget.currency.as_str() {
+        "EUR" => "€",
+        "GBP" => "£",
+        "JPY" => "¥",
+        _ => "$",
+    };
+    let dollars = budget.amount / 100;
+    let cents = budget.amount % 100;
+    format!("{symbol}{dollars}.{cents:02} per {}", budget.unit)
 }
 
 fn explain_agents(file: &rein::ast::ReinFile) {

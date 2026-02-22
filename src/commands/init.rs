@@ -1,7 +1,12 @@
 use std::fs;
 use std::path::Path;
 
-const EXAMPLE_REIN: &str = r"// My first Rein agent
+const EXAMPLE_REIN: &str = r#"// My first Rein agent
+
+provider openai {
+    model: "gpt-4o"
+    key: env("OPENAI_API_KEY")
+}
 
 agent assistant {
     model: openai
@@ -17,7 +22,7 @@ agent assistant {
 
     budget: $0.10 per request
 }
-";
+"#;
 
 const ENV_TEMPLATE: &str = r"# Rein environment configuration
 # OPENAI_API_KEY=sk-...
