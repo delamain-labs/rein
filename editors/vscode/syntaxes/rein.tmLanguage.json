@@ -1,0 +1,76 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Rein",
+  "scopeName": "source.rein",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#operators" },
+    { "include": "#functions" },
+    { "include": "#types" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.double-slash.rein", "match": "//.*$" },
+        { "name": "comment.line.hash.rein", "match": "#.*$" },
+        { "name": "comment.block.rein", "begin": "/\\*", "end": "\\*/", "contentName": "comment.block.rein" }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        { "name": "string.quoted.double.rein", "begin": "\"", "end": "\"", "patterns": [
+          { "name": "constant.character.escape.rein", "match": "\\\\." }
+        ]}
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.currency.rein", "match": "[$€£¥]\\d+(\\.\\d+)?" },
+        { "name": "constant.numeric.percentage.rein", "match": "\\b\\d+(\\.\\d+)?%" },
+        { "name": "constant.numeric.rein", "match": "\\b\\d+(\\.\\d+)?\\b" }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.rein",
+          "match": "\\b(agent|workflow|step|provider|defaults|archetype|policy|type|tool|guardrails|circuit_breaker|observe|fleet|channel|eval|consensus|approval|escalate|secrets|memory|schedule|scenario|import|parallel|route_on)\\b"
+        },
+        {
+          "name": "keyword.other.rein",
+          "match": "\\b(model|can|cannot|budget|trigger|goal|when|from|per|up_to|on|failure|retry|then|fallback|one_of|send_to|input|output|for|each|auto|resolve|assert|dataset|within|via|approve|collaborate|mode|timeout|require|agree|strategy|given|expect)\\b"
+        },
+        {
+          "name": "keyword.operator.logical.rein",
+          "match": "\\b(and|or|is|not)\\b"
+        },
+        {
+          "name": "constant.language.rein",
+          "match": "\\b(on|off|true|false|exponential|linear|fixed|majority|unanimous)\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        { "name": "keyword.operator.comparison.rein", "match": "==|!=|<=|>=|<|>" },
+        { "name": "keyword.operator.pipe.rein", "match": "\\|>" },
+        { "name": "keyword.operator.arrow.rein", "match": "->" },
+        { "name": "keyword.operator.range.rein", "match": "\\.\\." }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        { "name": "entity.name.function.rein", "match": "\\b(env)\\b(?=\\()" }
+      ]
+    },
+    "types": {
+      "patterns": [
+        { "name": "storage.type.rein", "match": "\\b(int|float|string|bool)\\b" },
+        { "name": "keyword.other.tier.rein", "match": "\\b(tier|working|session|knowledge)\\b" }
+      ]
+    }
+  }
+}
