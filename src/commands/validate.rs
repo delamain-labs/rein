@@ -85,7 +85,7 @@ impl JsonReport {
     }
 }
 
-pub fn run_validate(path: &std::path::Path, dump_ast: bool, format: &str) -> i32 {
+pub fn run_validate(path: &std::path::Path, dump_ast: bool, format: &str, strict: bool) -> i32 {
     let filename = path.to_string_lossy();
     let json_mode = format == "json";
 
@@ -124,14 +124,21 @@ pub fn run_validate(path: &std::path::Path, dump_ast: bool, format: &str) -> i32
         return 0;
     }
 
-    let diags = rein::validator::validate(&file);
+    let mut diags = rein::validator::validate(&file);
+    if strict {
+        diags.extend(rein::validator::strict::check_unenforced(&file));
+    }
     let has_errors = diags.iter().any(rein::validator::Diagnostic::is_error);
 
     if json_mode {
         JsonReport::from_diagnostics(&filename, &diags).print();
     } else {
         for diag in &diags {
-            rein::error::report_diagnostic(&filename, &source, diag);
+            if diag.code == "W_UNENFORCED" {
+                eprintln!("⚠ [{}] {}", diag.code, diag.message);
+            } else {
+                rein::error::report_diagnostic(&filename, &source, diag);
+            }
         }
         if !has_errors {
             if diags.is_empty() {

@@ -62,7 +62,7 @@ impl Span {
 // ---------------------------------------------------------------------------
 
 /// Top-level parsed file — provider, agent, and workflow definitions.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ReinFile {
     pub imports: Vec<ImportDef>,
     pub defaults: Option<DefaultsDef>,

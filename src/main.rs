@@ -23,6 +23,9 @@ enum Command {
         /// Output format: human (default) or json
         #[arg(long, default_value = "human")]
         format: String,
+        /// Warn when safety features parse but are not enforced at runtime
+        #[arg(long)]
+        strict: bool,
     },
     /// Aggregate and display cost statistics from trace files
     Cost {
@@ -59,8 +62,13 @@ enum Command {
 async fn main() {
     let cli = Cli::parse();
     match cli.command {
-        Command::Validate { file, ast, format } => {
-            let exit_code = commands::validate::run_validate(&file, ast, &format);
+        Command::Validate {
+            file,
+            ast,
+            format,
+            strict,
+        } => {
+            let exit_code = commands::validate::run_validate(&file, ast, &format, strict);
             process::exit(exit_code);
         }
         Command::Cost { paths } => {

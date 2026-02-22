@@ -1,3 +1,5 @@
+pub mod strict;
+
 use crate::ast::{AgentDef, Constraint, ProviderDef, ReinFile, Span, ToolDef};
 
 /// Severity of a diagnostic.
@@ -26,7 +28,7 @@ impl Diagnostic {
         }
     }
 
-    fn warning(code: &'static str, message: impl Into<String>, span: Span) -> Self {
+    pub fn warning(code: &'static str, message: impl Into<String>, span: Span) -> Self {
         Self {
             severity: Severity::Warning,
             code,
