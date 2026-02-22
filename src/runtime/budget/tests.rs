@@ -151,3 +151,43 @@ fn multiple_recordings() {
     assert_eq!(err.spent_cents, 110);
     assert_eq!(tracker.spent_cents(), 90); // unchanged on error
 }
+
+#[test]
+fn alert_triggers_at_threshold() {
+    let mut tracker = BudgetTracker::with_thresholds(100, vec![50, 80]);
+    tracker.record_usage(49).unwrap();
+    assert!(tracker.check_alerts().is_empty());
+
+    tracker.record_usage(2).unwrap(); // 51%
+    let alerts = tracker.check_alerts();
+    assert_eq!(alerts.len(), 1);
+    assert_eq!(alerts[0].threshold_pct, 50);
+
+    // Same threshold doesn't fire again
+    assert!(tracker.check_alerts().is_empty());
+
+    tracker.record_usage(30).unwrap(); // 81%
+    let alerts = tracker.check_alerts();
+    assert_eq!(alerts.len(), 1);
+    assert_eq!(alerts[0].threshold_pct, 80);
+}
+
+#[test]
+fn alert_multiple_thresholds_at_once() {
+    let mut tracker = BudgetTracker::with_thresholds(100, vec![50, 80, 90]);
+    tracker.record_usage(95).unwrap(); // crosses all three at once
+    let alerts = tracker.check_alerts();
+    assert_eq!(alerts.len(), 3);
+}
+
+#[test]
+fn alert_display_format() {
+    let alert = BudgetAlert {
+        threshold_pct: 80,
+        spent_cents: 85,
+        limit_cents: 100,
+    };
+    let s = format!("{alert}");
+    assert!(s.contains("80%"));
+    assert!(s.contains("85"));
+}

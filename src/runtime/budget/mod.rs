@@ -104,20 +104,60 @@ impl fmt::Display for BudgetExceeded {
 
 impl std::error::Error for BudgetExceeded {}
 
-/// Tracks spending against a budget limit.
+/// A budget alert triggered when spending crosses a threshold.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BudgetAlert {
+    /// The threshold percentage that was crossed (e.g. 80).
+    pub threshold_pct: u8,
+    /// Current spending in cents.
+    pub spent_cents: u64,
+    /// Budget limit in cents.
+    pub limit_cents: u64,
+}
+
+impl fmt::Display for BudgetAlert {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let pct = if self.limit_cents > 0 {
+            self.spent_cents * 100 / self.limit_cents
+        } else {
+            100
+        };
+        write!(
+            f,
+            "budget alert: {}% threshold crossed ({} of {} cents, {pct}% used)",
+            self.threshold_pct, self.spent_cents, self.limit_cents
+        )
+    }
+}
+
+/// Tracks spending against a budget limit with configurable alert thresholds.
 #[derive(Debug, Clone)]
 pub struct BudgetTracker {
     spent_cents: u64,
     limit_cents: u64,
+    /// Percentage thresholds that trigger alerts (e.g. [50, 80, 90]).
+    alert_thresholds: Vec<u8>,
+    /// Which thresholds have already been triggered.
+    triggered: Vec<bool>,
 }
 
 impl BudgetTracker {
-    /// Create a new tracker with the given limit in cents.
+    /// Create a new tracker with the given limit in cents and default alert
+    /// thresholds at 50%, 80%, and 95%.
     #[must_use]
     pub fn new(limit_cents: u64) -> Self {
+        Self::with_thresholds(limit_cents, vec![50, 80, 95])
+    }
+
+    /// Create a tracker with custom alert thresholds (percentages).
+    #[must_use]
+    pub fn with_thresholds(limit_cents: u64, thresholds: Vec<u8>) -> Self {
+        let triggered = vec![false; thresholds.len()];
         Self {
             spent_cents: 0,
             limit_cents,
+            alert_thresholds: thresholds,
+            triggered,
         }
     }
 
@@ -135,6 +175,27 @@ impl BudgetTracker {
         }
         self.spent_cents = new_total;
         Ok(())
+    }
+
+    /// Check and return any newly-triggered budget alerts.
+    /// Each threshold only fires once.
+    pub fn check_alerts(&mut self) -> Vec<BudgetAlert> {
+        let mut alerts = Vec::new();
+        if self.limit_cents == 0 {
+            return alerts;
+        }
+        let pct_used = self.spent_cents * 100 / self.limit_cents;
+        for (i, &threshold) in self.alert_thresholds.iter().enumerate() {
+            if pct_used >= u64::from(threshold) && !self.triggered[i] {
+                self.triggered[i] = true;
+                alerts.push(BudgetAlert {
+                    threshold_pct: threshold,
+                    spent_cents: self.spent_cents,
+                    limit_cents: self.limit_cents,
+                });
+            }
+        }
+        alerts
     }
 
     /// How many cents remain before the budget is exhausted.
