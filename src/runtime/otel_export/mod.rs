@@ -190,6 +190,7 @@ pub fn to_otlp(trace: &StructuredTrace) -> OtelResourceSpans {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn event_to_span_data(event: &super::RunEvent) -> (String, Vec<OtelAttribute>) {
     use super::RunEvent;
     match event {
@@ -255,6 +256,61 @@ fn event_to_span_data(event: &super::RunEvent) -> (String, Vec<OtelAttribute>) {
                     (*total_cost_cents).cast_signed(),
                 ),
                 attr_int("rein.run.total_tokens", (*total_tokens).cast_signed()),
+            ],
+        ),
+        RunEvent::GuardrailTriggered {
+            rule,
+            action,
+            blocked,
+        } => (
+            "rein.guardrail.triggered".to_string(),
+            vec![
+                attr_str("rein.guardrail.rule", rule),
+                attr_str("rein.guardrail.action", action),
+                attr_str("rein.guardrail.blocked", &blocked.to_string()),
+            ],
+        ),
+        RunEvent::CircuitBreakerTripped {
+            name,
+            failures,
+            threshold,
+        } => (
+            "rein.circuit_breaker.tripped".to_string(),
+            vec![
+                attr_str("rein.circuit_breaker.name", name),
+                attr_int("rein.circuit_breaker.failures", i64::from(*failures)),
+                attr_int("rein.circuit_breaker.threshold", i64::from(*threshold)),
+            ],
+        ),
+        RunEvent::PolicyPromotion { from_tier, to_tier } => (
+            "rein.policy.promotion".to_string(),
+            vec![
+                attr_str("rein.policy.from_tier", from_tier),
+                attr_str("rein.policy.to_tier", to_tier),
+            ],
+        ),
+        RunEvent::PolicyDemotion {
+            from_tier,
+            to_tier,
+            reason,
+        } => (
+            "rein.policy.demotion".to_string(),
+            vec![
+                attr_str("rein.policy.from_tier", from_tier),
+                attr_str("rein.policy.to_tier", to_tier),
+                attr_str("rein.policy.reason", reason),
+            ],
+        ),
+        RunEvent::EvalResult {
+            metric,
+            passed,
+            detail,
+        } => (
+            "rein.eval.result".to_string(),
+            vec![
+                attr_str("rein.eval.metric", metric),
+                attr_str("rein.eval.passed", &passed.to_string()),
+                attr_str("rein.eval.detail", detail),
             ],
         ),
     }

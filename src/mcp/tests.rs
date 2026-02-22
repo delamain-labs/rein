@@ -94,12 +94,12 @@ fn fmt_valid_source_returns_source() {
 
 #[test]
 fn validate_strict_warns_on_guardrails() {
+    // Guardrails are now enforced at runtime, so strict mode should NOT warn.
     let source = "agent safe {\n    model: openai\n    guardrails {\n        output_filter {\n            pii: redact\n        }\n    }\n}";
     let args = serde_json::json!({ "source": source, "strict": true });
     let result = call_tool("rein_validate", &args);
     assert!(
-        result.text.contains("UNENFORCED")
-            || result.text.contains("not enforced")
-            || result.text.contains("guardrails")
+        !result.text.contains("UNENFORCED") || !result.text.contains("guardrails"),
+        "guardrails should no longer trigger unenforced warnings"
     );
 }

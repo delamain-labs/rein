@@ -1,5 +1,9 @@
+use std::sync::Mutex;
+
 use super::budget::{BudgetTracker, calculate_cost};
+use super::circuit_breaker::CircuitBreaker;
 use super::executor::ToolExecutor;
+use super::guardrails::GuardrailEngine;
 use super::interceptor::{InterceptResult, ToolInterceptor};
 use super::permissions::ToolRegistry;
 use super::provider::{Message, Provider, ToolCallRequest, ToolDef};
@@ -96,6 +100,8 @@ pub struct AgentEngine<'a> {
     tool_defs: Vec<ToolDef>,
     config: RunConfig,
     stream: Box<dyn StreamCallback + 'a>,
+    guardrails: GuardrailEngine,
+    circuit_breaker: Option<Mutex<CircuitBreaker>>,
 }
 
 impl<'a> AgentEngine<'a> {
@@ -115,6 +121,8 @@ impl<'a> AgentEngine<'a> {
             tool_defs,
             config,
             stream: Box::new(NoopStream),
+            guardrails: GuardrailEngine::empty(),
+            circuit_breaker: None,
         }
     }
 
@@ -122,6 +130,20 @@ impl<'a> AgentEngine<'a> {
     #[must_use]
     pub fn with_stream(mut self, stream: Box<dyn StreamCallback + 'a>) -> Self {
         self.stream = stream;
+        self
+    }
+
+    /// Attach a guardrail engine for output filtering.
+    #[must_use]
+    pub fn with_guardrails(mut self, guardrails: GuardrailEngine) -> Self {
+        self.guardrails = guardrails;
+        self
+    }
+
+    /// Attach a circuit breaker for failure protection.
+    #[must_use]
+    pub fn with_circuit_breaker(mut self, cb: CircuitBreaker) -> Self {
+        self.circuit_breaker = Some(Mutex::new(cb));
         self
     }
 
@@ -148,11 +170,39 @@ impl<'a> AgentEngine<'a> {
         state.messages.push(Message::user(user_message));
 
         for _turn in 0..self.config.max_turns {
+            // Circuit breaker check before LLM call.
+            if let Some(ref cb_mutex) = self.circuit_breaker {
+                let mut cb = cb_mutex.lock().expect("circuit breaker lock");
+                if let Err(_reason) = cb.check() {
+                    state.events.push(RunEvent::CircuitBreakerTripped {
+                        name: cb.name().to_string(),
+                        failures: 0,
+                        threshold: 0,
+                    });
+                    return Err(RunError::CircuitBreakerOpen);
+                }
+            }
+
             let response = self
                 .provider
                 .chat(&state.messages, &self.tool_defs)
                 .await
-                .map_err(|_| RunError::ProviderError)?;
+                .map_err(|_| {
+                    if let Some(ref cb_mutex) = self.circuit_breaker {
+                        cb_mutex
+                            .lock()
+                            .expect("circuit breaker lock")
+                            .record_failure();
+                    }
+                    RunError::ProviderError
+                })?;
+
+            if let Some(ref cb_mutex) = self.circuit_breaker {
+                cb_mutex
+                    .lock()
+                    .expect("circuit breaker lock")
+                    .record_success();
+            }
 
             let cost = calculate_cost(&response.model, &response.usage);
             state.total_tokens += response.usage.input_tokens + response.usage.output_tokens;
@@ -167,14 +217,32 @@ impl<'a> AgentEngine<'a> {
 
             self.check_budget(&mut state, cost)?;
 
-            // Stream the response text
-            if !response.content.is_empty() {
-                self.stream.on_text(&response.content);
+            // Apply guardrails to LLM output.
+            let content = if self.guardrails.is_empty() {
+                response.content.clone()
+            } else {
+                let result = self.guardrails.apply(&response.content);
+                for violation in &result.violations {
+                    state.events.push(RunEvent::GuardrailTriggered {
+                        rule: violation.rule_key.clone(),
+                        action: format!("{:?}", violation.action),
+                        blocked: result.blocked,
+                    });
+                }
+                if result.blocked {
+                    return Err(RunError::GuardrailBlocked);
+                }
+                result.output
+            };
+
+            // Stream the response text.
+            if !content.is_empty() {
+                self.stream.on_text(&content);
             }
 
             if response.tool_calls.is_empty() {
                 self.stream.on_complete();
-                return Ok(Self::finish(state, response.content));
+                return Ok(Self::finish(state, content));
             }
 
             state.messages.push(Message::assistant(&response.content));

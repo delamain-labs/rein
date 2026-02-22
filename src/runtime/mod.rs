@@ -1,17 +1,20 @@
 pub mod alerting;
 pub mod audit;
 pub mod budget;
+pub mod circuit_breaker;
 pub mod engine;
 pub mod eval;
 pub mod events;
 pub mod execution;
 pub mod executor;
+pub mod guardrails;
 pub mod injection;
 pub mod interceptor;
 pub mod memory;
 pub mod observability;
 pub mod otel_export;
 pub mod permissions;
+pub mod policy;
 pub mod provider;
 pub mod registry;
 pub mod sandbox;
@@ -58,6 +61,30 @@ pub enum RunEvent {
     BudgetUpdate {
         spent_cents: u64,
         limit_cents: u64,
+    },
+    GuardrailTriggered {
+        rule: String,
+        action: String,
+        blocked: bool,
+    },
+    CircuitBreakerTripped {
+        name: String,
+        failures: u32,
+        threshold: u32,
+    },
+    PolicyPromotion {
+        from_tier: String,
+        to_tier: String,
+    },
+    PolicyDemotion {
+        from_tier: String,
+        to_tier: String,
+        reason: String,
+    },
+    EvalResult {
+        metric: String,
+        passed: bool,
+        detail: String,
     },
     RunComplete {
         total_cost_cents: u64,
@@ -200,6 +227,43 @@ impl RunTrace {
                 } => {
                     lines.push(format!("  budget: {spent_cents}¢ / {limit_cents}¢"));
                 }
+                RunEvent::GuardrailTriggered {
+                    rule,
+                    action,
+                    blocked,
+                } => {
+                    let status = if *blocked { "BLOCKED" } else { "triggered" };
+                    lines.push(format!("  ⚠ guardrail [{status}]: {rule} ({action})"));
+                }
+                RunEvent::CircuitBreakerTripped {
+                    name,
+                    failures,
+                    threshold,
+                } => {
+                    lines.push(format!(
+                        "  🔌 circuit breaker '{name}' tripped ({failures}/{threshold} failures)"
+                    ));
+                }
+                RunEvent::PolicyPromotion { from_tier, to_tier } => {
+                    lines.push(format!("  ⬆ policy: promoted {from_tier} → {to_tier}"));
+                }
+                RunEvent::PolicyDemotion {
+                    from_tier,
+                    to_tier,
+                    reason,
+                } => {
+                    lines.push(format!(
+                        "  ⬇ policy: demoted {from_tier} → {to_tier} ({reason})"
+                    ));
+                }
+                RunEvent::EvalResult {
+                    metric,
+                    passed,
+                    detail,
+                } => {
+                    let status = if *passed { "✓" } else { "✗" };
+                    lines.push(format!("  {status} eval: {metric}: {detail}"));
+                }
                 RunEvent::RunComplete {
                     total_cost_cents,
                     total_tokens,
@@ -261,6 +325,9 @@ pub enum RunError {
     PermissionDenied,
     ProviderError,
     ConfigError,
+    CircuitBreakerOpen,
+    GuardrailBlocked,
+    EvalFailed,
 }
 
 #[cfg(test)]
