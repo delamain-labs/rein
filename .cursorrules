@@ -1,0 +1,38 @@
+# Rein Language Rules
+
+You are working with Rein, a declarative language for AI agent governance.
+
+## File Format
+- Extension: `.rein`
+- Encoding: UTF-8
+- Comments: `//`, `#`, `/* */`
+
+## Key Block Types
+- `agent name { model: x, can: [...], cannot: [...], budget: $N per day }`
+- `workflow name { trigger: event, step name { agent: x, goal: "..." } }`
+- `provider name { model: x, key: env("KEY") }`
+- `defaults { model: x, budget: $N per day }`
+- `type Name { field: type }`
+- `policy name { tier name { can: [...], when: condition } }`
+
+## Important Rules
+- Every agent needs a `model` field
+- `can` and `cannot` are capability lists (comma-separated or bracket-enclosed)
+- Budget syntax: `$100 per day`, `€50 per month`, `£25 per hour`
+- `when` conditions: `field op value` with `and`/`or` logic
+- Operators: `<`, `>`, `<=`, `>=`, `==`, `!=`
+- `env("VAR")` or `env("VAR", "default")` for environment variables
+- `up_to` constrains capabilities: `can: refund up_to $500`
+
+## CLI Commands
+- `rein validate <file>` — parse and validate
+- `rein validate --strict <file>` — warn on unenforced features
+- `rein fmt <file>` — auto-format
+- `rein explain <file>` — human-readable summary
+- `rein run --dry-run <file>` — execution plan without API calls
+- `rein init <name>` — scaffold a project
+
+## Testing
+- `cargo test` — run all tests
+- `cargo clippy -- -D warnings` — lint check
+- Tests live in separate `tests.rs` files alongside `mod.rs`
