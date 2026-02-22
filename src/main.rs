@@ -71,6 +71,9 @@ enum Command {
         /// User prompt message to send to the agent
         #[arg(short, long)]
         message: Option<String>,
+        /// Show execution plan without calling APIs
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -107,8 +110,12 @@ async fn main() {
             let exit_code = commands::serve::run_serve(&file, &host, port);
             process::exit(exit_code);
         }
-        Command::Run { file, message } => {
-            let exit_code = commands::run::run_agent(&file, message.as_deref());
+        Command::Run {
+            file,
+            message,
+            dry_run,
+        } => {
+            let exit_code = commands::run::run_agent(&file, message.as_deref(), dry_run);
             process::exit(exit_code);
         }
     }
