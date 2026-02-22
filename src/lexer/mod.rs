@@ -84,6 +84,7 @@ pub enum TokenKind {
     Schedule, Daily, Every, Hours,
     For, Each, Input, Output,
     Human, Via, Secrets, Vault,
+    Approve, Collaborate, Mode, Timeout, Edit, Suggest, Review,
     Lt,
     Gt,
     LtEq,
@@ -170,6 +171,9 @@ impl TokenKind {
             Self::Input => "input", Self::Output => "output",
             Self::Human => "human", Self::Via => "via",
             Self::Secrets => "secrets", Self::Vault => "vault",
+            Self::Approve => "approve", Self::Collaborate => "collaborate",
+            Self::Mode => "mode", Self::Timeout => "timeout",
+            Self::Edit => "edit", Self::Suggest => "suggest", Self::Review => "review",
             Self::Comment => "comment", Self::Eof => "end of file",
             _ => return None,
         };
@@ -221,6 +225,9 @@ impl TokenKind {
             "input" => Self::Input, "output" => Self::Output,
             "human" => Self::Human, "via" => Self::Via,
             "secrets" => Self::Secrets, "vault" => Self::Vault,
+            "approve" => Self::Approve, "collaborate" => Self::Collaborate,
+            "mode" => Self::Mode, "timeout" => Self::Timeout,
+            "edit" => Self::Edit, "suggest" => Self::Suggest, "review" => Self::Review,
             _ => return None,
         };
         Some(kind)
@@ -247,7 +254,9 @@ impl TokenKind {
             | Self::Session | Self::Knowledge | Self::Schedule | Self::Daily
             | Self::Every | Self::Hours | Self::For | Self::Each
             | Self::Input | Self::Output | Self::Human | Self::Via
-            | Self::Secrets | Self::Vault => self.keyword_str(),
+            | Self::Secrets | Self::Vault
+            | Self::Approve | Self::Collaborate | Self::Mode | Self::Timeout
+            | Self::Edit | Self::Suggest | Self::Review => self.keyword_str(),
             _ => None,
         }
     }

@@ -1019,6 +1019,7 @@ async fn step_execution_runs_agent_with_goal() {
             typed_input: None,
             typed_outputs: vec![],
             escalate: None,
+            approval: None,
             span: Span::new(0, 1),
         }],
         route_blocks: vec![],
