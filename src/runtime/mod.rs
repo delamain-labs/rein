@@ -8,6 +8,7 @@ pub mod executor;
 pub mod injection;
 pub mod interceptor;
 pub mod observability;
+pub mod otel_export;
 pub mod permissions;
 pub mod provider;
 pub mod registry;
