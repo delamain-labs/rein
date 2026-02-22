@@ -32,6 +32,7 @@ chrono = { version = "0.4.43", features = ["serde"] }
 axum = { version = "0.8.8", features = ["json"] }
 tower-http = { version = "0.6.8", features = ["cors"] }
 tower = { version = "0.5.3", features = ["util"] }
+sha2 = "0.10.9"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
