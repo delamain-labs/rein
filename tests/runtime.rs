@@ -275,6 +275,7 @@ fn make_workflow(name: &str, trigger: &str, agents: &[&str]) -> WorkflowDef {
             auto_resolve: None,
             within_blocks: vec![],
         mode: ExecutionMode::Sequential,
+        schedule: None,
         span: Span::new(0, 1),
     }
 }

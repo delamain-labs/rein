@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-const EXAMPLE_REIN: &str = r#"// My first Rein agent
+const EXAMPLE_REIN: &str = r"// My first Rein agent
 
 agent assistant {
     model: openai
@@ -17,12 +17,12 @@ agent assistant {
 
     budget: $0.10 per request
 }
-"#;
+";
 
-const ENV_TEMPLATE: &str = r#"# Rein environment configuration
+const ENV_TEMPLATE: &str = r"# Rein environment configuration
 # OPENAI_API_KEY=sk-...
 # ANTHROPIC_API_KEY=sk-ant-...
-"#;
+";
 
 const REIN_TOML_TEMPLATE: &str = r#"[project]
 name = "{name}"
@@ -39,8 +39,7 @@ watch = false
 hot_reload = false
 "#;
 
-const GITIGNORE: &str = r#".env
-"#;
+const GITIGNORE: &str = ".env\n";
 
 const README_TEMPLATE: &str = r#"# My Rein Project
 
@@ -65,10 +64,9 @@ rein run agents/assistant.rein --message "Hello!"
 pub fn run_init(dir: &Path) -> i32 {
     let project_name = dir
         .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "my-rein-project".to_string());
+        .map_or_else(|| "my-rein-project".to_string(), |n| n.to_string_lossy().to_string());
 
-    if dir.exists() && dir.read_dir().map_or(false, |mut d| d.next().is_some()) {
+    if dir.exists() && dir.read_dir().is_ok_and(|mut d| d.next().is_some()) {
         eprintln!("Error: directory '{}' is not empty", dir.display());
         return 1;
     }

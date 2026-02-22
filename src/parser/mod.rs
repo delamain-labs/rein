@@ -15,6 +15,7 @@ mod pipe_parser;
 mod policy_parser;
 mod schedule_parser;
 mod secrets_parser;
+mod step_extensions;
 mod step_parser;
 mod type_parser;
 mod within_parser;
@@ -198,6 +199,12 @@ impl Parser {
                 self.advance();
                 Ok(ValueExpr::Literal(s))
             }
+            // Keywords that can appear as values in certain contexts
+            kind if kind.keyword_as_ident().is_some() => {
+                let name = kind.keyword_as_ident().unwrap().to_string();
+                self.advance();
+                Ok(ValueExpr::Literal(name))
+            }
             _ => Err(ParseError::new(
                 format!(
                     "expected value (identifier, string, or env()), got {}",
@@ -209,72 +216,24 @@ impl Parser {
     }
 
     /// Consume an `Ident` token and return its string value + span.
+    /// Keywords that can appear as identifiers in value positions are accepted.
     fn expect_ident(&mut self) -> Result<(String, Span), ParseError> {
         self.skip_comments();
         let tok = self.current().clone();
-        match &tok.kind {
-            TokenKind::Ident(name) => {
-                let name = name.clone();
-                self.advance();
-                Ok((name, tok.span))
-            }
-            // Contextual keywords that can appear as identifiers
-            TokenKind::Failure
-            | TokenKind::Retry
-            | TokenKind::Then
-            | TokenKind::Exponential
-            | TokenKind::Linear
-            | TokenKind::Fixed
-            | TokenKind::Escalate
-            | TokenKind::One
-            | TokenKind::Of
-            | TokenKind::On
-            | TokenKind::All
-            | TokenKind::From
-            | TokenKind::When
-            | TokenKind::Route
-            | TokenKind::Parallel
-            | TokenKind::Auto
-            | TokenKind::Resolve
-            | TokenKind::Is
-            | TokenKind::Policy
-            | TokenKind::Tier
-            | TokenKind::Fallback
-            | TokenKind::Where
-            | TokenKind::Sort
-            | TokenKind::By
-            | TokenKind::Take
-            | TokenKind::Skip
-            | TokenKind::Select
-            | TokenKind::Unique
-            | TokenKind::Asc
-            | TokenKind::Desc
-            | TokenKind::Observe
-            | TokenKind::Fleet
-            | TokenKind::Channel
-            | TokenKind::Trace
-            | TokenKind::Metrics
-            | TokenKind::Alert
-            | TokenKind::Export
-            | TokenKind::Agents
-            | TokenKind::Scaling
-            | TokenKind::Min
-            | TokenKind::Max
-            | TokenKind::Retention
-            | TokenKind::Send
-            | TokenKind::To
-            | TokenKind::Within
-            | TokenKind::CircuitBreaker
-            | TokenKind::Promote => {
-                let name = tok.kind.to_string();
-                self.advance();
-                Ok((name, tok.span))
-            }
-            _ => Err(ParseError::new(
-                format!("expected identifier, got {}", tok.kind),
-                tok.span,
-            )),
+        if let TokenKind::Ident(name) = &tok.kind {
+            let name = name.clone();
+            self.advance();
+            return Ok((name, tok.span));
         }
+        if let Some(name) = tok.kind.keyword_as_ident() {
+            let name = name.to_string();
+            self.advance();
+            return Ok((name, tok.span));
+        }
+        Err(ParseError::new(
+            format!("expected identifier, got {}", tok.kind),
+            tok.span,
+        ))
     }
 
     /// Expect an identifier or keyword token, returning the text.
@@ -353,6 +312,9 @@ impl Parser {
         let mut fleets = Vec::new();
         let mut channels = Vec::new();
         let mut circuit_breakers = Vec::new();
+        let mut evals = Vec::new();
+        let mut memories = Vec::new();
+        let mut secrets = Vec::new();
         while self.peek() != &TokenKind::Eof {
             match self.peek() {
                 TokenKind::Import => imports.push(self.parse_import()?),
@@ -378,6 +340,15 @@ impl Parser {
                 TokenKind::CircuitBreaker => {
                     circuit_breakers.push(self.parse_circuit_breaker()?);
                 }
+                TokenKind::Eval => evals.push(self.parse_eval()?),
+                TokenKind::Memory => memories.push(self.parse_memory()?),
+                TokenKind::Schedule => {
+                    return Err(ParseError::new(
+                        "'schedule' must appear inside a workflow block",
+                        self.current_span(),
+                    ));
+                }
+                TokenKind::Secrets => secrets.push(self.parse_secrets()?),
                 other => {
                     return Err(ParseError::new(
                         format!(
@@ -403,6 +374,9 @@ impl Parser {
             fleets,
             channels,
             circuit_breakers,
+            evals,
+            memories,
+            secrets,
         })
     }
 }

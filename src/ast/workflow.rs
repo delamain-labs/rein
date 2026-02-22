@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use super::escalate::EscalateDef;
 use super::pipe::PipeExpr;
 use super::types::TypeExpr;
 use super::Span;
@@ -218,6 +219,14 @@ pub struct StepDef {
     pub send_to: Option<SendTarget>,
     /// Optional fallback step executed when the primary step fails.
     pub fallback: Option<Box<StepDef>>,
+    /// `for each: <collection>` iteration binding.
+    pub for_each: Option<String>,
+    /// Typed input binding: `input: <name>`.
+    pub typed_input: Option<String>,
+    /// Typed output bindings: `output: <name>: <TypeExpr>`.
+    pub typed_outputs: Vec<(String, TypeExpr)>,
+    /// Escalation to human: `escalate to human via channel("dest")`.
+    pub escalate: Option<EscalateDef>,
     pub span: Span,
 }
 
@@ -241,6 +250,8 @@ pub struct WorkflowDef {
     pub within_blocks: Vec<WithinBlock>,
     /// Default execution mode.
     pub mode: ExecutionMode,
+    /// Optional schedule for the workflow.
+    pub schedule: Option<crate::ast::ScheduleDef>,
     pub span: Span,
 }
 

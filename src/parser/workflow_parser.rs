@@ -1,7 +1,7 @@
 use crate::ast::{
     AutoResolveBlock, AutoResolveCondition, CompareOp, ExecutionMode, ParallelBlock, RouteArm,
-    RouteBlock, RoutePattern, RouteRule, Span, Stage, StepDef, TypeExpr, WhenComparison,
-    WithinBlock, WorkflowDef,
+    RouteBlock, RoutePattern, RouteRule, ScheduleDef, Span, Stage, StepDef, TypeExpr,
+    WhenComparison, WithinBlock, WorkflowDef,
 };
 use crate::lexer::TokenKind;
 
@@ -16,6 +16,7 @@ struct WorkflowBody {
     parallel_blocks: Vec<ParallelBlock>,
     auto_resolve: Option<AutoResolveBlock>,
     within_blocks: Vec<WithinBlock>,
+    schedule: Option<ScheduleDef>,
 }
 
 impl Parser {
@@ -64,6 +65,7 @@ impl Parser {
             auto_resolve: body.auto_resolve,
             within_blocks: body.within_blocks,
             mode: ExecutionMode::Sequential,
+            schedule: body.schedule,
             span: Span::new(start, end),
         })
     }
@@ -103,6 +105,15 @@ impl Parser {
                 TokenKind::Within => body.within_blocks.push(self.parse_within_block()?),
                 TokenKind::Route => body.route_blocks.push(self.parse_route_block()?),
                 TokenKind::Parallel => body.parallel_blocks.push(self.parse_parallel_block()?),
+                TokenKind::Schedule => {
+                    if body.schedule.is_some() {
+                        return Err(ParseError::new(
+                            format!("duplicate 'schedule' in workflow '{name}'"),
+                            self.current_span(),
+                        ));
+                    }
+                    body.schedule = Some(self.parse_schedule()?);
+                }
                 TokenKind::Auto => {
                     if body.auto_resolve.is_some() {
                         return Err(ParseError::new(

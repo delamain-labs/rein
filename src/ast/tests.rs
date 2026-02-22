@@ -102,7 +102,7 @@ fn agent_def_full_serializes() {
 
 #[test]
 fn rein_file_roundtrips_via_json() {
-    let file = ReinFile { archetypes: vec![], policies: vec![], observes: vec![], fleets: vec![], channels: vec![], circuit_breakers: vec![],
+    let file = ReinFile { archetypes: vec![], policies: vec![], observes: vec![], fleets: vec![], channels: vec![], circuit_breakers: vec![], evals: vec![], memories: vec![], secrets: vec![],
         imports: vec![],
         defaults: None,
         providers: vec![],
@@ -193,7 +193,7 @@ fn workflow_def_serializes() {
         route_blocks: vec![],
         parallel_blocks: vec![],
         auto_resolve: None, within_blocks: vec![],
-        mode: ExecutionMode::Sequential,
+        mode: ExecutionMode::Sequential, schedule: None,
         span: dummy_span(),
     };
     let json = serde_json::to_value(&workflow).unwrap();
@@ -213,7 +213,7 @@ fn workflow_roundtrips_via_json() {
         route_blocks: vec![],
         parallel_blocks: vec![],
         auto_resolve: None, within_blocks: vec![],
-        mode: ExecutionMode::Parallel,
+        mode: ExecutionMode::Parallel, schedule: None,
         span: dummy_span(),
     };
     let json = serde_json::to_string(&workflow).unwrap();
@@ -223,7 +223,7 @@ fn workflow_roundtrips_via_json() {
 
 #[test]
 fn rein_file_with_workflows_roundtrips() {
-    let file = ReinFile { archetypes: vec![], policies: vec![], observes: vec![], fleets: vec![], channels: vec![], circuit_breakers: vec![],
+    let file = ReinFile { archetypes: vec![], policies: vec![], observes: vec![], fleets: vec![], channels: vec![], circuit_breakers: vec![], evals: vec![], memories: vec![], secrets: vec![],
         imports: vec![],
         defaults: None,
         providers: vec![],
@@ -237,7 +237,7 @@ fn rein_file_with_workflows_roundtrips() {
             route_blocks: vec![],
             parallel_blocks: vec![],
             auto_resolve: None, within_blocks: vec![],
-            mode: ExecutionMode::Sequential,
+            mode: ExecutionMode::Sequential, schedule: None,
             span: dummy_span(),
         }],
         types: vec![],
@@ -270,7 +270,7 @@ fn workflow_def_find_stage() {
         route_blocks: vec![],
         parallel_blocks: vec![],
         auto_resolve: None, within_blocks: vec![],
-        mode: ExecutionMode::Sequential,
+        mode: ExecutionMode::Sequential, schedule: None,
         span: dummy_span(),
     };
 
