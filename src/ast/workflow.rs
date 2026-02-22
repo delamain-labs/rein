@@ -227,6 +227,8 @@ pub struct StepDef {
     pub typed_outputs: Vec<(String, TypeExpr)>,
     /// Escalation to human: `escalate to human via channel("dest")`.
     pub escalate: Option<EscalateDef>,
+    /// Human approval gate or collaboration session.
+    pub approval: Option<super::ApprovalDef>,
     pub span: Span,
 }
 

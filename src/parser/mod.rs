@@ -6,6 +6,7 @@ mod channel_parser;
 mod circuit_breaker_parser;
 mod common_parser;
 mod condition_parser;
+mod approval_parser;
 mod eval_parser;
 mod fleet_parser;
 mod import_parser;
@@ -389,6 +390,9 @@ mod eval_parser_tests;
 mod memory_parser_tests;
 #[cfg(test)]
 mod schedule_parser_tests;
+#[cfg(test)]
+#[cfg(test)]
+mod approval_tests;
 #[cfg(test)]
 mod step_ext_tests;
 #[cfg(test)]

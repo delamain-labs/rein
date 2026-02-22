@@ -1,9 +1,49 @@
-use crate::ast::{EscalateDef, Span, TypeExpr};
+use crate::ast::{EscalateDef, PipeExpr, Span, TypeExpr};
 use crate::lexer::TokenKind;
 
 use super::{ParseError, Parser};
 
 impl Parser {
+    /// Parse an `input:` field in a step body.
+    /// Handles both typed input (`input: name`) and pipe expressions (`input: source | ...`).
+    /// Caller must have already consumed `input` keyword and `:`.
+    pub(super) fn parse_step_input_field(
+        &mut self,
+        name: &str,
+        input: &mut Option<PipeExpr>,
+        typed_input: &mut Option<String>,
+    ) -> Result<(), ParseError> {
+        if matches!(self.peek(), TokenKind::Ident(_)) || self.peek().keyword_as_ident().is_some() {
+            if self.peek_at(1) == Some(&TokenKind::Pipe) {
+                if input.is_some() {
+                    return Err(ParseError::new(
+                        format!("duplicate field 'input' in step '{name}'"),
+                        self.current_span(),
+                    ));
+                }
+                *input = Some(self.parse_pipe_expr()?);
+            } else {
+                if typed_input.is_some() {
+                    return Err(ParseError::new(
+                        format!("duplicate 'input' in step '{name}'"),
+                        self.current_span(),
+                    ));
+                }
+                let (input_name, _) = self.expect_ident()?;
+                *typed_input = Some(input_name);
+            }
+        } else {
+            if input.is_some() {
+                return Err(ParseError::new(
+                    format!("duplicate field 'input' in step '{name}'"),
+                    self.current_span(),
+                ));
+            }
+            *input = Some(self.parse_pipe_expr()?);
+        }
+        Ok(())
+    }
+
     /// Parse `for each: <collection>`.
     pub(super) fn parse_step_for_each(
         &mut self,

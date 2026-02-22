@@ -18,6 +18,7 @@ struct StepFields {
     typed_input: Option<String>,
     typed_outputs: Vec<(String, TypeExpr)>,
     escalate: Option<EscalateDef>,
+    approval: Option<crate::ast::ApprovalDef>,
     seen_agent: bool,
     seen_goal: bool,
 }
@@ -75,6 +76,7 @@ impl Parser {
                         typed_input: f.typed_input,
                         typed_outputs: f.typed_outputs,
                         escalate: f.escalate,
+                        approval: f.approval,
                         span: Span::new(start, end),
                     });
                 }
@@ -103,47 +105,23 @@ impl Parser {
                     self.parse_step_escalate(&name, &mut f.escalate)?;
                 }
                 TokenKind::Input => {
-                    // `input:` can be a typed input binding or a pipe expression.
-                    // We peek ahead: if it's `input: <ident>` with no pipe, it's typed_input.
-                    // Otherwise, fall through to pipe parsing.
                     self.advance(); // consume `input`
                     self.expect(&TokenKind::Colon)?;
-                    // Check if next is a simple ident without pipe
-                    if matches!(self.peek(), TokenKind::Ident(_)) || self.peek().keyword_as_ident().is_some() {
-                        // Check if followed by pipe
-                        if self.peek_at(1) == Some(&TokenKind::Pipe) {
-                            // It's a pipe expression — parse as input
-                            if f.input.is_some() {
-                                return Err(ParseError::new(
-                                    format!("duplicate field 'input' in step '{name}'"),
-                                    self.current_span(),
-                                ));
-                            }
-                            f.input = Some(self.parse_pipe_expr()?);
-                        } else {
-                            // Simple typed input
-                            if f.typed_input.is_some() {
-                                return Err(ParseError::new(
-                                    format!("duplicate 'input' in step '{name}'"),
-                                    self.current_span(),
-                                ));
-                            }
-                            let (input_name, _) = self.expect_ident()?;
-                            f.typed_input = Some(input_name);
-                        }
-                    } else {
-                        // Likely a pipe expression starting with something else
-                        if f.input.is_some() {
-                            return Err(ParseError::new(
-                                format!("duplicate field 'input' in step '{name}'"),
-                                self.current_span(),
-                            ));
-                        }
-                        f.input = Some(self.parse_pipe_expr()?);
-                    }
+                    self.parse_step_input_field(
+                        &name, &mut f.input, &mut f.typed_input,
+                    )?;
                 }
                 TokenKind::Output => {
                     self.parse_step_typed_output(&name, &mut f.typed_outputs)?;
+                }
+                TokenKind::Approve | TokenKind::Collaborate => {
+                    if f.approval.is_some() {
+                        return Err(ParseError::new(
+                            format!("duplicate approval in step '{name}'"),
+                            self.current_span(),
+                        ));
+                    }
+                    f.approval = Some(self.parse_approval()?);
                 }
                 _ => {
                     self.parse_step_field_or_error(&name, &mut f)?;
@@ -350,6 +328,7 @@ impl Parser {
             typed_input: None,
             typed_outputs: Vec::new(),
             escalate: None,
+            approval: None,
             span: Span::new(start, end),
         })
     }

@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 mod agent;
+mod approval;
 mod channel;
 mod circuit_breaker;
 mod escalate;
@@ -23,6 +24,7 @@ mod workflow;
 pub use agent::*;
 pub use channel::*;
 pub use circuit_breaker::*;
+pub use approval::*;
 pub use escalate::*;
 pub use eval::*;
 pub use fleet::*;
