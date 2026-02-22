@@ -42,6 +42,42 @@ pub struct RunResult {
     pub total_cost_cents: u64,
 }
 
+/// Callback for streaming output events during a run.
+pub trait StreamCallback: Send + Sync {
+    /// Called when a text chunk is received from the LLM.
+    fn on_text(&self, text: &str);
+    /// Called when a tool call is about to be executed.
+    fn on_tool_call(&self, namespace: &str, action: &str);
+    /// Called when the run completes.
+    fn on_complete(&self);
+}
+
+/// A no-op stream callback (default).
+pub struct NoopStream;
+
+impl StreamCallback for NoopStream {
+    fn on_text(&self, _text: &str) {}
+    fn on_tool_call(&self, _namespace: &str, _action: &str) {}
+    fn on_complete(&self) {}
+}
+
+/// A stream callback that prints to stdout.
+pub struct StdoutStream;
+
+impl StreamCallback for StdoutStream {
+    fn on_text(&self, text: &str) {
+        use std::io::Write;
+        print!("{text}");
+        let _ = std::io::stdout().flush();
+    }
+    fn on_tool_call(&self, namespace: &str, action: &str) {
+        eprintln!("[tool] {namespace}.{action}");
+    }
+    fn on_complete(&self) {
+        println!();
+    }
+}
+
 /// Mutable state carried through the agent loop.
 struct RunState {
     messages: Vec<Message>,
@@ -59,6 +95,7 @@ pub struct AgentEngine<'a> {
     interceptor: ToolInterceptor<'a>,
     tool_defs: Vec<ToolDef>,
     config: RunConfig,
+    stream: Box<dyn StreamCallback + 'a>,
 }
 
 impl<'a> AgentEngine<'a> {
@@ -77,7 +114,15 @@ impl<'a> AgentEngine<'a> {
             interceptor: ToolInterceptor::new(registry),
             tool_defs,
             config,
+            stream: Box::new(NoopStream),
         }
+    }
+
+    /// Set a stream callback for real-time output.
+    #[must_use]
+    pub fn with_stream(mut self, stream: Box<dyn StreamCallback + 'a>) -> Self {
+        self.stream = stream;
+        self
     }
 
     /// Run the agent with the given user message.
@@ -122,11 +167,21 @@ impl<'a> AgentEngine<'a> {
 
             self.check_budget(&mut state, cost)?;
 
+            // Stream the response text
+            if !response.content.is_empty() {
+                self.stream.on_text(&response.content);
+            }
+
             if response.tool_calls.is_empty() {
+                self.stream.on_complete();
                 return Ok(Self::finish(state, response.content));
             }
 
             state.messages.push(Message::assistant(&response.content));
+            // Stream tool call notifications
+            for tc in &response.tool_calls {
+                self.stream.on_tool_call(&tc.name, &tc.name);
+            }
             self.process_tool_calls(&mut state, &response.tool_calls)
                 .await;
         }

@@ -282,3 +282,52 @@ async fn trace_contains_run_complete() {
         .collect();
     assert_eq!(complete.len(), 1);
 }
+
+#[tokio::test]
+async fn stream_callback_receives_text() {
+    use std::sync::{Arc, Mutex};
+
+    struct CollectStream {
+        texts: Arc<Mutex<Vec<String>>>,
+        completed: Arc<Mutex<bool>>,
+    }
+
+    impl super::StreamCallback for CollectStream {
+        fn on_text(&self, text: &str) {
+            self.texts.lock().unwrap().push(text.to_string());
+        }
+        fn on_tool_call(&self, _ns: &str, _action: &str) {}
+        fn on_complete(&self) {
+            *self.completed.lock().unwrap() = true;
+        }
+    }
+
+    let provider = MockProvider::new();
+    provider.push_response(ChatResponse {
+        content: "Hello streamed!".to_string(),
+        tool_calls: vec![],
+        usage: Usage { input_tokens: 10, output_tokens: 5 },
+        model: "gpt-4o".to_string(),
+    });
+
+    let executor = MockExecutor::new();
+    let agent = make_agent(vec![], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+    let config = RunConfig::default();
+
+    let texts = Arc::new(Mutex::new(Vec::new()));
+    let completed = Arc::new(Mutex::new(false));
+    let stream = CollectStream {
+        texts: Arc::clone(&texts),
+        completed: Arc::clone(&completed),
+    };
+
+    let engine = AgentEngine::new(&provider, &executor, &registry, vec![], config)
+        .with_stream(Box::new(stream));
+    let result = engine.run("Hi").await.unwrap();
+
+    assert_eq!(result.response, "Hello streamed!");
+    assert_eq!(texts.lock().unwrap().len(), 1);
+    assert_eq!(texts.lock().unwrap()[0], "Hello streamed!");
+    assert!(*completed.lock().unwrap());
+}
