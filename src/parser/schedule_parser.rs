@@ -23,7 +23,7 @@ impl Parser {
                             self.current_span(),
                         ));
                     }
-                };
+                }
                 // Parse time: could be "2am", "14:30", etc. — grab as string or ident
                 let time = match self.peek().clone() {
                     TokenKind::StringLiteral(s) | TokenKind::Ident(s) => {

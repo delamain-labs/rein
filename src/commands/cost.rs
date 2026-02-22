@@ -47,10 +47,10 @@ fn collect_traces_from_dir(dir: &Path) -> Result<Vec<StructuredTrace>, std::io::
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.extension().is_some_and(|e| e == "json") {
-            if let Ok(t) = load_trace(&path) {
-                traces.push(t);
-            }
+        if path.extension().is_some_and(|e| e == "json")
+            && let Ok(t) = load_trace(&path)
+        {
+            traces.push(t);
         }
     }
     Ok(traces)

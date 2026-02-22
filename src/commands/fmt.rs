@@ -40,10 +40,8 @@ pub fn run_fmt(files: &[std::path::PathBuf], check: bool) -> i32 {
 
     if any_error {
         2
-    } else if check && any_changed {
-        1
     } else {
-        0
+        i32::from(check && any_changed)
     }
 }
 
@@ -119,7 +117,7 @@ pub fn format_source(source: &str) -> String {
         }
 
         // Indent and write line
-        let indent = "    ".repeat(depth as usize);
+        let indent = "    ".repeat(usize::try_from(depth).unwrap_or(0));
         let formatted_line = format_line(trimmed);
         output.push_str(&indent);
         output.push_str(&formatted_line);
@@ -134,7 +132,7 @@ pub fn format_source(source: &str) -> String {
         let closes = trimmed.chars().filter(|&c| c == '}' || c == ']').count();
         // We already decremented for leading close, so only count non-leading closes
         let effective_closes = if starts_with_close { closes - 1 } else { closes };
-        depth += opens as i32 - effective_closes as i32;
+        depth += i32::try_from(opens).unwrap_or(0) - i32::try_from(effective_closes).unwrap_or(0);
         if depth < 0 {
             depth = 0;
         }

@@ -38,6 +38,7 @@ fn make_workflow(name: &str, trigger: &str, stage_agents: &[&str]) -> WorkflowDe
             parallel_blocks: vec![],
             auto_resolve: None, within_blocks: vec![],
         mode: ExecutionMode::Sequential,
+        schedule: None,
         span: Span::new(0, 1),
     }
 }
@@ -359,7 +360,7 @@ fn make_conditional_workflow() -> (ReinFile, WorkflowDef) {
             route_blocks: vec![],
             parallel_blocks: vec![],
             auto_resolve: None, within_blocks: vec![],
-        mode: ExecutionMode::Sequential,
+        mode: ExecutionMode::Sequential, schedule: None,
         span: Span::new(0, 1),
     };
 
@@ -462,7 +463,7 @@ async fn conditional_no_else_ends_workflow() {
             route_blocks: vec![],
             parallel_blocks: vec![],
             auto_resolve: None, within_blocks: vec![],
-        mode: ExecutionMode::Sequential,
+        mode: ExecutionMode::Sequential, schedule: None,
         span: Span::new(0, 1),
     };
 
@@ -893,7 +894,7 @@ async fn conditional_route_to_nonexistent_stage_errors() {
             route_blocks: vec![],
             parallel_blocks: vec![],
             auto_resolve: None, within_blocks: vec![],
-        mode: ExecutionMode::Sequential,
+        mode: ExecutionMode::Sequential, schedule: None,
         span: Span::new(0, 1),
     };
 
@@ -962,7 +963,7 @@ async fn circular_route_returns_error() {
             route_blocks: vec![],
             parallel_blocks: vec![],
             auto_resolve: None, within_blocks: vec![],
-        mode: ExecutionMode::Sequential,
+        mode: ExecutionMode::Sequential, schedule: None,
         span: Span::new(0, 1),
     };
 
@@ -1014,6 +1015,10 @@ async fn step_execution_runs_agent_with_goal() {
             on_failure: None,
             send_to: None,
             fallback: None,
+            for_each: None,
+            typed_input: None,
+            typed_outputs: vec![],
+            escalate: None,
             span: Span::new(0, 1),
         }],
         route_blocks: vec![],
@@ -1021,6 +1026,7 @@ async fn step_execution_runs_agent_with_goal() {
         auto_resolve: None,
         within_blocks: vec![],
         mode: ExecutionMode::Sequential,
+        schedule: None,
         span: Span::new(0, 1),
     };
 

@@ -1,4 +1,4 @@
-use crate::ast::{PipeExpr, RetryPolicy, SendTarget, Span, StepDef, TypeExpr, ValueExpr, WhenExpr};
+use crate::ast::{EscalateDef, PipeExpr, RetryPolicy, SendTarget, Span, StepDef, TypeExpr, ValueExpr, WhenExpr};
 use crate::lexer::TokenKind;
 
 use super::{ParseError, Parser};
@@ -14,6 +14,10 @@ struct StepFields {
     when: Option<WhenExpr>,
     on_failure: Option<RetryPolicy>,
     fallback: Option<Box<StepDef>>,
+    for_each: Option<String>,
+    typed_input: Option<String>,
+    typed_outputs: Vec<(String, TypeExpr)>,
+    escalate: Option<EscalateDef>,
     seen_agent: bool,
     seen_goal: bool,
 }
@@ -67,6 +71,10 @@ impl Parser {
                         when: f.when,
                         on_failure: f.on_failure,
                         fallback: f.fallback,
+                        for_each: f.for_each,
+                        typed_input: f.typed_input,
+                        typed_outputs: f.typed_outputs,
+                        escalate: f.escalate,
                         span: Span::new(start, end),
                     });
                 }
@@ -87,6 +95,55 @@ impl Parser {
                 }
                 TokenKind::Fallback => {
                     self.parse_step_fallback(&name, &mut f.fallback)?;
+                }
+                TokenKind::For => {
+                    self.parse_step_for_each(&name, &mut f.for_each)?;
+                }
+                TokenKind::Escalate => {
+                    self.parse_step_escalate(&name, &mut f.escalate)?;
+                }
+                TokenKind::Input => {
+                    // `input:` can be a typed input binding or a pipe expression.
+                    // We peek ahead: if it's `input: <ident>` with no pipe, it's typed_input.
+                    // Otherwise, fall through to pipe parsing.
+                    self.advance(); // consume `input`
+                    self.expect(&TokenKind::Colon)?;
+                    // Check if next is a simple ident without pipe
+                    if matches!(self.peek(), TokenKind::Ident(_)) || self.peek().keyword_as_ident().is_some() {
+                        // Check if followed by pipe
+                        if self.peek_at(1) == Some(&TokenKind::Pipe) {
+                            // It's a pipe expression — parse as input
+                            if f.input.is_some() {
+                                return Err(ParseError::new(
+                                    format!("duplicate field 'input' in step '{name}'"),
+                                    self.current_span(),
+                                ));
+                            }
+                            f.input = Some(self.parse_pipe_expr()?);
+                        } else {
+                            // Simple typed input
+                            if f.typed_input.is_some() {
+                                return Err(ParseError::new(
+                                    format!("duplicate 'input' in step '{name}'"),
+                                    self.current_span(),
+                                ));
+                            }
+                            let (input_name, _) = self.expect_ident()?;
+                            f.typed_input = Some(input_name);
+                        }
+                    } else {
+                        // Likely a pipe expression starting with something else
+                        if f.input.is_some() {
+                            return Err(ParseError::new(
+                                format!("duplicate field 'input' in step '{name}'"),
+                                self.current_span(),
+                            ));
+                        }
+                        f.input = Some(self.parse_pipe_expr()?);
+                    }
+                }
+                TokenKind::Output => {
+                    self.parse_step_typed_output(&name, &mut f.typed_outputs)?;
                 }
                 _ => {
                     self.parse_step_field_or_error(&name, &mut f)?;
@@ -289,6 +346,10 @@ impl Parser {
             when: None,
             on_failure: None,
             fallback: None,
+            for_each: None,
+            typed_input: None,
+            typed_outputs: Vec::new(),
+            escalate: None,
             span: Span::new(start, end),
         })
     }

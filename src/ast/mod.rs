@@ -71,6 +71,9 @@ pub struct ReinFile {
     pub fleets: Vec<FleetDef>,
     pub channels: Vec<ChannelDef>,
     pub circuit_breakers: Vec<CircuitBreakerDef>,
+    pub evals: Vec<EvalDef>,
+    pub memories: Vec<MemoryDef>,
+    pub secrets: Vec<SecretsDef>,
 }
 
 #[cfg(test)]

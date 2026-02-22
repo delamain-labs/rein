@@ -2,7 +2,7 @@ use serde_json::json;
 
 use super::*;
 use crate::ast::ValueExpr;
-use crate::ast::{AgentDef, Capability, Constraint, Span};
+use crate::ast::{AgentDef, Capability, Span};
 use crate::runtime::executor::MockExecutor;
 use crate::runtime::provider::{ChatResponse, MockProvider, ToolCallRequest, ToolDef, Usage};
 

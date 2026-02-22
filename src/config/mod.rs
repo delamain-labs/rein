@@ -126,10 +126,10 @@ impl Config {
 
         let mut toml_config = Self::load_toml(dir);
         let env_path = dir.join(format!("rein.env.{env_name}.toml"));
-        if let Ok(content) = std::fs::read_to_string(&env_path) {
-            if let Ok(overrides) = toml::from_str::<ReinToml>(&content) {
-                Self::merge_toml(&mut toml_config, &overrides);
-            }
+        if let Ok(content) = std::fs::read_to_string(&env_path)
+            && let Ok(overrides) = toml::from_str::<ReinToml>(&content)
+        {
+            Self::merge_toml(&mut toml_config, &overrides);
         }
 
         Self::from_toml(toml_config)
