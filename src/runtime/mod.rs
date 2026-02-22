@@ -1,13 +1,18 @@
+pub mod alerting;
 pub mod audit;
 pub mod budget;
 pub mod engine;
+pub mod events;
 pub mod execution;
 pub mod executor;
 pub mod injection;
 pub mod interceptor;
+pub mod observability;
 pub mod permissions;
 pub mod provider;
+pub mod registry;
 pub mod sandbox;
+pub mod webhook;
 pub mod workflow;
 
 use serde::{Deserialize, Serialize};
