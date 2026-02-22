@@ -71,7 +71,7 @@ impl<'a> Lexer<'a> {
             self.advance();
         }
         let end = self.pos;
-        let word = std::str::from_utf8(&self.src[start..end]).unwrap();
+        let word = std::str::from_utf8(&self.src[start..end]).expect("input should be valid UTF-8");
         // "key" is context-sensitive; lexed as Ident, matched in parser
         let kind = if word == "key" {
             TokenKind::Ident("key".to_string())
@@ -93,7 +93,7 @@ impl<'a> Lexer<'a> {
             }
         }
         let end = self.pos;
-        let text = std::str::from_utf8(&self.src[start..end]).unwrap().to_string();
+        let text = std::str::from_utf8(&self.src[start..end]).expect("input should be valid UTF-8").to_string();
         Token::new(TokenKind::Number(text), start, end)
     }
 
@@ -161,7 +161,7 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        let num_str = std::str::from_utf8(&self.src[num_start..self.pos]).unwrap();
+        let num_str = std::str::from_utf8(&self.src[num_start..self.pos]).expect("numeric literal should be valid UTF-8");
         let cents = parse_cents(num_str).map_err(|()| LexError {
             message: format!("invalid currency amount: '{symbol}{num_str}'"),
             span: Span::new(start, self.pos),
@@ -224,6 +224,19 @@ impl<'a> Lexer<'a> {
         Ok(Token::new(TokenKind::Comment, start, self.pos))
     }
 
+    /// Lex a comparison or equality operator starting with `<`, `>`, `=`, or `!`.
+    fn read_comparison(&mut self, ch: u8, start: usize) -> Option<Token> {
+        match ch {
+            b'<' if self.peek() == Some(b'=') => { self.advance(); Some(Token::new(TokenKind::LtEq, start, self.pos)) }
+            b'<' => Some(Token::new(TokenKind::Lt, start, self.pos)),
+            b'>' if self.peek() == Some(b'=') => { self.advance(); Some(Token::new(TokenKind::GtEq, start, self.pos)) }
+            b'>' => Some(Token::new(TokenKind::Gt, start, self.pos)),
+            b'=' if self.peek() == Some(b'=') => { self.advance(); Some(Token::new(TokenKind::EqEq, start, self.pos)) }
+            b'!' if self.peek() == Some(b'=') => { self.advance(); Some(Token::new(TokenKind::BangEq, start, self.pos)) }
+            _ => None,
+        }
+    }
+
     fn run(&mut self) -> Result<Vec<Token>, LexError> {
         let mut tokens = Vec::new();
         loop {
@@ -269,20 +282,14 @@ impl<'a> Lexer<'a> {
                     self.advance(); // consume '>'
                     tokens.push(Token::new(TokenKind::Arrow, start, self.pos));
                 }
-                Some(b'<') => {
-                    if self.peek() == Some(b'=') {
-                        self.advance();
-                        tokens.push(Token::new(TokenKind::LtEq, start, self.pos));
+                Some(ch @ (b'<' | b'>' | b'=' | b'!')) => {
+                    if let Some(tok) = self.read_comparison(ch, start) {
+                        tokens.push(tok);
                     } else {
-                        tokens.push(Token::new(TokenKind::Lt, start, self.pos));
-                    }
-                }
-                Some(b'>') => {
-                    if self.peek() == Some(b'=') {
-                        self.advance();
-                        tokens.push(Token::new(TokenKind::GtEq, start, self.pos));
-                    } else {
-                        tokens.push(Token::new(TokenKind::Gt, start, self.pos));
+                        return Err(LexError {
+                            message: format!("unexpected character: '{}'", ch as char),
+                            span: Span::new(start, self.pos),
+                        });
                     }
                 }
                 Some(b'%') => tokens.push(Token::new(TokenKind::Percent, start, self.pos)),

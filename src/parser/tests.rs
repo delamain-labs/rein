@@ -1560,6 +1560,58 @@ fn parse_step_without_when() {
     assert!(f.workflows[0].steps[0].when.is_none());
 }
 
+#[test]
+fn parse_step_with_when_equality() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step x {
+                agent: a
+                when: status == "critical"
+            }
+        }
+    "#,
+    );
+    let step = &f.workflows[0].steps[0];
+    let when = step.when.as_ref().unwrap();
+    match when {
+        crate::ast::WhenExpr::Comparison(c) => {
+            assert_eq!(c.field, "status");
+            assert_eq!(c.op, crate::ast::CompareOp::Eq);
+            assert!(matches!(&c.value, crate::ast::WhenValue::String(s) if s == "critical"));
+        }
+        other => panic!("expected Comparison, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_step_with_when_not_equal() {
+    let f = parse_ok(
+        r#"
+        agent a { model: openai }
+        workflow w {
+            trigger: event
+            step x {
+                agent: a
+                when: tier != "free"
+            }
+        }
+    "#,
+    );
+    let step = &f.workflows[0].steps[0];
+    let when = step.when.as_ref().unwrap();
+    match when {
+        crate::ast::WhenExpr::Comparison(c) => {
+            assert_eq!(c.field, "tier");
+            assert_eq!(c.op, crate::ast::CompareOp::NotEq);
+            assert!(matches!(&c.value, crate::ast::WhenValue::String(s) if s == "free"));
+        }
+        other => panic!("expected Comparison, got {other:?}"),
+    }
+}
+
 // ── retry policy tests ──────────────────────────────────────────────────
 
 #[test]

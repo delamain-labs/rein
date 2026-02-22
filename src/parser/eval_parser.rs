@@ -136,6 +136,8 @@ impl Parser {
             TokenKind::Lt => CompareOp::Lt,
             TokenKind::GtEq => CompareOp::GtEq,
             TokenKind::LtEq => CompareOp::LtEq,
+            TokenKind::EqEq => CompareOp::Eq,
+            TokenKind::BangEq => CompareOp::NotEq,
             other => {
                 return Err(ParseError::new(
                     format!("expected comparison operator in assert, got {other}"),

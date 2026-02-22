@@ -106,7 +106,7 @@ impl Parser {
         }
 
         if parts.len() == 1 {
-            Ok(parts.into_iter().next().unwrap())
+            Ok(parts.into_iter().next().expect("parts vec must have at least one element"))
         } else {
             Ok(WhenExpr::Or(parts))
         }
@@ -128,7 +128,7 @@ impl Parser {
         }
 
         if parts.len() == 1 {
-            Ok(parts.into_iter().next().unwrap())
+            Ok(parts.into_iter().next().expect("parts vec must have at least one element"))
         } else {
             Ok(WhenExpr::And(parts))
         }
@@ -143,9 +143,11 @@ impl Parser {
             TokenKind::Gt => CompareOp::Gt,
             TokenKind::LtEq => CompareOp::LtEq,
             TokenKind::GtEq => CompareOp::GtEq,
+            TokenKind::EqEq => CompareOp::Eq,
+            TokenKind::BangEq => CompareOp::NotEq,
             other => {
                 return Err(ParseError::new(
-                    format!("expected comparison operator (<, >, <=, >=), got {other}"),
+                    format!("expected comparison operator (<, >, <=, >=, ==, !=), got {other}"),
                     self.current_span(),
                 ));
             }
@@ -174,6 +176,11 @@ impl Parser {
             TokenKind::Currency { symbol, amount } => {
                 self.advance();
                 Ok(WhenValue::Currency { symbol, amount })
+            }
+            TokenKind::StringLiteral(s) => {
+                let s = s.clone();
+                self.advance();
+                Ok(WhenValue::String(s))
             }
             TokenKind::Ident(name) => {
                 let name = name.clone();

@@ -535,3 +535,14 @@ fn tool_and_endpoint_keywords() {
     assert_eq!(tokens[3].kind, TokenKind::Endpoint);
     assert_eq!(tokens[4].kind, TokenKind::Colon);
 }
+
+#[test]
+fn equality_operators() {
+    let src = "a == b != c";
+    let tokens = non_eof(lex_ok(src));
+    assert_eq!(tokens[0].kind, TokenKind::Ident("a".into()));
+    assert_eq!(tokens[1].kind, TokenKind::EqEq);
+    assert_eq!(tokens[2].kind, TokenKind::Ident("b".into()));
+    assert_eq!(tokens[3].kind, TokenKind::BangEq);
+    assert_eq!(tokens[4].kind, TokenKind::Ident("c".into()));
+}

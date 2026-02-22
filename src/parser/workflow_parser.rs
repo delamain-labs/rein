@@ -229,6 +229,8 @@ impl Parser {
                 TokenKind::Gt => CompareOp::Gt,
                 TokenKind::LtEq => CompareOp::LtEq,
                 TokenKind::GtEq => CompareOp::GtEq,
+                TokenKind::EqEq => CompareOp::Eq,
+                TokenKind::BangEq => CompareOp::NotEq,
                 other => {
                     return Err(ParseError::new(
                         format!("expected comparison operator or 'is', got {other}"),

@@ -80,6 +80,8 @@ pub enum CompareOp {
     Gt,
     LtEq,
     GtEq,
+    Eq,
+    NotEq,
 }
 
 /// A value in a `when` comparison (right-hand side).
@@ -92,6 +94,8 @@ pub enum WhenValue {
     Currency { symbol: char, amount: u64 },
     /// A plain number.
     Number(String),
+    /// A string literal like `"critical"`.
+    String(String),
     /// An identifier reference.
     Ident(String),
 }

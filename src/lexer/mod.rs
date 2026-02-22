@@ -91,6 +91,8 @@ pub enum TokenKind {
     Gt,
     LtEq,
     GtEq,
+    EqEq,
+    BangEq,
     Percent,
     // Symbols
     LBrace,
@@ -156,6 +158,7 @@ impl TokenKind {
             Self::Or => "or", Self::And => "and",
             Self::Lt => "<", Self::Gt => ">",
             Self::LtEq => "<=", Self::GtEq => ">=",
+            Self::EqEq => "==", Self::BangEq => "!=",
             Self::Percent => "%", Self::Arrow => "->",
             Self::Route => "route", Self::On => "on",
             Self::Underscore => "_", Self::DotDot => "..",
