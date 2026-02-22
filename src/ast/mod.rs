@@ -6,6 +6,7 @@ mod agent;
 mod approval;
 mod channel;
 mod circuit_breaker;
+mod consensus;
 mod escalate;
 mod eval;
 mod fleet;
@@ -15,6 +16,7 @@ mod observe;
 mod pipe;
 mod policy;
 mod provider;
+mod scenario;
 mod schedule;
 mod secrets;
 mod types;
@@ -24,6 +26,7 @@ mod workflow;
 pub use agent::*;
 pub use channel::*;
 pub use circuit_breaker::*;
+pub use consensus::*;
 pub use approval::*;
 pub use escalate::*;
 pub use eval::*;
@@ -34,6 +37,7 @@ pub use observe::*;
 pub use pipe::*;
 pub use policy::*;
 pub use provider::*;
+pub use scenario::*;
 pub use schedule::*;
 pub use secrets::*;
 pub use types::*;
@@ -76,6 +80,8 @@ pub struct ReinFile {
     pub evals: Vec<EvalDef>,
     pub memories: Vec<MemoryDef>,
     pub secrets: Vec<SecretsDef>,
+    pub consensus_blocks: Vec<ConsensusDef>,
+    pub scenarios: Vec<ScenarioDef>,
 }
 
 #[cfg(test)]

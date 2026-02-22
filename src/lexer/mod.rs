@@ -85,6 +85,8 @@ pub enum TokenKind {
     For, Each, Input, Output,
     Human, Via, Secrets, Vault,
     Approve, Collaborate, Mode, Timeout, Edit, Suggest, Review,
+    Consensus, Strategy, Majority, Unanimous, Require, Agree,
+    Scenario, Given, Expect,
     Lt,
     Gt,
     LtEq,
@@ -174,6 +176,10 @@ impl TokenKind {
             Self::Approve => "approve", Self::Collaborate => "collaborate",
             Self::Mode => "mode", Self::Timeout => "timeout",
             Self::Edit => "edit", Self::Suggest => "suggest", Self::Review => "review",
+            Self::Consensus => "consensus", Self::Strategy => "strategy",
+            Self::Majority => "majority", Self::Unanimous => "unanimous",
+            Self::Require => "require", Self::Agree => "agree",
+            Self::Scenario => "scenario", Self::Given => "given", Self::Expect => "expect",
             Self::Comment => "comment", Self::Eof => "end of file",
             _ => return None,
         };
@@ -228,6 +234,10 @@ impl TokenKind {
             "approve" => Self::Approve, "collaborate" => Self::Collaborate,
             "mode" => Self::Mode, "timeout" => Self::Timeout,
             "edit" => Self::Edit, "suggest" => Self::Suggest, "review" => Self::Review,
+            "consensus" => Self::Consensus, "strategy" => Self::Strategy,
+            "majority" => Self::Majority, "unanimous" => Self::Unanimous,
+            "require" => Self::Require, "agree" => Self::Agree,
+            "scenario" => Self::Scenario, "given" => Self::Given, "expect" => Self::Expect,
             _ => return None,
         };
         Some(kind)
@@ -256,7 +266,10 @@ impl TokenKind {
             | Self::Input | Self::Output | Self::Human | Self::Via
             | Self::Secrets | Self::Vault
             | Self::Approve | Self::Collaborate | Self::Mode | Self::Timeout
-            | Self::Edit | Self::Suggest | Self::Review => self.keyword_str(),
+            | Self::Edit | Self::Suggest | Self::Review
+            | Self::Consensus | Self::Strategy | Self::Majority | Self::Unanimous
+            | Self::Require | Self::Agree | Self::Scenario | Self::Given
+            | Self::Expect => self.keyword_str(),
             _ => None,
         }
     }
