@@ -7,6 +7,7 @@ mod circuit_breaker_parser;
 mod common_parser;
 mod condition_parser;
 mod approval_parser;
+mod consensus_parser;
 mod eval_parser;
 mod fleet_parser;
 mod import_parser;
@@ -15,6 +16,7 @@ mod observe_parser;
 mod pipe_parser;
 mod policy_parser;
 mod schedule_parser;
+mod scenario_parser;
 mod secrets_parser;
 mod step_extensions;
 mod step_parser;
@@ -281,6 +283,22 @@ impl Parser {
         }
     }
 
+    fn expect_integer(&mut self) -> Result<u64, ParseError> {
+        match self.peek().clone() {
+            TokenKind::Number(n) => {
+                let val = n.parse::<u64>().map_err(|_| {
+                    ParseError::new(format!("expected integer, got '{n}'"), self.current_span())
+                })?;
+                self.advance();
+                Ok(val)
+            }
+            other => Err(ParseError::new(
+                format!("expected integer, got {other}"),
+                self.current_span(),
+            )),
+        }
+    }
+
     fn expect_currency(&mut self) -> Result<(u64, char, Span), ParseError> {
         self.skip_comments();
         let tok = self.current().clone();
@@ -316,6 +334,8 @@ impl Parser {
         let mut evals = Vec::new();
         let mut memories = Vec::new();
         let mut secrets = Vec::new();
+        let mut consensus_blocks = Vec::new();
+        let mut scenarios = Vec::new();
         while self.peek() != &TokenKind::Eof {
             match self.peek() {
                 TokenKind::Import => imports.push(self.parse_import()?),
@@ -350,6 +370,8 @@ impl Parser {
                     ));
                 }
                 TokenKind::Secrets => secrets.push(self.parse_secrets()?),
+                TokenKind::Consensus => consensus_blocks.push(self.parse_consensus()?),
+                TokenKind::Scenario => scenarios.push(self.parse_scenario()?),
                 other => {
                     return Err(ParseError::new(
                         format!(
@@ -378,6 +400,8 @@ impl Parser {
             evals,
             memories,
             secrets,
+            consensus_blocks,
+            scenarios,
         })
     }
 }
@@ -393,6 +417,10 @@ mod schedule_parser_tests;
 #[cfg(test)]
 #[cfg(test)]
 mod approval_tests;
+#[cfg(test)]
+mod consensus_tests;
+#[cfg(test)]
+mod scenario_tests;
 #[cfg(test)]
 mod step_ext_tests;
 #[cfg(test)]

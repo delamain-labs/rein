@@ -102,7 +102,7 @@ fn agent_def_full_serializes() {
 
 #[test]
 fn rein_file_roundtrips_via_json() {
-    let file = ReinFile { archetypes: vec![], policies: vec![], observes: vec![], fleets: vec![], channels: vec![], circuit_breakers: vec![], evals: vec![], memories: vec![], secrets: vec![],
+    let file = ReinFile { archetypes: vec![], policies: vec![], observes: vec![], fleets: vec![], channels: vec![], circuit_breakers: vec![], evals: vec![], memories: vec![], secrets: vec![], consensus_blocks: vec![], scenarios: vec![],
         imports: vec![],
         defaults: None,
         providers: vec![],
@@ -223,7 +223,7 @@ fn workflow_roundtrips_via_json() {
 
 #[test]
 fn rein_file_with_workflows_roundtrips() {
-    let file = ReinFile { archetypes: vec![], policies: vec![], observes: vec![], fleets: vec![], channels: vec![], circuit_breakers: vec![], evals: vec![], memories: vec![], secrets: vec![],
+    let file = ReinFile { archetypes: vec![], policies: vec![], observes: vec![], fleets: vec![], channels: vec![], circuit_breakers: vec![], evals: vec![], memories: vec![], secrets: vec![], consensus_blocks: vec![], scenarios: vec![],
         imports: vec![],
         defaults: None,
         providers: vec![],
