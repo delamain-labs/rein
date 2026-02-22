@@ -24,6 +24,21 @@ const ENV_TEMPLATE: &str = r#"# Rein environment configuration
 # ANTHROPIC_API_KEY=sk-ant-...
 "#;
 
+const REIN_TOML_TEMPLATE: &str = r#"[project]
+name = "{name}"
+version = "0.1.0"
+
+[runtime]
+default_model = "gpt-4o"
+timeout_secs = 30
+max_retries = 3
+log_level = "info"
+
+[dev]
+watch = false
+hot_reload = false
+"#;
+
 const GITIGNORE: &str = r#".env
 "#;
 
@@ -71,13 +86,17 @@ pub fn run_init(dir: &Path) -> i32 {
     0
 }
 
-fn scaffold(dir: &Path, _project_name: &str) -> std::io::Result<()> {
+fn scaffold(dir: &Path, project_name: &str) -> std::io::Result<()> {
     let agents_dir = dir.join("agents");
     fs::create_dir_all(&agents_dir)?;
     fs::write(agents_dir.join("assistant.rein"), EXAMPLE_REIN)?;
     fs::write(dir.join(".env.example"), ENV_TEMPLATE)?;
     fs::write(dir.join(".gitignore"), GITIGNORE)?;
     fs::write(dir.join("README.md"), README_TEMPLATE)?;
+    fs::write(
+        dir.join("rein.toml"),
+        REIN_TOML_TEMPLATE.replace("{name}", project_name),
+    )?;
     Ok(())
 }
 
