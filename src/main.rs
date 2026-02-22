@@ -21,6 +21,12 @@ enum Command {
         #[arg(long)]
         ast: bool,
     },
+    /// Aggregate and display cost statistics from trace files
+    Cost {
+        /// Trace files or directories to analyze
+        #[arg(required = true)]
+        paths: Vec<std::path::PathBuf>,
+    },
     /// Auto-format .rein files to canonical style
     Fmt {
         /// .rein files to format
@@ -52,6 +58,10 @@ async fn main() {
     match cli.command {
         Command::Validate { file, ast } => {
             let exit_code = commands::validate::run_validate(&file, ast);
+            process::exit(exit_code);
+        }
+        Command::Cost { paths } => {
+            let exit_code = commands::cost::run_cost(&paths);
             process::exit(exit_code);
         }
         Command::Fmt { files, check } => {
