@@ -48,6 +48,11 @@ enum Command {
         #[arg(default_value = "my-rein-project")]
         name: std::path::PathBuf,
     },
+    /// Explain what a .rein file defines in plain language
+    Explain {
+        /// Path to the .rein file
+        file: std::path::PathBuf,
+    },
     /// Run an agent defined in a .rein file
     Run {
         /// Path to the .rein file
@@ -81,6 +86,10 @@ async fn main() {
         }
         Command::Init { name } => {
             let exit_code = commands::init::run_init(&name);
+            process::exit(exit_code);
+        }
+        Command::Explain { file } => {
+            let exit_code = commands::explain::run_explain(&file);
             process::exit(exit_code);
         }
         Command::Run { file, message } => {
