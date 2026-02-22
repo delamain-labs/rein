@@ -27,6 +27,7 @@ reqwest = { version = "0.12", features = ["json"] }
 dotenvy = "0.15"
 async-trait = "0.1.89"
 regex = "1.12.3"
+toml = "0.8"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
