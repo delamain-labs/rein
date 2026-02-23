@@ -208,7 +208,9 @@ impl RunTrace {
         path: &std::path::Path,
         agent_name: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let trace = self.to_structured(agent_name, "", "", 0);
+        use chrono::Utc;
+        let now = Utc::now().to_rfc3339();
+        let trace = self.to_structured(agent_name, &now, &now, 0);
         let json = serde_json::to_string_pretty(&trace)?;
         std::fs::write(path, json)?;
         Ok(())
