@@ -119,10 +119,8 @@ fn rfc3339_to_unix_nanos(ts: &str) -> u64 {
     use chrono::DateTime;
     DateTime::parse_from_rfc3339(ts)
         .ok()
-        .and_then(|dt| {
-            dt.timestamp_nanos_opt()
-                .map(|n| u64::try_from(n).unwrap_or(0))
-        })
+        .and_then(|dt| dt.timestamp_nanos_opt())
+        .and_then(|n| u64::try_from(n).ok())
         .unwrap_or_else(|| {
             eprintln!(
                 "rein[otel]: warning: could not parse timestamp '{ts}' as RFC 3339; \
