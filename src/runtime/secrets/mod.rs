@@ -131,7 +131,7 @@ fn resolve_source(name: &str, source: &SecretSource) -> Result<ResolvedSecret, S
             match std::env::var(&env_key) {
                 Ok(value) => {
                     let warn_msg = format!(
-                        "vault path '{path}' is not configured — falling back to \
+                        "vault path '{path}' is not configured - falling back to \
                          env var '{env_key}'. Add real Vault integration or use \
                          `env: {env_key}` explicitly."
                     );
