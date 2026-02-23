@@ -92,6 +92,9 @@ struct RunState {
     total_tokens: u64,
     total_cost_cents: u64,
     budget: Option<BudgetTracker>,
+    /// Accumulated LLM cost (in cents) attributed to each capped tool.
+    /// Key is `"namespace.action"`. Only populated for `CappedAt` tools.
+    per_tool_spent: HashMap<String, u64>,
 }
 
 /// The agent execution engine. Orchestrates the LLM, tool call, result loop
@@ -205,6 +208,7 @@ impl<'a> AgentEngine<'a> {
             } else {
                 None
             },
+            per_tool_spent: HashMap::new(),
         };
 
         if let Some(ref prompt) = self.config.system_prompt {
@@ -297,7 +301,7 @@ impl<'a> AgentEngine<'a> {
             for tc in &response.tool_calls {
                 self.stream.on_tool_call(&tc.name, &tc.name);
             }
-            self.process_tool_calls(&mut state, &response.tool_calls)
+            self.process_tool_calls(&mut state, &response.tool_calls, cost)
                 .await;
         }
 
@@ -344,7 +348,34 @@ impl<'a> AgentEngine<'a> {
     }
 
     /// Process all tool calls from an LLM response.
-    async fn process_tool_calls(&self, state: &mut RunState, tool_calls: &[ToolCallRequest]) {
+    ///
+    /// `turn_cost` is the LLM cost (cents) for this turn and is attributed to
+    /// each capped tool that executes in this turn. Caps are checked BEFORE
+    /// execution: if a tool's accumulated attributed cost has already reached
+    /// its declared cap, the call is denied and the agent is informed.
+    async fn process_tool_calls(
+        &self,
+        state: &mut RunState,
+        tool_calls: &[ToolCallRequest],
+        turn_cost: u64,
+    ) {
+        // Count capped tools in this batch to distribute turn_cost evenly.
+        let capped_count = tool_calls
+            .iter()
+            .filter(|tc| {
+                let tool = ToolCall {
+                    namespace: Self::extract_namespace(&tc.name),
+                    action: Self::extract_action(&tc.name),
+                    arguments: serde_json::Value::Null,
+                };
+                matches!(
+                    self.interceptor.intercept(&tool),
+                    InterceptResult::CappedAt { .. }
+                )
+            })
+            .count()
+            .max(1) as u64;
+
         for tc_req in tool_calls {
             let tool_call = ToolCall {
                 namespace: Self::extract_namespace(&tc_req.name),
@@ -355,9 +386,33 @@ impl<'a> AgentEngine<'a> {
             let intercept = self.interceptor.intercept(&tool_call);
 
             match intercept {
-                InterceptResult::Allowed | InterceptResult::CappedAt { .. } => {
+                InterceptResult::Allowed => {
                     self.execute_allowed_tool(state, &tc_req.id, tool_call)
                         .await;
+                }
+                InterceptResult::CappedAt { max_cents, .. } => {
+                    let key = format!("{}.{}", tool_call.namespace, tool_call.action);
+                    let spent = state.per_tool_spent.get(&key).copied().unwrap_or(0);
+                    if spent >= max_cents {
+                        let reason = format!(
+                            "monetary cap of {max_cents}¢ exceeded \
+                             ({spent}¢ attributed to `{key}`)"
+                        );
+                        state.events.push(RunEvent::ToolCallAttempt {
+                            tool: tool_call,
+                            allowed: false,
+                            reason: Some(reason.clone()),
+                        });
+                        state
+                            .messages
+                            .push(Message::tool(&tc_req.id, format!("Permission denied: {reason}")));
+                    } else {
+                        // Attribute this turn's LLM cost (divided evenly across capped tools).
+                        *state.per_tool_spent.entry(key).or_insert(0) +=
+                            turn_cost / capped_count;
+                        self.execute_allowed_tool(state, &tc_req.id, tool_call)
+                            .await;
+                    }
                 }
                 InterceptResult::Denied { reason } => {
                     state.events.push(RunEvent::ToolCallAttempt {

@@ -801,3 +801,84 @@ async fn engine_with_secrets_forwards_them_to_executor_context() {
         Some("s3cr3t")
     );
 }
+
+// ── Monetary cap tests (#349) ─────────────────────────────────────────────
+
+fn capped_cap(ns: &str, action: &str, max_cents: u64) -> Capability {
+    use crate::ast::Constraint;
+    Capability {
+        namespace: ns.to_string(),
+        action: action.to_string(),
+        constraint: Some(Constraint::MonetaryCap {
+            amount: max_cents,
+            currency: "USD".to_string(),
+        }),
+        span: Span { start: 0, end: 1 },
+    }
+}
+
+// When cumulative LLM cost attributed to a capped tool exceeds the cap,
+// further calls to that tool must be denied.
+#[tokio::test]
+async fn capped_tool_denied_after_cap_exceeded() {
+    // Cap api.call at 1 cent. The mock LLM will cost more than that (150 tokens
+    // at gpt-4o rates) so the second tool call should be denied.
+    let agent = make_agent(vec![capped_cap("api", "call", 1)], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // Turn 1: LLM requests api.call → executor responds → LLM gives final answer
+    provider.push_response(tool_call_response("api.call", json!({})));
+    provider.push_response(tool_call_response("api.call", json!({})));
+    provider.push_response(simple_response("done"));
+
+    let engine = AgentEngine::new(&provider, &executor, &registry, vec![], RunConfig::default());
+    let result = engine.run("go").await.expect("should complete");
+
+    let attempts: Vec<_> = result
+        .trace
+        .events
+        .iter()
+        .filter(|e| matches!(e, RunEvent::ToolCallAttempt { .. }))
+        .collect();
+
+    // At least one attempt must have been denied (cap exceeded).
+    let denied_count = attempts
+        .iter()
+        .filter(|e| matches!(e, RunEvent::ToolCallAttempt { allowed: false, .. }))
+        .count();
+    assert!(
+        denied_count >= 1,
+        "expected at least one denied call after cap exceeded; trace: {:?}",
+        result.trace.events
+    );
+}
+
+// A tool with a generous cap should be allowed as long as cost stays under it.
+#[tokio::test]
+async fn capped_tool_allowed_within_cap() {
+    // Cap api.call at 9999 cents — effectively unlimited for this test.
+    let agent = make_agent(vec![capped_cap("api", "call", 9_999)], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    provider.push_response(tool_call_response("api.call", json!({})));
+    provider.push_response(simple_response("done"));
+
+    let engine = AgentEngine::new(&provider, &executor, &registry, vec![], RunConfig::default());
+    let result = engine.run("go").await.expect("should complete");
+
+    let denied_count = result
+        .trace
+        .events
+        .iter()
+        .filter(|e| matches!(e, RunEvent::ToolCallAttempt { allowed: false, .. }))
+        .count();
+    assert_eq!(
+        denied_count, 0,
+        "tool within cap should not be denied; trace: {:?}",
+        result.trace.events
+    );
+}
