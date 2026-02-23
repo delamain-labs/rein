@@ -136,6 +136,9 @@ pub enum RunEvent {
     StepSkipped {
         /// Name of the step that was skipped.
         step: String,
+        /// Name of the dependency step that caused this step to be skipped.
+        /// Enables structured OTEL queries like `rein.step.failed_dependency = "step_a"`.
+        failed_dependency: String,
         /// Human-readable reason (e.g. "dependency '`step_a`' failed").
         reason: String,
     },
@@ -452,7 +455,7 @@ fn summarize_event(event: &RunEvent, lines: &mut Vec<String>, turn: &mut usize) 
         RunEvent::StageTimeout { turn, timeout_secs } => {
             lines.push(format!("  ✗ turn {turn} timed out after {timeout_secs}s"));
         }
-        RunEvent::StepSkipped { step, reason } => {
+        RunEvent::StepSkipped { step, reason, .. } => {
             lines.push(format!("  ⏭ step '{step}' skipped: {reason}"));
         }
     }

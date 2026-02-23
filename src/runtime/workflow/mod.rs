@@ -540,6 +540,9 @@ fn apply_step_result(
             }
 
             state.results.push(result);
+            state.events.push(super::RunEvent::StepCompleted {
+                step: step.name.clone(),
+            });
             StepOutcome::Continue
         }
         Err(e) => {
@@ -580,9 +583,10 @@ fn apply_step_result(
 ///
 /// - Steps with `fallback` retry on failure using the fallback agent.
 /// - Steps with `for_each` iterate over a JSON array in the trigger input.
-///   Soft errors (agent not found, LLM failure) from `for_each` steps are
-///   treated the same as regular step failures: the step is recorded as failed
-///   and dependent steps are skipped.
+///   Errors from `for_each` steps propagate to the `run_steps` loop via `?`
+///   and are then classified by `apply_step_result`: soft errors (agent not
+///   found, LLM failure) are absorbed — the step is recorded as failed and
+///   dependent steps are skipped; hard errors abort the workflow.
 /// - If `workflow.auto_resolve` conditions are met after a step, remaining
 ///   steps are short-circuited.
 /// - Hard errors (`ApprovalRejected`, `ApprovalTimedOut`, `CyclicDependency`)
@@ -617,6 +621,7 @@ pub async fn run_steps(
             let reason = format!("dependency '{failed_dep}' failed");
             state.events.push(super::RunEvent::StepSkipped {
                 step: step.name.clone(),
+                failed_dependency: failed_dep.clone(),
                 reason,
             });
             // Insert an empty output so the step appears in `outputs` for
@@ -644,7 +649,6 @@ pub async fn run_steps(
             step: step.name.clone(),
             index,
         });
-
 
         let input = if step.depends_on.is_empty() {
             trigger_input.clone()

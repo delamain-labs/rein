@@ -184,6 +184,11 @@ fn run_workflow_mode(
                 .iter()
                 .filter(|e| matches!(e, rein::runtime::RunEvent::StepFailed { .. }))
                 .count();
+            let skipped_count = result
+                .events
+                .iter()
+                .filter(|e| matches!(e, rein::runtime::RunEvent::StepSkipped { .. }))
+                .count();
 
             eprintln!();
             let completed_stages = result
@@ -192,8 +197,10 @@ fn run_workflow_mode(
                 .filter(|r| r.agent_name != SENTINEL_FAILED && r.agent_name != SENTINEL_SKIPPED)
                 .count();
             eprintln!("--- Workflow complete ({completed_stages} stages) ---");
-            if failed_count > 0 {
-                eprintln!("warning: {failed_count} step(s) failed (see trace below)");
+            if failed_count > 0 || skipped_count > 0 {
+                eprintln!(
+                    "warning: {failed_count} step(s) failed, {skipped_count} skipped (see trace below)"
+                );
             }
             eprintln!("Final output: {}", result.final_output);
             if !result.events.is_empty() {

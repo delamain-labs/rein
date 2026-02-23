@@ -1906,11 +1906,12 @@ async fn run_steps_emits_step_started_and_completed() {
     );
 }
 
-/// Tests that `run_steps` returns an appropriate error when a step's agent is
-/// not found. `StepFailed` emission is deferred to issue #380, which will
-/// change the `run_steps` signature to surface partial events alongside errors.
+/// Tests that `run_steps` returns partial success when a step's agent is not
+/// found. Under the partial-success model, `AgentNotFound` is a soft error:
+/// `run_steps` returns `Ok` with a `StepFailed` event in the trace rather
+/// than `Err`. This allows subsequent independent steps to continue.
 #[tokio::test]
-async fn run_steps_returns_error_on_missing_agent() {
+async fn run_steps_returns_partial_success_on_missing_agent() {
     let file = parse_file("agent other { model: openai }");
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
@@ -1938,11 +1939,23 @@ async fn run_steps_returns_error_on_missing_agent() {
         approval_handler: None,
     };
 
-    let err = run_steps(&workflow, &ctx).await.unwrap_err();
-    assert!(matches!(
-        err,
-        WorkflowError::StageFailed { .. } | WorkflowError::AgentNotFound(_)
-    ));
+    let (results, events) = run_steps(&workflow, &ctx)
+        .await
+        .expect("partial success: soft error should not return Err");
+
+    // The step result should use the SENTINEL_FAILED marker.
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].agent_name, SENTINEL_FAILED);
+
+    // A StepFailed event must be emitted with the agent-not-found reason.
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            crate::runtime::RunEvent::StepFailed { step, reason }
+            if step == "broken" && reason.contains("ghost_agent")
+        )),
+        "expected StepFailed for broken; events: {events:?}"
+    );
 }
 
 /// #356 — StepStarted and StepCompleted must wrap the for_each iteration set,
@@ -2367,5 +2380,80 @@ async fn cyclic_dependency_is_hard_error() {
     assert!(
         err.is_hard_error(),
         "CyclicDependency must be classified as a hard error"
+    );
+}
+
+/// #363/#374 — A `for_each` step that fails (agent not found) is a soft error:
+/// it is recorded as `StepFailed` and its declared dependents receive
+/// `StepSkipped`. The `StepSkipped` event must include `failed_dependency`
+/// set to the failing step's name (not a generic "unknown").
+#[tokio::test]
+async fn for_each_step_failure_cascades_to_dependent() {
+    // "ghost" does not exist in the file → for_each step fails with AgentNotFound.
+    let file = parse_file(r#"agent follower { model: openai }"#);
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("follower ran"));
+    let executor = MockExecutor::new();
+
+    // step_a: for_each with non-existent agent → will fail
+    let mut step_a = make_step_for_each("step_a", "ghost", "items");
+    // step_b: depends on step_a → should be skipped when step_a fails
+    let mut step_b = make_step("step_b", "follower", vec!["step_a"]);
+    // step_c: independent — should still run despite step_a failure
+    let step_c = make_step("step_c", "follower", vec![]);
+
+    step_a.depends_on = vec![];
+    step_b.depends_on = vec!["step_a".to_string()];
+
+    let workflow = make_workflow_steps("cascade_test", "start", vec![step_a, step_b, step_c]);
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+    };
+
+    let result = run_workflow(&workflow, &ctx)
+        .await
+        .expect("workflow should succeed (soft error, partial success)");
+
+    // step_a failed → StepFailed event must be emitted.
+    assert!(
+        result.events.iter().any(
+            |e| matches!(e, crate::runtime::RunEvent::StepFailed { step, .. } if step == "step_a")
+        ),
+        "expected StepFailed for step_a; events: {:?}",
+        result.events
+    );
+
+    // step_b skipped because step_a failed → StepSkipped with correct failed_dependency.
+    let skipped_b = result.events.iter().find(
+        |e| matches!(e, crate::runtime::RunEvent::StepSkipped { step, .. } if step == "step_b"),
+    );
+    assert!(
+        skipped_b.is_some(),
+        "expected StepSkipped for step_b; events: {:?}",
+        result.events
+    );
+    if let Some(crate::runtime::RunEvent::StepSkipped {
+        failed_dependency, ..
+    }) = skipped_b
+    {
+        assert_eq!(
+            failed_dependency, "step_a",
+            "StepSkipped.failed_dependency must be 'step_a'"
+        );
+    }
+
+    // step_c is independent and should have run.
+    assert!(
+        result
+            .events
+            .iter()
+            .any(|e| matches!(e, crate::runtime::RunEvent::StepCompleted { step, .. } if step == "step_c")),
+        "step_c should have completed; events: {:?}",
+        result.events
     );
 }
