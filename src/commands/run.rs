@@ -91,7 +91,7 @@ pub fn run_agent(
         engine = engine.with_circuit_breaker(cb);
     }
 
-    // Log policy tier if defined.
+    // Attach policy engine if defined.
     if let Some(policy_def) = file.policies.first() {
         let policy = rein::runtime::policy::PolicyEngine::from_def(policy_def);
         eprintln!(
@@ -99,6 +99,7 @@ pub fn run_agent(
             policy.current_tier(),
             policy.tier_count()
         );
+        engine = engine.with_policy(policy);
     }
 
     // If the file has workflows, run the first workflow instead of single-agent execution.
