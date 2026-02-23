@@ -91,6 +91,14 @@ pub fn run_agent(
         engine = engine.with_circuit_breaker(cb);
     }
 
+    // Resolve and inject secrets if defined.
+    if !file.secrets.is_empty() {
+        match resolve_secrets(&file.secrets) {
+            Ok(map) => engine = engine.with_secrets(map),
+            Err(code) => return code,
+        }
+    }
+
     // Attach policy engine if defined.
     if let Some(policy_def) = file.policies.first() {
         let policy = rein::runtime::policy::PolicyEngine::from_def(policy_def);
@@ -210,6 +218,45 @@ fn resolve_otel_mode(
     } else {
         OtelMode::None
     }
+}
+
+/// Resolve all secrets from parsed `secrets { }` blocks.
+///
+/// Fails fast on the first unresolvable binding — subsequent bindings are not
+/// checked. This is intentional to keep startup errors actionable one at a time.
+///
+/// Returns a flat `HashMap<name, value>` or a CLI-friendly error code.
+fn resolve_secrets(
+    defs: &[rein::ast::SecretsDef],
+) -> Result<std::collections::HashMap<String, String>, i32> {
+    use rein::runtime::secrets::{SecretError, SecretResolver};
+    let mut map = std::collections::HashMap::new();
+    for def in defs {
+        let secret_resolver = SecretResolver::from_def(def);
+        match secret_resolver.resolve_all() {
+            Ok(resolved) => {
+                for (name, secret) in resolved {
+                    map.insert(name, secret.value);
+                }
+            }
+            Err(e) => {
+                match &e {
+                    SecretError::EnvNotFound(var) => {
+                        eprintln!("error: Secret binding failed.");
+                        eprintln!("  → env var '{var}' is not set");
+                        eprintln!("hint: Add {var} to your environment or .env file");
+                    }
+                    SecretError::VaultUnavailable(path) => {
+                        eprintln!("error: Vault source not supported yet.");
+                        eprintln!("  → vault path: {path}");
+                        eprintln!("hint: Use env: sources instead of vault: sources");
+                    }
+                }
+                return Err(1);
+            }
+        }
+    }
+    Ok(map)
 }
 
 fn resolve_approval_handler() -> Arc<dyn rein::runtime::approval::ApprovalHandler> {
