@@ -57,6 +57,23 @@ pub fn parse(source: &str) -> Result<ReinFile, ParseError> {
     parser.parse_file()
 }
 
+/// Parse collecting multiple errors. Returns a partial `ReinFile` with all
+/// successfully parsed blocks, plus a list of errors for blocks that failed.
+/// If the lexer itself fails, returns a single error.
+pub fn parse_collecting(source: &str) -> (ReinFile, Vec<ParseError>) {
+    let tokens = match tokenize(source) {
+        Ok(t) => t,
+        Err(e) => {
+            return (
+                ReinFile::default(),
+                vec![ParseError::new(e.message, e.span)],
+            );
+        }
+    };
+    let mut parser = Parser::new(tokens);
+    parser.parse_file_collecting()
+}
+
 struct Parser {
     tokens: Vec<Token>,
     pos: usize,
@@ -406,6 +423,162 @@ impl Parser {
             consensus_blocks,
             scenarios,
         })
+    }
+
+    /// Like `parse_file` but collects errors and continues parsing.
+    fn parse_file_collecting(&mut self) -> (ReinFile, Vec<ParseError>) {
+        self.skip_comments();
+        let mut file = ReinFile::default();
+        let mut errors = Vec::new();
+
+        while self.peek() != &TokenKind::Eof {
+            let result = self.try_parse_top_level(&mut file);
+            if let Err(e) = result {
+                errors.push(e);
+                self.skip_to_next_top_level();
+            }
+            self.skip_comments();
+        }
+
+        (file, errors)
+    }
+
+    /// Attempt to parse one top-level block, pushing it into `file`.
+    fn try_parse_top_level(
+        &mut self,
+        file: &mut ReinFile,
+    ) -> Result<(), ParseError> {
+        match self.peek() {
+            TokenKind::Import => {
+                file.imports.push(self.parse_import()?);
+            }
+            TokenKind::Defaults => {
+                if file.defaults.is_some() {
+                    return Err(ParseError::new(
+                        "duplicate 'defaults' block",
+                        self.current_span(),
+                    ));
+                }
+                file.defaults = Some(self.parse_defaults()?);
+            }
+            TokenKind::Provider => {
+                file.providers.push(self.parse_provider()?);
+            }
+            TokenKind::Tool => {
+                file.tools.push(self.parse_tool()?);
+            }
+            TokenKind::Archetype => {
+                file.archetypes.push(self.parse_archetype()?);
+            }
+            TokenKind::Agent => {
+                file.agents.push(self.parse_agent()?);
+            }
+            TokenKind::Workflow => {
+                file.workflows.push(self.parse_workflow()?);
+            }
+            TokenKind::Type => {
+                file.types.push(self.parse_type_def()?);
+            }
+            TokenKind::Policy => {
+                file.policies.push(self.parse_policy()?);
+            }
+            TokenKind::Observe => {
+                file.observes.push(self.parse_observe()?);
+            }
+            TokenKind::Fleet => {
+                file.fleets.push(self.parse_fleet()?);
+            }
+            TokenKind::Channel => {
+                file.channels.push(self.parse_channel()?);
+            }
+            TokenKind::CircuitBreaker => {
+                file.circuit_breakers
+                    .push(self.parse_circuit_breaker()?);
+            }
+            TokenKind::Eval => {
+                file.evals.push(self.parse_eval()?);
+            }
+            TokenKind::Memory => {
+                file.memories.push(self.parse_memory()?);
+            }
+            TokenKind::Schedule => {
+                return Err(ParseError::new(
+                    "'schedule' must appear inside a workflow block",
+                    self.current_span(),
+                ));
+            }
+            TokenKind::Secrets => {
+                file.secrets.push(self.parse_secrets()?);
+            }
+            TokenKind::Consensus => {
+                file.consensus_blocks
+                    .push(self.parse_consensus()?);
+            }
+            TokenKind::Scenario => {
+                file.scenarios.push(self.parse_scenario()?);
+            }
+            other => {
+                return Err(ParseError::new(
+                    format!("expected top-level declaration, got {other}"),
+                    self.current_span(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Skip tokens until we reach a top-level keyword or EOF.
+    fn skip_to_next_top_level(&mut self) {
+        let mut brace_depth: usize = 0;
+        loop {
+            match self.peek() {
+                TokenKind::Eof => break,
+                TokenKind::LBrace => {
+                    brace_depth += 1;
+                    self.advance();
+                }
+                TokenKind::RBrace => {
+                    if brace_depth == 0 {
+                        self.advance();
+                        break;
+                    }
+                    brace_depth = brace_depth.saturating_sub(1);
+                    self.advance();
+                }
+                _ if brace_depth == 0 && self.is_top_level_keyword() => {
+                    break;
+                }
+                _ => {
+                    self.advance();
+                }
+            }
+        }
+    }
+
+    /// Check if the current token is a top-level keyword.
+    fn is_top_level_keyword(&self) -> bool {
+        matches!(
+            self.peek(),
+            TokenKind::Import
+                | TokenKind::Defaults
+                | TokenKind::Provider
+                | TokenKind::Tool
+                | TokenKind::Archetype
+                | TokenKind::Agent
+                | TokenKind::Workflow
+                | TokenKind::Type
+                | TokenKind::Policy
+                | TokenKind::Observe
+                | TokenKind::Fleet
+                | TokenKind::Channel
+                | TokenKind::CircuitBreaker
+                | TokenKind::Eval
+                | TokenKind::Memory
+                | TokenKind::Schedule
+                | TokenKind::Secrets
+                | TokenKind::Consensus
+                | TokenKind::Scenario
+        )
     }
 }
 

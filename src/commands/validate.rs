@@ -43,21 +43,24 @@ impl JsonReport {
         }
     }
 
-    fn parse_error(filename: &str, e: &rein::parser::ParseError) -> Self {
+    fn from_parse_errors(filename: &str, errors: &[rein::parser::ParseError]) -> Self {
         Self {
             file: filename.to_string(),
             valid: false,
-            errors: 1,
+            errors: errors.len(),
             warnings: 0,
-            diagnostics: vec![JsonDiagnostic {
-                severity: "error".to_string(),
-                code: "PARSE".to_string(),
-                message: e.message.clone(),
-                span: JsonSpan {
-                    start: e.span.start,
-                    end: e.span.end,
-                },
-            }],
+            diagnostics: errors
+                .iter()
+                .map(|e| JsonDiagnostic {
+                    severity: "error".to_string(),
+                    code: "PARSE".to_string(),
+                    message: e.message.clone(),
+                    span: JsonSpan {
+                        start: e.span.start,
+                        end: e.span.end,
+                    },
+                })
+                .collect(),
         }
     }
 
@@ -101,17 +104,19 @@ pub fn run_validate(path: &std::path::Path, dump_ast: bool, format: &str, strict
         }
     };
 
-    let file = match rein::parser::parse(&source) {
-        Ok(f) => f,
-        Err(e) => {
-            if json_mode {
-                JsonReport::parse_error(&filename, &e).print();
-            } else {
-                rein::error::report_parse_error(&filename, &source, &e);
+    let (file, parse_errors) = rein::parser::parse_collecting(&source);
+
+    if !parse_errors.is_empty() {
+        if json_mode {
+            let report = JsonReport::from_parse_errors(&filename, &parse_errors);
+            report.print();
+        } else {
+            for e in &parse_errors {
+                rein::error::report_parse_error(&filename, &source, e);
             }
-            return 1;
         }
-    };
+        return 1;
+    }
 
     if dump_ast {
         match serde_json::to_string_pretty(&file) {
