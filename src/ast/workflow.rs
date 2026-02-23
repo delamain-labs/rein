@@ -215,6 +215,8 @@ pub struct StepDef {
     pub input: Option<PipeExpr>,
     /// Output type constraints (e.g. `category: one of [billing, technical]`).
     pub output_constraints: Vec<(String, TypeExpr)>,
+    /// Step dependencies: `depends_on: step_name` or `depends_on: [a, b]`.
+    pub depends_on: Vec<String>,
     /// Optional guard condition: `when: confidence < 70%`.
     pub when: Option<WhenExpr>,
     /// Optional retry policy: `on failure: retry 3 exponential then escalate`.

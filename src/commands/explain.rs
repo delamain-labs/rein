@@ -138,29 +138,111 @@ fn explain_providers(file: &rein::ast::ReinFile) {
 }
 
 fn explain_safety(file: &rein::ast::ReinFile) {
-    let mut features: Vec<&str> = Vec::new();
-    if !file.policies.is_empty() {
-        features.push("trust tiers");
-    }
-    if !file.circuit_breakers.is_empty() {
-        features.push("circuit breakers");
-    }
-    if !file.consensus_blocks.is_empty() {
-        features.push("consensus verification");
-    }
-    if !file.evals.is_empty() {
-        features.push("eval quality gates");
-    }
-    if file.agents.iter().any(|a| a.guardrails.is_some()) {
-        features.push("guardrails");
-    }
+    explain_circuit_breakers(file);
+    explain_policies(file);
+    explain_evals(file);
+    explain_approvals(file);
+    explain_guardrails_summary(file);
+}
 
-    if features.is_empty() {
+fn explain_circuit_breakers(file: &rein::ast::ReinFile) {
+    if file.circuit_breakers.is_empty() {
         return;
     }
-    println!("Safety features: {}", features.join(", "));
-    println!("  ⚠ Note: not yet enforced at runtime (use --strict to see details)");
+    println!(
+        "Circuit Breakers ({}) ✅",
+        file.circuit_breakers.len()
+    );
+    for cb in &file.circuit_breakers {
+        println!(
+            "  • {}: trips after {} failures in {} min, recovers after {} min",
+            cb.name,
+            cb.failure_threshold,
+            cb.window_minutes,
+            cb.half_open_after_minutes
+        );
+    }
     println!();
+}
+
+fn explain_policies(file: &rein::ast::ReinFile) {
+    if file.policies.is_empty() {
+        return;
+    }
+    println!("Policy Tiers 🔧");
+    for policy in &file.policies {
+        for tier in &policy.tiers {
+            println!("  • tier {}", tier.name);
+        }
+    }
+    println!();
+}
+
+fn explain_evals(file: &rein::ast::ReinFile) {
+    if file.evals.is_empty() {
+        return;
+    }
+    println!("Evals ({})", file.evals.len());
+    for eval in &file.evals {
+        let name = eval
+            .name
+            .as_deref()
+            .unwrap_or("(unnamed)");
+        println!("  • {name}: dataset {}", eval.dataset);
+        for a in &eval.assertions {
+            let op = match a.op {
+                rein::ast::CompareOp::Lt => "<",
+                rein::ast::CompareOp::Gt => ">",
+                rein::ast::CompareOp::LtEq => "<=",
+                rein::ast::CompareOp::GtEq => ">=",
+                rein::ast::CompareOp::Eq => "==",
+                rein::ast::CompareOp::NotEq => "!=",
+            };
+            println!("    assert {} {op} {}", a.metric, a.value);
+        }
+    }
+    println!();
+}
+
+fn explain_approvals(file: &rein::ast::ReinFile) {
+    let mut found = false;
+    for wf in &file.workflows {
+        for step in &wf.steps {
+            if let Some(ref approval) = step.approval {
+                if !found {
+                    println!("Approval Gates ✅");
+                    found = true;
+                }
+                let timeout = approval
+                    .timeout
+                    .as_deref()
+                    .unwrap_or("none");
+                println!(
+                    "  • {}.{}: {:?} via {}({}), timeout {timeout}",
+                    wf.name,
+                    step.name,
+                    approval.kind,
+                    approval.channel,
+                    approval.destination
+                );
+            }
+        }
+    }
+    if found {
+        println!();
+    }
+}
+
+fn explain_guardrails_summary(file: &rein::ast::ReinFile) {
+    let count = file
+        .agents
+        .iter()
+        .filter(|a| a.guardrails.is_some())
+        .count();
+    if count > 0 {
+        println!("Guardrails ✅: {count} agent(s) with output filtering");
+        println!();
+    }
 }
 
 fn explain_other(file: &rein::ast::ReinFile) {

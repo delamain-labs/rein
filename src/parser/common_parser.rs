@@ -99,7 +99,7 @@ impl Parser {
                     self.expect(&TokenKind::Colon)?;
                     model = Some(self.parse_value_expr()?);
                 }
-                TokenKind::Ident(ref k) if k == "key" => {
+                TokenKind::Ident(ref k) if k == "key" || k == "api_key" => {
                     if seen_key {
                         return Err(ParseError::new(
                             format!("duplicate field 'key' in provider '{name}'"),

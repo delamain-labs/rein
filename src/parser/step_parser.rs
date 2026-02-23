@@ -13,6 +13,7 @@ struct StepFields {
     input: Option<PipeExpr>,
     send_to: Option<SendTarget>,
     output_constraints: Vec<(String, TypeExpr)>,
+    depends_on: Vec<String>,
     when: Option<WhenExpr>,
     on_failure: Option<RetryPolicy>,
     fallback: Option<Box<StepDef>>,
@@ -67,6 +68,7 @@ impl Parser {
                         input: f.input,
                         send_to: f.send_to,
                         output_constraints: f.output_constraints,
+                        depends_on: f.depends_on,
                         when: f.when,
                         on_failure: f.on_failure,
                         fallback: f.fallback,
@@ -263,6 +265,18 @@ impl Parser {
                     fields.input = Some(self.parse_pipe_expr()?);
                     return Ok(());
                 }
+                if field_name == "depends_on" {
+                    if !fields.depends_on.is_empty() {
+                        return Err(ParseError::new(
+                            format!("duplicate field 'depends_on' in step '{name}'"),
+                            self.current_span(),
+                        ));
+                    }
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    fields.depends_on = self.parse_depends_on_value()?;
+                    return Ok(());
+                }
                 self.advance();
                 self.expect(&TokenKind::Colon)?;
                 if *self.peek() == TokenKind::One {
@@ -317,6 +331,7 @@ impl Parser {
             input: None,
             send_to: None,
             output_constraints: Vec::new(),
+            depends_on: Vec::new(),
             when: None,
             on_failure: None,
             fallback: None,
@@ -327,6 +342,16 @@ impl Parser {
             approval: None,
             span: Span::new(start, end),
         })
+    }
+
+    /// Parse `depends_on: step_name` or `depends_on: [step_a, step_b]`.
+    fn parse_depends_on_value(&mut self) -> Result<Vec<String>, ParseError> {
+        if *self.peek() == TokenKind::LBracket {
+            self.parse_ident_list()
+        } else {
+            let (name, _) = self.expect_ident()?;
+            Ok(vec![name])
+        }
     }
 
     fn parse_step_agent_field(
