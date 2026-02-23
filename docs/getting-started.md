@@ -24,7 +24,7 @@ cargo install --path .
 
 ```bash
 rein --version
-# rein 0.1.0
+# rein 0.2.1
 ```
 
 ---
