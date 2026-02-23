@@ -1,6 +1,12 @@
 use std::time::Instant;
 
-pub fn run_agent(path: &std::path::Path, message: Option<&str>, dry_run: bool, otel: bool) -> i32 {
+pub fn run_agent(
+    path: &std::path::Path,
+    message: Option<&str>,
+    dry_run: bool,
+    demo: bool,
+    otel: bool,
+) -> i32 {
     let filename = path.to_string_lossy();
 
     let source = match std::fs::read_to_string(path) {
@@ -41,9 +47,14 @@ pub fn run_agent(path: &std::path::Path, message: Option<&str>, dry_run: bool, o
 
     let user_message = message.unwrap_or("Hello");
 
-    let provider = match resolve_provider(agent) {
-        Ok(p) => p,
-        Err(code) => return code,
+    let provider: Box<dyn rein::runtime::provider::Provider> = if demo {
+        eprintln!("🎭 Demo mode: using mock provider (no API keys needed)\n");
+        Box::new(rein::runtime::provider::demo::DemoProvider::new())
+    } else {
+        match resolve_provider(agent) {
+            Ok(p) => p,
+            Err(code) => return code,
+        }
     };
 
     // Build permission registry from agent capabilities.
@@ -91,8 +102,14 @@ pub fn run_agent(path: &std::path::Path, message: Option<&str>, dry_run: bool, o
 
     // Execute.
     let start = Instant::now();
-    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
-    let result = rt.block_on(engine.run(user_message));
+    let handle = tokio::runtime::Handle::try_current();
+    let result = if let Ok(handle) = handle {
+        // Already inside a tokio runtime (e.g. #[tokio::main])
+        tokio::task::block_in_place(|| handle.block_on(engine.run(user_message)))
+    } else {
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        rt.block_on(engine.run(user_message))
+    };
 
     match result {
         Ok(run_result) => {

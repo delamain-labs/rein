@@ -77,6 +77,9 @@ enum Command {
         /// Show execution plan without calling APIs
         #[arg(long)]
         dry_run: bool,
+        /// Run with a mock provider to demo enforcement (no API keys needed)
+        #[arg(long)]
+        demo: bool,
         /// Output trace as OpenTelemetry-compatible JSON
         #[arg(long)]
         otel: bool,
@@ -124,9 +127,10 @@ async fn main() {
             file,
             message,
             dry_run,
+            demo,
             otel,
         } => {
-            let exit_code = commands::run::run_agent(&file, message.as_deref(), dry_run, otel);
+            let exit_code = commands::run::run_agent(&file, message.as_deref(), dry_run, demo, otel);
             process::exit(exit_code);
         }
     }

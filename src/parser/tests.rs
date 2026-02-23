@@ -2426,3 +2426,39 @@ fn parse_step_depends_on_list() {
     "#).unwrap();
     assert_eq!(f.workflows[0].steps[2].depends_on, vec!["a", "b"]);
 }
+
+#[test]
+fn parse_collecting_reports_multiple_errors() {
+    let (file, errors) = crate::parser::parse_collecting(
+        r#"
+        agent good { model: openai can [chat.respond] }
+        agent bad { model: openai can broken }
+        agent good2 { model: openai can [files.read] }
+    "#,
+    );
+    assert_eq!(errors.len(), 1);
+    assert_eq!(file.agents.len(), 2); // good and good2 parsed
+}
+
+#[test]
+fn parse_collecting_two_errors() {
+    let (file, errors) = crate::parser::parse_collecting(
+        r#"
+        agent ok { model: openai can [a.b] }
+        agent bad1 { model: openai can broken }
+        agent bad2 { model: openai budget: }
+        agent ok2 { model: anthropic can [c.d] }
+    "#,
+    );
+    assert_eq!(errors.len(), 2);
+    assert_eq!(file.agents.len(), 2); // ok and ok2
+}
+
+#[test]
+fn parse_collecting_no_errors() {
+    let (file, errors) = crate::parser::parse_collecting(
+        r#"agent good { model: openai can [a.b] }"#,
+    );
+    assert!(errors.is_empty());
+    assert_eq!(file.agents.len(), 1);
+}
