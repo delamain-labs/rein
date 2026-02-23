@@ -107,6 +107,27 @@ impl std::fmt::Display for WorkflowError {
     }
 }
 
+impl WorkflowError {
+    /// Returns `true` for errors that must abort the entire workflow immediately
+    /// (policy enforcement, infrastructure invariants).
+    ///
+    /// Returns `false` for soft errors (agent not found, LLM failure) where the
+    /// step should be recorded as failed and the workflow should continue,
+    /// skipping any steps that depend on the failed step.
+    ///
+    /// New variants are hard errors by default — they must be explicitly opted
+    /// into soft behaviour by adding a `false` arm here.
+    #[must_use]
+    pub fn is_hard_error(&self) -> bool {
+        matches!(
+            self,
+            Self::ApprovalRejected { .. }
+                | Self::ApprovalTimedOut { .. }
+                | Self::CyclicDependency(_)
+        )
+    }
+}
+
 impl std::error::Error for WorkflowError {}
 
 /// Run a single stage and return its result.
@@ -438,6 +459,78 @@ pub(crate) async fn run_step_with_fallback(
     }
 }
 
+/// Outcome of processing one step's result inside the `run_steps` loop.
+enum StepOutcome {
+    /// Step completed normally; continue to next step.
+    Continue,
+    /// `auto_resolve` conditions were met — break the loop early.
+    AutoResolved,
+    /// Hard error — propagate immediately and abort the workflow.
+    HardError(WorkflowError),
+}
+
+/// Process the result of a single step execution, updating shared loop state.
+///
+/// Extracts the success/failure logic from the `run_steps` loop so that the
+/// outer function stays within the project line-limit.
+fn apply_step_result(
+    step: &crate::ast::StepDef,
+    step_result: Result<(StageResult, Vec<super::RunEvent>), WorkflowError>,
+    workflow: &WorkflowDef,
+    outputs: &mut std::collections::HashMap<String, String>,
+    failed_steps: &mut std::collections::HashSet<String>,
+    events: &mut Vec<super::RunEvent>,
+    results: &mut Vec<StageResult>,
+) -> StepOutcome {
+    match step_result {
+        Ok((result, step_events)) => {
+            events.extend(step_events);
+
+            // Check workflow-level auto_resolve conditions after each step.
+            let resolved = if let Some(ref ar) = workflow.auto_resolve {
+                auto_resolve_matches(&result.output, ar)
+            } else {
+                None
+            };
+
+            outputs.insert(step.name.clone(), result.output.clone());
+
+            if let Some(ref condition) = resolved {
+                events.push(super::RunEvent::AutoResolved {
+                    step: step.name.clone(),
+                    condition: condition.clone(),
+                });
+                results.push(result);
+                return StepOutcome::AutoResolved;
+            }
+
+            results.push(result);
+            StepOutcome::Continue
+        }
+        Err(e) => {
+            // Hard errors abort immediately; soft errors record the failure and
+            // let the workflow continue, skipping dependent steps.
+            if e.is_hard_error() {
+                return StepOutcome::HardError(e);
+            }
+            let reason = e.to_string();
+            failed_steps.insert(step.name.clone());
+            events.push(super::RunEvent::StepFailed {
+                step: step.name.clone(),
+                reason,
+            });
+            results.push(StageResult {
+                stage_name: step.name.clone(),
+                agent_name: step.agent.clone(),
+                output: String::new(),
+                cost_cents: 0,
+                tokens: 0,
+            });
+            StepOutcome::Continue
+        }
+    }
+}
+
 /// Execute all step blocks in a workflow, resolving `depends_on` ordering.
 ///
 /// Steps are executed in topological order. Each step receives the concatenated
@@ -445,12 +538,16 @@ pub(crate) async fn run_step_with_fallback(
 ///
 /// - Steps with `fallback` retry on failure using the fallback agent.
 /// - Steps with `for_each` iterate over a JSON array in the trigger input.
-/// - If `workflow.auto_resolve` conditions are met after a step, remaining steps
-///   are short-circuited.
+///   Soft errors (agent not found, LLM failure) from `for_each` steps are
+///   treated the same as regular step failures: the step is recorded as failed
+///   and dependent steps are skipped.
+/// - If `workflow.auto_resolve` conditions are met after a step, remaining
+///   steps are short-circuited.
+/// - Hard errors (`ApprovalRejected`, `ApprovalTimedOut`, `CyclicDependency`)
+///   abort the workflow immediately. Soft errors record the failure and continue.
 ///
 /// # Errors
-/// Returns `WorkflowError` if any step fails or a dependency cycle is detected.
-#[allow(clippy::too_many_lines)]
+/// Returns `WorkflowError` for hard errors or dependency cycles.
 pub async fn run_steps(
     workflow: &WorkflowDef,
     ctx: &WorkflowContext<'_>,
@@ -540,62 +637,18 @@ pub async fn run_steps(
                 })
         };
 
-        match step_result {
-            Ok((result, step_events)) => {
-                events.extend(step_events);
-                events.push(super::RunEvent::StepCompleted {
-                    step: step.name.clone(),
-                });
-
-                // Check workflow-level auto_resolve conditions after each step.
-                let resolved = if let Some(ref ar) = workflow.auto_resolve {
-                    auto_resolve_matches(&result.output, ar)
-                } else {
-                    None
-                };
-
-                outputs.insert(step.name.clone(), result.output.clone());
-
-                if let Some(ref condition) = resolved {
-                    events.push(super::RunEvent::AutoResolved {
-                        step: step.name.clone(),
-                        condition: condition.clone(),
-                    });
-                    results.push(result);
-                    break;
-                }
-
-                results.push(result);
-            }
-            Err(e) => {
-                // Hard errors (approval rejection, timed-out approval, cycle) abort
-                // immediately — these represent policy enforcement failures, not
-                // transient infrastructure errors.
-                // Soft errors (agent not found, LLM failure) record the failure,
-                // emit a StepFailed event, and continue so that dependent steps
-                // can be skipped gracefully while independent steps still execute.
-                if matches!(
-                    e,
-                    WorkflowError::ApprovalRejected { .. }
-                        | WorkflowError::ApprovalTimedOut { .. }
-                        | WorkflowError::CyclicDependency(_)
-                ) {
-                    return Err(e);
-                }
-                let reason = e.to_string();
-                failed_steps.insert(step.name.clone());
-                events.push(super::RunEvent::StepFailed {
-                    step: step.name.clone(),
-                    reason,
-                });
-                results.push(StageResult {
-                    stage_name: step.name.clone(),
-                    agent_name: step.agent.clone(),
-                    output: String::new(),
-                    cost_cents: 0,
-                    tokens: 0,
-                });
-            }
+        match apply_step_result(
+            step,
+            step_result,
+            workflow,
+            &mut outputs,
+            &mut failed_steps,
+            &mut events,
+            &mut results,
+        ) {
+            StepOutcome::Continue => {}
+            StepOutcome::AutoResolved => break,
+            StepOutcome::HardError(e) => return Err(e),
         }
     }
 

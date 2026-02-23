@@ -1504,13 +1504,20 @@ async fn step_without_fallback_propagates_error() {
     // Since #363: soft errors (AgentNotFound/StageFailed) no longer abort the
     // whole run — run_steps returns Ok so dependent steps can be skipped.
     // The failed step's result has empty output.
-    let (results, _events) = run_steps(&workflow, &ctx)
+    let (results, events) = run_steps(&workflow, &ctx)
         .await
         .expect("soft errors return Ok");
     assert_eq!(results.len(), 1);
     assert!(
         results[0].output.is_empty(),
         "failed step output must be empty"
+    );
+    // A StepFailed event must be emitted so the trace is observable.
+    assert!(
+        events.iter().any(
+            |e| matches!(e, crate::runtime::RunEvent::StepFailed { step, .. } if step == "alone")
+        ),
+        "expected StepFailed event for step 'alone'"
     );
 }
 

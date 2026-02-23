@@ -164,11 +164,25 @@ fn run_workflow_mode(
     let duration = start.elapsed();
     match wf_result {
         Ok(result) => {
+            // Count soft failures. Workflows use a partial-success model: a
+            // step that fails softly (agent not found, LLM error) records a
+            // StepFailed event and allows independent steps to continue rather
+            // than aborting the whole run. We surface this to shell callers by
+            // returning exit code 1 when any step failed.
+            let failed_count = result
+                .events
+                .iter()
+                .filter(|e| matches!(e, rein::runtime::RunEvent::StepFailed { .. }))
+                .count();
+
             eprintln!();
             eprintln!(
                 "--- Workflow complete ({} stages) ---",
                 result.stage_results.len()
             );
+            if failed_count > 0 {
+                eprintln!("warning: {failed_count} step(s) failed (see trace below)");
+            }
             eprintln!("Final output: {}", result.final_output);
             if !result.events.is_empty() {
                 eprintln!(
@@ -177,7 +191,7 @@ fn run_workflow_mode(
                 );
             }
             eprintln!("Duration: {duration:.2?}");
-            0
+            i32::from(failed_count > 0)
         }
         Err(e) => {
             eprintln!("Workflow failed: {e}");
