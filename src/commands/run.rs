@@ -509,6 +509,35 @@ mod tests {
         );
     }
 
+    // #358: Passing --audit-log to a single-agent run (no workflow block) must
+    // exit with code 1 and print an actionable error. Silently ignoring the flag
+    // would be a footgun for compliance users who expect audit records but receive
+    // none — fail-hard is the correct contract.
+    #[test]
+    fn run_agent_audit_log_without_workflow_exits_1() {
+        use std::io::Write;
+        // Minimal .rein file with an agent but no workflow block.
+        let mut tmp = tempfile::NamedTempFile::new().expect("temp .rein file");
+        writeln!(
+            tmp,
+            "agent deploy {{\n  model: \"claude-opus-4-6\"\n  goal: \"test\"\n}}"
+        )
+        .expect("write");
+        let audit_path = tempfile::NamedTempFile::new().expect("temp audit path");
+        let code = run_agent(
+            tmp.path(),
+            None,
+            false,
+            true, // demo mode — no API key needed
+            false,
+            Some(audit_path.path()),
+        );
+        assert_eq!(
+            code, 1,
+            "--audit-log on a single-agent run must exit 1, got {code}"
+        );
+    }
+
     // #358: The run_step production path wraps an Arc<dyn ApprovalHandler> with
     // AuditingApprovalHandler — test that the blanket impl delegates correctly.
     #[tokio::test]

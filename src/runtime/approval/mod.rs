@@ -351,10 +351,13 @@ impl<H: ApprovalHandler> ApprovalHandler for AuditingApprovalHandler<H> {
         requested.step = Some(step_name.to_string());
         requested.workflow = self.workflow_name.clone();
         requested.agent = self.agent_name.clone();
-        requested.metadata = serde_json::json!({
+        let mut req_meta = serde_json::json!({
             "channel": approval.channel,
-            "timeout": approval.timeout,
         });
+        if let Some(ref t) = approval.timeout {
+            req_meta["timeout"] = serde_json::Value::String(t.clone());
+        }
+        requested.metadata = req_meta;
         // Start the clock before writing ApprovalRequested so elapsed_ms
         // captures the total gate-open time: the moment the audit record
         // makes the approval visible until the handler returns its decision.
