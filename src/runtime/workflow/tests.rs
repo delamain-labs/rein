@@ -1,5 +1,5 @@
 use super::*;
-use crate::ast::{ConditionMatcher, ExecutionMode, RouteRule, Span, Stage, WorkflowDef};
+use crate::ast::{ConditionMatcher, ExecutionMode, RouteRule, Span, Stage, StepDef, WorkflowDef};
 use crate::runtime::executor::MockExecutor;
 use crate::runtime::provider::{ChatResponse, MockProvider, Usage};
 use tempfile::NamedTempFile;
@@ -1191,4 +1191,129 @@ async fn step_without_approval_def_skips_handler() {
 
     let result = run_workflow(&workflow, &ctx).await.unwrap();
     assert_eq!(result.final_output, "Done without approval");
+}
+
+// --- #303 DAG depends_on Tests ---
+
+fn make_step(name: &str, agent: &str, depends_on: Vec<&str>) -> StepDef {
+    StepDef {
+        name: name.to_string(),
+        agent: agent.to_string(),
+        goal: None,
+        input: None,
+        output_constraints: vec![],
+        depends_on: depends_on.into_iter().map(str::to_string).collect(),
+        when: None,
+        on_failure: None,
+        send_to: None,
+        fallback: None,
+        for_each: None,
+        typed_input: None,
+        typed_outputs: vec![],
+        escalate: None,
+        approval: None,
+        span: Span::new(0, 1),
+    }
+}
+
+#[test]
+fn dag_no_deps_preserves_file_order() {
+    let steps = vec![make_step("a", "bot", vec![]), make_step("b", "bot", vec![])];
+    let order = resolve_dag(&steps).expect("no cycle");
+    let names: Vec<&str> = order.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, vec!["a", "b"]);
+}
+
+#[test]
+fn dag_single_dependency_reorders() {
+    // b depends on a — even if b comes first in file order, a must execute first
+    let steps = vec![
+        make_step("b", "bot", vec!["a"]),
+        make_step("a", "bot", vec![]),
+    ];
+    let order = resolve_dag(&steps).expect("no cycle");
+    let names: Vec<&str> = order.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names[0], "a", "a must come before b");
+    assert_eq!(names[1], "b");
+}
+
+#[test]
+fn dag_diamond_dependency_valid() {
+    // a → b, a → c, b → d, c → d
+    let steps = vec![
+        make_step("a", "bot", vec![]),
+        make_step("b", "bot", vec!["a"]),
+        make_step("c", "bot", vec!["a"]),
+        make_step("d", "bot", vec!["b", "c"]),
+    ];
+    let order = resolve_dag(&steps).expect("no cycle");
+    let names: Vec<&str> = order.iter().map(|s| s.name.as_str()).collect();
+    // a must come first, d must come last
+    assert_eq!(names[0], "a");
+    assert_eq!(names[names.len() - 1], "d");
+    // b and c must appear before d
+    let d_idx = names.iter().position(|&n| n == "d").unwrap();
+    let b_idx = names.iter().position(|&n| n == "b").unwrap();
+    let c_idx = names.iter().position(|&n| n == "c").unwrap();
+    assert!(b_idx < d_idx);
+    assert!(c_idx < d_idx);
+}
+
+#[test]
+fn dag_cycle_returns_error() {
+    // a → b → a forms a cycle
+    let steps = vec![
+        make_step("a", "bot", vec!["b"]),
+        make_step("b", "bot", vec!["a"]),
+    ];
+    let err = resolve_dag(&steps).unwrap_err();
+    assert!(
+        err.to_string().contains("cycle") || err.to_string().contains("Cycle"),
+        "error should mention cycle: {err}"
+    );
+}
+
+#[tokio::test]
+async fn workflow_steps_respect_depends_on_order() {
+    // Steps declared out of order: b depends on a
+    let file = parse_file(
+        r#"
+        agent bot { model: openai }
+    "#,
+    );
+    let workflow = WorkflowDef {
+        name: "dag_wf".to_string(),
+        trigger: "start".to_string(),
+        stages: vec![],
+        steps: vec![
+            make_step("b", "bot", vec!["a"]),
+            make_step("a", "bot", vec![]),
+        ],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+    };
+
+    // a runs first, b runs second
+    provider.push_response(simple_response("output from a"));
+    provider.push_response(simple_response("output from b"));
+
+    let result = run_workflow(&workflow, &ctx).await.unwrap();
+    assert_eq!(result.stage_results.len(), 2);
+    assert_eq!(result.final_output, "output from b");
 }
