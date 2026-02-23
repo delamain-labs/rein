@@ -274,44 +274,28 @@ impl ApprovalHandler for SlackApprovalHandler {
     }
 }
 
-/// Blanket impl so `AuditingApprovalHandler<Arc<dyn ApprovalHandler>>` works.
-/// This allows a single resolved `Arc<dyn ApprovalHandler>` (whether injected
-/// via `WorkflowContext` or freshly resolved) to be wrapped by the auditor.
+/// Wraps any `ApprovalHandler` (as an `Arc<dyn ApprovalHandler>`) and emits
+/// `ApprovalRequested` / `ApprovalResolved` audit entries before and after
+/// each approval decision.
 ///
-/// # Note
-/// Rust trait impls do not support visibility modifiers, so this impl is
-/// effectively public. It is crate-internal glue and should not be relied upon
-/// by external callers. A future `AuditSink` trait refactor (tracked in the
-/// backlog) will eliminate the need for this blanket impl entirely.
-#[async_trait::async_trait]
-impl ApprovalHandler for std::sync::Arc<dyn ApprovalHandler> {
-    async fn request_approval(
-        &self,
-        step_name: &str,
-        agent_output: &str,
-        approval: &ApprovalDef,
-    ) -> ApprovalStatus {
-        (**self)
-            .request_approval(step_name, agent_output, approval)
-            .await
-    }
-}
-
-/// Wraps any `ApprovalHandler` and emits `ApprovalRequested` / `ApprovalResolved`
-/// audit entries before and after each approval decision.
+/// Accepting `Arc<dyn ApprovalHandler>` directly (rather than a generic `H:
+/// ApprovalHandler`) eliminates the blanket impl on `Arc<dyn ApprovalHandler>`
+/// that would have been required to bridge the generic and the trait-object
+/// injection site in `run_step`. Callers wrap concrete handlers with
+/// `Arc::new(handler)` before passing them here.
 ///
 /// This is the canonical way to add audit trails to approval flows — callers
 /// construct the appropriate inner handler and wrap it here.
-pub struct AuditingApprovalHandler<H> {
-    inner: H,
+pub struct AuditingApprovalHandler {
+    inner: Arc<dyn ApprovalHandler>,
     log: Arc<AuditLog>,
     workflow_name: Option<String>,
     agent_name: Option<String>,
 }
 
-impl<H> AuditingApprovalHandler<H> {
+impl AuditingApprovalHandler {
     #[must_use]
-    pub fn new(inner: H, log: Arc<AuditLog>) -> Self {
+    pub fn new(inner: Arc<dyn ApprovalHandler>, log: Arc<AuditLog>) -> Self {
         Self {
             inner,
             log,
@@ -336,7 +320,7 @@ impl<H> AuditingApprovalHandler<H> {
 }
 
 #[async_trait::async_trait]
-impl<H: ApprovalHandler> ApprovalHandler for AuditingApprovalHandler<H> {
+impl ApprovalHandler for AuditingApprovalHandler {
     async fn request_approval(
         &self,
         step_name: &str,
@@ -380,10 +364,15 @@ impl<H: ApprovalHandler> ApprovalHandler for AuditingApprovalHandler<H> {
         let decision = match &status {
             ApprovalStatus::Approved => "approved",
             ApprovalStatus::Rejected { .. } => "rejected",
-            // Both TimedOut and Pending are mapped to WorkflowError::ApprovalTimedOut
-            // by the workflow engine. The audit record uses "timed_out" for both so
-            // compliance consumers do not incorrectly infer the workflow is still
-            // running when it has already been terminated.
+            // Both TimedOut and Pending are raised as WorkflowError::ApprovalTimedOut
+            // by the workflow engine (see workflow/mod.rs — the match arm that handles
+            // ApprovalStatus::TimedOut | ApprovalStatus::Pending). Recording "timed_out"
+            // for both ensures compliance consumers do not incorrectly infer the workflow
+            // is still running when it has already been terminated. The raw handler status
+            // is preserved in the "original_status" field (see below) so operators can
+            // distinguish a genuine timeout from a Pending return without affecting
+            // compliance parsers. If the engine ever adds a resume path for Pending, this
+            // mapping must be revisited.
             ApprovalStatus::TimedOut | ApprovalStatus::Pending => "timed_out",
         };
         // Record the raw handler status separately from the compliance-stable

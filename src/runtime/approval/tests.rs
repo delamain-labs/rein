@@ -279,8 +279,7 @@ async fn auditing_handler_logs_approval_requested_and_resolved() {
     let tmp = TempDir::new().unwrap();
     let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
 
-    let inner = AutoApproveHandler;
-    let handler = AuditingApprovalHandler::new(inner, Arc::clone(&log));
+    let handler = AuditingApprovalHandler::new(Arc::new(AutoApproveHandler), Arc::clone(&log));
 
     let approval = make_approval_for_channel("cli", "");
     let status = handler
@@ -302,6 +301,10 @@ async fn auditing_handler_logs_approval_requested_and_resolved() {
     assert_eq!(entries[1].kind, AuditKind::ApprovalResolved);
     assert!(entries[1].step.as_deref() == Some("deploy"));
     assert_eq!(entries[1].metadata["decision"], "approved");
+    assert!(
+        entries[1].metadata["elapsed_ms"].is_number(),
+        "elapsed_ms must be a numeric field in the resolved entry"
+    );
 }
 
 #[tokio::test]
@@ -313,8 +316,10 @@ async fn auditing_handler_records_rejected_decision() {
     let tmp = TempDir::new().unwrap();
     let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
 
-    let inner = AutoRejectHandler::new("policy violation");
-    let handler = AuditingApprovalHandler::new(inner, Arc::clone(&log));
+    let handler = AuditingApprovalHandler::new(
+        Arc::new(AutoRejectHandler::new("policy violation")),
+        Arc::clone(&log),
+    );
 
     let approval = make_approval_for_channel("cli", "");
     let status = handler
@@ -339,7 +344,7 @@ async fn auditing_handler_records_channel_in_metadata() {
     let tmp = TempDir::new().unwrap();
     let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
 
-    let handler = AuditingApprovalHandler::new(AutoApproveHandler, Arc::clone(&log));
+    let handler = AuditingApprovalHandler::new(Arc::new(AutoApproveHandler), Arc::clone(&log));
     let approval = make_approval_for_channel("slack", "https://hooks.slack.com/fake");
     handler.request_approval("notify", "out", &approval).await;
 
@@ -357,7 +362,7 @@ async fn auditing_handler_records_timed_out_decision() {
     let tmp = TempDir::new().unwrap();
     let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
 
-    let handler = AuditingApprovalHandler::new(AutoTimedOutHandler, Arc::clone(&log));
+    let handler = AuditingApprovalHandler::new(Arc::new(AutoTimedOutHandler), Arc::clone(&log));
     let approval = make_approval_for_channel("cli", "");
     let status = handler
         .request_approval("timeout-step", "Agent output", &approval)
@@ -383,7 +388,7 @@ async fn auditing_handler_records_pending_decision() {
     let tmp = TempDir::new().unwrap();
     let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
 
-    let handler = AuditingApprovalHandler::new(AutoPendingHandler, Arc::clone(&log));
+    let handler = AuditingApprovalHandler::new(Arc::new(AutoPendingHandler), Arc::clone(&log));
     let approval = make_approval_for_channel("cli", "");
     let status = handler
         .request_approval("async-step", "Agent output", &approval)
@@ -421,7 +426,7 @@ async fn auditing_handler_populates_workflow_and_agent_context() {
     let tmp = TempDir::new().unwrap();
     let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
 
-    let handler = AuditingApprovalHandler::new(AutoApproveHandler, Arc::clone(&log))
+    let handler = AuditingApprovalHandler::new(Arc::new(AutoApproveHandler), Arc::clone(&log))
         .with_workflow("deploy-workflow")
         .with_agent("deploy-bot");
     let approval = make_approval_for_channel("cli", "");
