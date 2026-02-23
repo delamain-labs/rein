@@ -483,21 +483,21 @@ fn run_error_config_error_roundtrips() {
 }
 
 #[test]
-fn run_error_serializes_as_tagged_snake_case() {
-    // All variants use #[serde(tag = "type", rename_all = "snake_case")], so
-    // they serialize as {"type": "<variant>"} — a consistent object shape
-    // across both unit and struct variants.
+fn run_error_serializes_as_snake_case() {
+    // Unit variants use #[serde(rename_all = "snake_case")] and serialize as
+    // bare strings, preserving the existing wire format. Only the `Timeout`
+    // struct variant serializes as an object `{"timeout": {...}}`.
     let v: serde_json::Value = serde_json::to_value(RunError::BudgetExceeded).expect("serialize");
-    assert_eq!(v["type"], "budget_exceeded");
+    assert_eq!(v, "budget_exceeded");
 
     let v: serde_json::Value = serde_json::to_value(RunError::PermissionDenied).expect("serialize");
-    assert_eq!(v["type"], "permission_denied");
+    assert_eq!(v, "permission_denied");
 
     let v: serde_json::Value = serde_json::to_value(RunError::ProviderError).expect("serialize");
-    assert_eq!(v["type"], "provider_error");
+    assert_eq!(v, "provider_error");
 
     let v: serde_json::Value = serde_json::to_value(RunError::ConfigError).expect("serialize");
-    assert_eq!(v["type"], "config_error");
+    assert_eq!(v, "config_error");
 }
 
 #[test]
@@ -506,9 +506,13 @@ fn run_error_timeout_roundtrips() {
         partial_trace: RunTrace::from_events(vec![]),
     };
     let json = serde_json::to_string(&err).expect("serialize");
-    // Must include the type discriminant and the partial_trace field.
+    // Without a `tag`, serde serializes a struct variant as {"<variant>": {<fields>}}.
+    // The key is the snake_case variant name and the value contains `partial_trace`.
     let v: serde_json::Value = serde_json::from_str(&json).expect("parse");
-    assert_eq!(v["type"], "timeout");
+    assert!(
+        v["timeout"].is_object(),
+        "expected {{\"timeout\": {{...}}}} shape, got: {v}"
+    );
     let back: RunError = serde_json::from_str(&json).expect("deserialize");
     assert!(matches!(back, RunError::Timeout { .. }));
 }
