@@ -659,3 +659,34 @@ fn structured_trace_serializes_to_json() {
     assert!(json.contains("\"version\":\"1.0\""));
     assert!(json.contains("\"agent\":\"agent\""));
 }
+
+// #346: write_to_file must accept caller-provided timestamps; output must not have blank fields.
+#[test]
+fn write_to_file_records_provided_timestamps() {
+    let trace = RunTrace { events: vec![] };
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("trace.json");
+    trace
+        .write_to_file(
+            &path,
+            "agent",
+            "2026-01-01T00:00:00Z",
+            "2026-01-01T00:00:01Z",
+            1000,
+        )
+        .expect("write should succeed");
+
+    let json = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        json.contains("\"started_at\": \"2026-01-01T00:00:00Z\""),
+        "started_at must appear verbatim in trace file"
+    );
+    assert!(
+        json.contains("\"completed_at\": \"2026-01-01T00:00:01Z\""),
+        "completed_at must appear verbatim in trace file"
+    );
+    assert!(
+        json.contains("\"duration_ms\": 1000"),
+        "duration_ms must be recorded in trace file"
+    );
+}
