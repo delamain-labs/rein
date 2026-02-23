@@ -10,6 +10,10 @@ pub struct ResolvedSecret {
     pub name: String,
     pub value: String,
     pub source: String,
+    /// Non-fatal diagnostic message to surface to the caller (e.g. CLI layer).
+    /// `None` means resolution was clean; `Some(msg)` means resolution
+    /// succeeded via a fallback path the caller should warn the user about.
+    pub warning: Option<String>,
 }
 
 /// Errors from secret resolution.
@@ -108,6 +112,7 @@ fn resolve_source(name: &str, source: &SecretSource) -> Result<ResolvedSecret, S
                 name: name.to_string(),
                 value,
                 source: format!("env({var})"),
+                warning: None,
             })
         }
         SecretSource::Vault { path } => {
@@ -125,8 +130,8 @@ fn resolve_source(name: &str, source: &SecretSource) -> Result<ResolvedSecret, S
             );
             match std::env::var(&env_key) {
                 Ok(value) => {
-                    eprintln!(
-                        "warning: vault path '{path}' is not configured — falling back to \
+                    let warn_msg = format!(
+                        "vault path '{path}' is not configured — falling back to \
                          env var '{env_key}'. Add real Vault integration or use \
                          `env: {env_key}` explicitly."
                     );
@@ -134,6 +139,7 @@ fn resolve_source(name: &str, source: &SecretSource) -> Result<ResolvedSecret, S
                         name: name.to_string(),
                         value,
                         source: format!("vault({path})->env({env_key})"),
+                        warning: Some(warn_msg),
                     })
                 }
                 Err(_) => Err(SecretError::VaultUnavailable(path.clone())),

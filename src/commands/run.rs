@@ -251,6 +251,9 @@ fn resolve_secrets(
         match secret_resolver.resolve_all() {
             Ok(resolved) => {
                 for (name, secret) in resolved {
+                    if let Some(ref warn) = secret.warning {
+                        eprintln!("warning: {warn}");
+                    }
                     map.insert(name, secret.value);
                 }
             }

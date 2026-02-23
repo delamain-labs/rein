@@ -144,10 +144,11 @@ fn count_reports_bindings() {
     assert_eq!(resolver.count(), 2);
 }
 
-// #357: Vault fallback to env var must warn explicitly and mark source as env-based.
+// #357: Vault fallback must populate the `warning` field so callers (CLI layer)
+// can surface it without the resolver writing directly to stderr.
 #[test]
 #[serial]
-fn vault_fallback_source_indicates_env_fallback() {
+fn vault_fallback_populates_warning_field() {
     unsafe { std::env::set_var("VAULT_SECRET_REIN_KEY", "vault-value") };
     let def = SecretsDef {
         bindings: vec![SecretBinding {
@@ -163,12 +164,43 @@ fn vault_fallback_source_indicates_env_fallback() {
     let resolved = resolver.resolve_all().unwrap();
     // Cleanup before assert so env var is removed even if assertion panics.
     unsafe { std::env::remove_var("VAULT_SECRET_REIN_KEY") };
-    // The source field must encode the composite vault(path)->env(KEY) format
-    // so operators can reconstruct exactly which vault path was attempted and
-    // which env var was used as fallback.
-    assert_eq!(
-        resolved["db_pass"].source, "vault(secret/rein/key)->env(VAULT_SECRET_REIN_KEY)",
-        "source must be composite vault->env format"
+    // The warning field must be Some and mention both the vault path and the
+    // fallback env var so the CLI layer can produce a useful diagnostic.
+    let warning = resolved["db_pass"]
+        .warning
+        .as_deref()
+        .expect("vault fallback must set a warning");
+    assert!(
+        warning.contains("secret/rein/key"),
+        "warning must mention vault path, got: {warning}"
+    );
+    assert!(
+        warning.contains("VAULT_SECRET_REIN_KEY"),
+        "warning must mention fallback env var, got: {warning}"
+    );
+}
+
+// Env-source resolutions must NOT set a warning (no fallback occurred).
+#[test]
+#[serial]
+fn env_source_resolution_has_no_warning() {
+    unsafe { std::env::set_var("TEST_REIN_WARNING_CHECK", "val") };
+    let def = SecretsDef {
+        bindings: vec![SecretBinding {
+            name: "tok".to_string(),
+            source: SecretSource::Env {
+                var: "TEST_REIN_WARNING_CHECK".to_string(),
+            },
+            span: span(),
+        }],
+        span: span(),
+    };
+    let resolver = SecretResolver::from_def(&def);
+    let resolved = resolver.resolve_all().unwrap();
+    unsafe { std::env::remove_var("TEST_REIN_WARNING_CHECK") };
+    assert!(
+        resolved["tok"].warning.is_none(),
+        "env sources must not set a warning"
     );
 }
 
