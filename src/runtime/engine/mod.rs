@@ -267,7 +267,7 @@ impl<'a> AgentEngine<'a> {
             let response = match self.call_provider_with_timeout(&state.messages).await {
                 Ok(r) => r,
                 Err(CallError::Timeout { secs }) => {
-                    state.events.push(RunEvent::StageTimeout {
+                    state.push(RunEvent::StageTimeout {
                         turn,
                         timeout_secs: secs,
                     });
