@@ -246,8 +246,14 @@ impl ApprovalHandler for SlackApprovalHandler {
             .send()
             .await
         {
-            Ok(_) => {
+            Ok(resp) if resp.status().is_success() => {
                 eprintln!("[slack] Approval notification sent for step '{step_name}'");
+            }
+            Ok(resp) => {
+                eprintln!(
+                    "[slack] Slack endpoint returned {}: auto-approving step '{step_name}'",
+                    resp.status()
+                );
             }
             Err(e) => {
                 eprintln!("[slack] Failed to send Slack notification for step '{step_name}': {e}");
