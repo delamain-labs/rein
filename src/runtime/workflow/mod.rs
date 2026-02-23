@@ -364,31 +364,40 @@ pub fn resolve_dag(
 /// Execute a single step definition, running its referenced agent with the
 /// step's goal as additional context.
 ///
+/// `workflow_name` is passed to `AuditingApprovalHandler::with_workflow` so
+/// audit entries record the workflow they belong to for compliance queries.
+///
 /// # Errors
 /// Returns `WorkflowError` if the agent is not found or execution fails.
 pub async fn run_step(
     step: &crate::ast::StepDef,
     input: &str,
     ctx: &WorkflowContext<'_>,
+    workflow_name: &str,
 ) -> Result<StageResult, WorkflowError> {
     // Check approval gate before execution.
-    // Use the injected handler (tests/CLI override) if present; otherwise
-    // resolve a channel-appropriate handler from the approval definition.
+    // Resolve both the injected handler (tests/CI env-var overrides) and the
+    // channel-derived handler into a single Arc so the audit wrapper can be
+    // applied uniformly regardless of which path produced the handler.
     if let Some(approval_def) = &step.approval {
-        let status = if let Some(handler) = &ctx.approval_handler {
-            handler
-                .request_approval(&step.name, input, approval_def)
-                .await
+        let base: Arc<dyn ApprovalHandler> = if let Some(h) = ctx.approval_handler.as_ref() {
+            Arc::clone(h)
         } else {
-            let base = crate::runtime::approval::resolve_approval_handler(approval_def);
-            if let Some(log) = &ctx.audit_log {
-                crate::runtime::approval::AuditingApprovalHandler::new(base, Arc::clone(log))
-                    .with_agent(step.agent.clone())
-                    .request_approval(&step.name, input, approval_def)
-                    .await
-            } else {
-                base.request_approval(&step.name, input, approval_def).await
-            }
+            Arc::from(crate::runtime::approval::resolve_approval_handler(
+                approval_def,
+            ))
+        };
+        let status = if let Some(log) = &ctx.audit_log {
+            crate::runtime::approval::AuditingApprovalHandler::new(
+                Arc::clone(&base),
+                Arc::clone(log),
+            )
+            .with_agent(step.agent.clone())
+            .with_workflow(workflow_name)
+            .request_approval(&step.name, input, approval_def)
+            .await
+        } else {
+            base.request_approval(&step.name, input, approval_def).await
         };
         match status {
             ApprovalStatus::Approved => {}
@@ -432,12 +441,13 @@ pub(crate) async fn run_step_with_fallback(
     step: &crate::ast::StepDef,
     input: &str,
     ctx: &WorkflowContext<'_>,
+    workflow_name: &str,
 ) -> Result<(StageResult, bool), WorkflowError> {
-    match run_step(step, input, ctx).await {
+    match run_step(step, input, ctx, workflow_name).await {
         Ok(result) => Ok((result, false)),
         Err(e) => {
             if let Some(ref fallback) = step.fallback {
-                let fallback_result = run_step(fallback, input, ctx).await?;
+                let fallback_result = run_step(fallback, input, ctx, workflow_name).await?;
                 Ok((fallback_result, true))
             } else {
                 Err(e)
@@ -493,9 +503,10 @@ pub async fn run_steps(
         };
 
         let (result, step_events) = if let Some(ref key) = step.for_each {
-            run_step_for_each(step, &for_each_input, key, ctx).await?
+            run_step_for_each(step, &for_each_input, key, ctx, &workflow.name).await?
         } else {
-            let (r, fallback_used) = run_step_with_fallback(step, &input, ctx).await?;
+            let (r, fallback_used) =
+                run_step_with_fallback(step, &input, ctx, &workflow.name).await?;
             let mut evts = Vec::new();
             if fallback_used {
                 let fallback_name = step
@@ -561,6 +572,7 @@ async fn run_step_for_each(
     input: &str,
     collection_key: &str,
     ctx: &WorkflowContext<'_>,
+    workflow_name: &str,
 ) -> Result<(StageResult, Vec<super::RunEvent>), WorkflowError> {
     // Try to parse the trigger as JSON and extract the array.
     let items: Vec<String> = serde_json::from_str::<serde_json::Value>(input)
@@ -576,7 +588,8 @@ async fn run_step_for_each(
 
     // If the key wasn't found or empty, fall back to running the step once.
     if items.is_empty() {
-        let (result, fallback_used) = run_step_with_fallback(step, input, ctx).await?;
+        let (result, fallback_used) =
+            run_step_with_fallback(step, input, ctx, workflow_name).await?;
         let mut evts = Vec::new();
         if fallback_used {
             let fallback_name = step
@@ -600,7 +613,8 @@ async fn run_step_for_each(
     let mut events: Vec<super::RunEvent> = Vec::new();
 
     for (index, item) in items.iter().enumerate() {
-        let (result, fallback_used) = run_step_with_fallback(step, item, ctx).await?;
+        let (result, fallback_used) =
+            run_step_with_fallback(step, item, ctx, workflow_name).await?;
         total_cost += result.cost_cents;
         total_tokens += result.tokens;
         outputs.push(serde_json::Value::String(result.output));

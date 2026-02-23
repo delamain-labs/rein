@@ -289,6 +289,23 @@ impl ApprovalHandler for Box<dyn ApprovalHandler> {
     }
 }
 
+/// Blanket impl so `AuditingApprovalHandler<Arc<dyn ApprovalHandler>>` works.
+/// This allows a single resolved `Arc<dyn ApprovalHandler>` (whether injected
+/// via `WorkflowContext` or freshly resolved) to be wrapped by the auditor.
+#[async_trait::async_trait]
+impl ApprovalHandler for std::sync::Arc<dyn ApprovalHandler> {
+    async fn request_approval(
+        &self,
+        step_name: &str,
+        agent_output: &str,
+        approval: &ApprovalDef,
+    ) -> ApprovalStatus {
+        (**self)
+            .request_approval(step_name, agent_output, approval)
+            .await
+    }
+}
+
 /// Wraps any `ApprovalHandler` and emits `ApprovalRequested` / `ApprovalResolved`
 /// audit entries before and after each approval decision.
 ///

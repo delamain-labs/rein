@@ -7,6 +7,7 @@ pub fn run_agent(
     dry_run: bool,
     demo: bool,
     otel: bool,
+    audit_log: Option<&std::path::Path>,
 ) -> i32 {
     let filename = path.to_string_lossy();
 
@@ -126,7 +127,14 @@ pub fn run_agent(
     // If the file has workflows, run the first workflow instead of single-agent execution.
     if let Some(workflow) = file.workflows.first() {
         let budget_cents = agent.budget.as_ref().map_or(0, |b| b.amount);
-        return run_workflow_mode(workflow, &file, provider.as_ref(), &executor, budget_cents);
+        return run_workflow_mode(
+            workflow,
+            &file,
+            provider.as_ref(),
+            &executor,
+            budget_cents,
+            audit_log,
+        );
     }
 
     run_engine(&engine, user_message)
@@ -138,6 +146,7 @@ fn run_workflow_mode(
     provider: &dyn rein::runtime::provider::Provider,
     executor: &dyn rein::runtime::executor::ToolExecutor,
     budget_cents: u64,
+    audit_log_path: Option<&std::path::Path>,
 ) -> i32 {
     // Only inject a global handler when env-var overrides are active (CI/testing).
     // In normal runs `approval_handler` is `None` so each step resolves its own
@@ -148,6 +157,14 @@ fn run_workflow_mode(
         max_turns: 10,
         budget_cents,
     };
+    // Construct an AuditLog if the caller requested one via --audit-log.
+    let audit_log = audit_log_path.and_then(|p| match rein::runtime::audit::AuditLog::new(p) {
+        Ok(log) => Some(Arc::new(log)),
+        Err(e) => {
+            eprintln!("warn: could not open audit log '{}': {e}", p.display());
+            None
+        }
+    });
     let ctx = rein::runtime::workflow::WorkflowContext {
         file,
         provider,
@@ -155,7 +172,7 @@ fn run_workflow_mode(
         tool_defs: &[],
         config: &wf_config,
         approval_handler,
-        audit_log: None,
+        audit_log,
     };
     let start = Instant::now();
     let wf_result =
