@@ -218,7 +218,13 @@ fn resolve_otel_mode(
                     metrics: obs.metrics.clone(),
                 };
             }
-            Some(_) => return OtelMode::FileOnComplete,
+            Some("file" | "otlp") => return OtelMode::FileOnComplete,
+            Some(other) => {
+                eprintln!(
+                    "warning: observe export target '{other}' is not supported at runtime; defaulting to file output"
+                );
+                return OtelMode::FileOnComplete;
+            }
             None => {}
         }
     }
@@ -360,4 +366,73 @@ fn print_execution_plan(file: &rein::ast::ReinFile, message: Option<&str>) -> i3
 
     println!("⚡ No API calls made. Use without --dry-run to execute.");
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rein::ast::{ObserveDef, Span};
+    use rein::runtime::otel_export::OtelMode;
+
+    fn span() -> Span {
+        Span { start: 0, end: 0 }
+    }
+
+    fn obs(export: Option<&str>, metrics: &[&str]) -> ObserveDef {
+        ObserveDef {
+            name: "test".to_string(),
+            trace: None,
+            metrics: metrics.iter().map(|s| (*s).to_string()).collect(),
+            alert_when: None,
+            export: export.map(str::to_string),
+            span: span(),
+        }
+    }
+
+    #[test]
+    fn resolve_otel_mode_stdout_export() {
+        let o = obs(Some("stdout"), &["cost"]);
+        let mode = resolve_otel_mode(Some(&o), false);
+        assert!(matches!(mode, OtelMode::StdoutOnComplete { .. }));
+    }
+
+    #[test]
+    fn resolve_otel_mode_file_export() {
+        let o = obs(Some("file"), &[]);
+        let mode = resolve_otel_mode(Some(&o), false);
+        assert!(matches!(mode, OtelMode::FileOnComplete));
+    }
+
+    #[test]
+    fn resolve_otel_mode_otlp_export() {
+        let o = obs(Some("otlp"), &[]);
+        let mode = resolve_otel_mode(Some(&o), false);
+        assert!(matches!(mode, OtelMode::FileOnComplete));
+    }
+
+    #[test]
+    fn resolve_otel_mode_unknown_export_falls_back_to_file() {
+        let o = obs(Some("prometheus"), &[]);
+        let mode = resolve_otel_mode(Some(&o), false);
+        assert!(matches!(mode, OtelMode::FileOnComplete));
+    }
+
+    #[test]
+    fn resolve_otel_mode_no_observe_otel_flag_true() {
+        let mode = resolve_otel_mode(None, true);
+        assert!(matches!(mode, OtelMode::FileOnComplete));
+    }
+
+    #[test]
+    fn resolve_otel_mode_no_observe_otel_flag_false() {
+        let mode = resolve_otel_mode(None, false);
+        assert!(matches!(mode, OtelMode::None));
+    }
+
+    #[test]
+    fn resolve_otel_mode_no_export_field_falls_through_to_flag() {
+        let o = obs(None, &[]);
+        let mode = resolve_otel_mode(Some(&o), true);
+        assert!(matches!(mode, OtelMode::FileOnComplete));
+    }
 }

@@ -437,28 +437,34 @@ impl<'a> AgentEngine<'a> {
     }
 
     /// Build a `StructuredTrace` with wall-clock timestamps from a completed run.
+    ///
+    /// Returns `(trace, completed_at)` so callers can reuse the captured timestamp
+    /// (e.g. for a filename) without a second `Utc::now()` call that would drift.
     fn build_structured_trace(
         result: &RunResult,
         duration: std::time::Duration,
         agent_name: &str,
-    ) -> super::StructuredTrace {
+    ) -> (super::StructuredTrace, chrono::DateTime<chrono::Utc>) {
         let now = chrono::Utc::now();
         let started =
             now - chrono::Duration::from_std(duration).unwrap_or(chrono::Duration::zero());
-        result.trace.to_structured(
+        let trace = result.trace.to_structured(
             agent_name,
             &started.to_rfc3339(),
             &now.to_rfc3339(),
             duration.as_millis().try_into().unwrap_or(u64::MAX),
-        )
+        );
+        (trace, now)
     }
 
     /// Write OTLP JSON to a timestamped file.
     fn export_otel_to_file(result: &RunResult, duration: std::time::Duration, agent_name: &str) {
-        let structured = Self::build_structured_trace(result, duration, agent_name);
+        let (structured, completed_at) = Self::build_structured_trace(result, duration, agent_name);
         match super::otel_export::to_otlp_json(&structured) {
             Ok(json) => {
-                let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+                // Reuse the timestamp captured in build_structured_trace so the
+                // filename matches the completed_at field inside the JSON.
+                let ts = completed_at.format("%Y%m%d-%H%M%S");
                 let path = format!("rein-trace-{ts}.json");
                 match std::fs::write(&path, &json) {
                     Ok(()) => eprintln!("OTLP trace written to {path}"),
@@ -477,7 +483,8 @@ impl<'a> AgentEngine<'a> {
         agent_name: &str,
     ) {
         use super::otel_export::to_otlp;
-        let mut structured = Self::build_structured_trace(result, duration, agent_name);
+        let (mut structured, _completed_at) =
+            Self::build_structured_trace(result, duration, agent_name);
         if !metrics.is_empty() {
             structured
                 .events
