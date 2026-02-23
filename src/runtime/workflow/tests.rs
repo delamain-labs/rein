@@ -2384,14 +2384,11 @@ async fn for_each_step_failure_cascades_to_dependent() {
     let executor = MockExecutor::new();
 
     // step_a: for_each with non-existent agent → will fail
-    let mut step_a = make_step_for_each("step_a", "ghost", "items");
+    let step_a = make_step_for_each("step_a", "ghost", "items");
     // step_b: depends on step_a → should be skipped when step_a fails
-    let mut step_b = make_step("step_b", "follower", vec!["step_a"]);
+    let step_b = make_step("step_b", "follower", vec!["step_a"]);
     // step_c: independent — should still run despite step_a failure
     let step_c = make_step("step_c", "follower", vec![]);
-
-    step_a.depends_on = vec![];
-    step_b.depends_on = vec!["step_a".to_string()];
 
     let workflow = make_workflow_steps("cascade_test", "start", vec![step_a, step_b, step_c]);
     let ctx = WorkflowContext {

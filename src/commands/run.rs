@@ -170,13 +170,11 @@ fn run_workflow_mode(
             // than aborting the whole run.
             //
             // Exit code convention:
-            //   0 — all steps succeeded
-            //   1 — one or more steps failed softly (partial success) OR a
-            //       hard error aborted the run (see Err arm below)
-            //
-            // Both partial-success (Ok with failures) and hard-abort (Err) map
-            // to exit 1. Shell consumers that need to distinguish the two cases
-            // can inspect the trace JSON for StepFailed events.
+            //   0 — all steps succeeded (no StepFailed or StepSkipped events)
+            //   1 — partial success: at least one step failed softly or was
+            //       cascade-skipped (workflow ran to completion with failures)
+            //   2 — hard abort: a non-recoverable error terminated the run
+            //       before all steps could execute (see Err arm below)
             let failed_count = result
                 .events
                 .iter()
@@ -215,12 +213,16 @@ fn run_workflow_mode(
                 );
             }
             eprintln!("Duration: {duration:.2?}");
+            // Skips only occur as cascades from upstream failures under current
+            // semantics — a skipped step implies at least one failed step.
+            // The assert makes this invariant machine-checked so a future change
+            // (e.g., when:-condition skips) cannot silently produce a zero exit.
+            debug_assert!(
+                failed_count > 0 || skipped_count == 0,
+                "skipped_count={skipped_count} but failed_count=0: skips must cascade from a failure"
+            );
             // Exit 0: all steps succeeded.
-            // Exit 1: partial success — at least one step failed or was skipped.
-            //         `skipped_count > 0` implies `failed_count > 0` under current
-            //         semantics (skips only cascade from upstream failures), so
-            //         both are included here for defensive correctness and to
-            //         avoid silent zero-exit on cascaded skips in CI pipelines.
+            // Exit 1: partial success — step(s) failed or were cascade-skipped.
             // Exit 2: hard abort — see Err arm below.
             i32::from(failed_count > 0 || skipped_count > 0)
         }
