@@ -507,5 +507,24 @@ pub enum RunError {
     },
 }
 
+impl std::fmt::Display for RunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BudgetExceeded => write!(f, "budget exceeded"),
+            Self::PermissionDenied => write!(f, "permission denied"),
+            Self::ProviderError => write!(f, "provider error"),
+            Self::ConfigError => write!(f, "configuration error"),
+            Self::CircuitBreakerOpen => write!(f, "circuit breaker open"),
+            Self::GuardrailBlocked => write!(f, "guardrail blocked"),
+            Self::EvalFailed => write!(f, "eval failed"),
+            Self::Timeout { partial_trace } => write!(
+                f,
+                "provider timed out (partial trace: {} events)",
+                partial_trace.events.len()
+            ),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;

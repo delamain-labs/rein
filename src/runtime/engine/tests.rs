@@ -11,6 +11,25 @@ use crate::runtime::otel_export::OtelMode;
 use crate::runtime::policy::PolicyEngine;
 use crate::runtime::provider::{ChatResponse, MockProvider, ToolCallRequest, ToolDef, Usage};
 
+/// A `Provider` that never resolves — used to test timeout behaviour.
+/// Tokio's mock clock (`start_paused = true`) advances automatically past any
+/// `tokio::time::timeout` wrapper so the test finishes instantly.
+struct HangingProvider;
+
+#[async_trait::async_trait]
+impl crate::runtime::provider::Provider for HangingProvider {
+    fn name(&self) -> &'static str {
+        "hanging"
+    }
+    async fn chat(
+        &self,
+        _messages: &[crate::runtime::provider::Message],
+        _tools: &[ToolDef],
+    ) -> Result<ChatResponse, crate::runtime::provider::ProviderError> {
+        std::future::pending().await
+    }
+}
+
 fn make_agent(
     can: Vec<Capability>,
     cannot: Vec<Capability>,
@@ -909,24 +928,6 @@ async fn capped_tool_allowed_within_cap() {
 // The partial trace in the error must contain a StageTimeout event.
 #[tokio::test(start_paused = true)]
 async fn stage_timeout_fires_when_provider_hangs() {
-    use crate::runtime::provider::{ChatResponse, Message, ProviderError, ToolDef};
-
-    struct HangingProvider;
-    #[async_trait::async_trait]
-    impl crate::runtime::provider::Provider for HangingProvider {
-        fn name(&self) -> &'static str {
-            "hanging"
-        }
-        async fn chat(
-            &self,
-            _messages: &[Message],
-            _tools: &[ToolDef],
-        ) -> Result<ChatResponse, ProviderError> {
-            // Never returns — tokio mock clock will advance past the timeout.
-            std::future::pending().await
-        }
-    }
-
     let agent = make_agent(vec![], vec![], None);
     let registry = ToolRegistry::from_agent(&agent);
     let executor = MockExecutor::new();
@@ -966,6 +967,16 @@ async fn stage_timeout_fires_when_provider_hangs() {
         "partial_trace must contain a StageTimeout event; got: {:?}",
         partial_trace.events
     );
+    // The StageTimeout event must be last — the doc comment on RunError::Timeout
+    // establishes this ordering contract.
+    assert!(
+        matches!(
+            partial_trace.events.last(),
+            Some(RunEvent::StageTimeout { .. })
+        ),
+        "StageTimeout must be the last event in the partial trace; got: {:?}",
+        partial_trace.events
+    );
 }
 
 // #355: a timeout counts as a provider failure for circuit-breaker purposes.
@@ -974,22 +985,6 @@ async fn stage_timeout_fires_when_provider_hangs() {
 #[tokio::test(start_paused = true)]
 async fn stage_timeout_records_circuit_breaker_failure() {
     use crate::runtime::circuit_breaker::CircuitBreaker;
-    use crate::runtime::provider::{ChatResponse, Message, ProviderError, ToolDef};
-
-    struct HangingProvider;
-    #[async_trait::async_trait]
-    impl crate::runtime::provider::Provider for HangingProvider {
-        fn name(&self) -> &'static str {
-            "hanging"
-        }
-        async fn chat(
-            &self,
-            _messages: &[Message],
-            _tools: &[ToolDef],
-        ) -> Result<ChatResponse, ProviderError> {
-            std::future::pending().await
-        }
-    }
 
     let agent = make_agent(vec![], vec![], None);
     let registry = ToolRegistry::from_agent(&agent);
