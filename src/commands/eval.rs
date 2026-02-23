@@ -104,6 +104,7 @@ fn run_scenarios(
             system_prompt: None,
             max_turns: 5,
             budget_cents: 0,
+            stage_timeout_secs: None,
         };
         let executor = rein::runtime::executor::NoopExecutor;
         let engine = rein::runtime::engine::AgentEngine::new(

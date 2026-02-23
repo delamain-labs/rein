@@ -903,3 +903,49 @@ async fn capped_tool_allowed_within_cap() {
         result.trace.events
     );
 }
+
+// #355: stage_timeout_secs must cause engine.run() to return RunError::Timeout
+// when the provider does not respond within the configured window.
+#[tokio::test(start_paused = true)]
+async fn stage_timeout_fires_when_provider_hangs() {
+    use crate::runtime::provider::{ChatResponse, Message, ProviderError, ToolDef};
+
+    struct HangingProvider;
+    #[async_trait::async_trait]
+    impl crate::runtime::provider::Provider for HangingProvider {
+        fn name(&self) -> &'static str { "hanging" }
+        async fn chat(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolDef],
+        ) -> Result<ChatResponse, ProviderError> {
+            // Never returns — tokio mock clock will advance past the timeout.
+            std::future::pending().await
+        }
+    }
+
+    let agent = make_agent(vec![], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+    let executor = MockExecutor::new();
+    let provider = HangingProvider;
+
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig {
+            stage_timeout_secs: Some(5),
+            ..RunConfig::default()
+        },
+    );
+
+    // start_paused = true: tokio auto-advances mock time when all tasks are
+    // waiting on timers. The 5-second timeout will fire automatically.
+    let result = engine.run("hello").await;
+    assert!(
+        matches!(result, Err(RunError::Timeout)),
+        "expected RunError::Timeout, got: {:?}",
+        result
+    );
+}

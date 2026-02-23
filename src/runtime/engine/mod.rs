@@ -24,6 +24,8 @@ pub struct RunConfig {
     pub max_turns: usize,
     /// Budget limit in cents (0 = no budget).
     pub budget_cents: u64,
+    /// Per-LLM-call timeout in seconds. `None` means no timeout.
+    pub stage_timeout_secs: Option<u64>,
 }
 
 impl Default for RunConfig {
@@ -32,6 +34,7 @@ impl Default for RunConfig {
             system_prompt: None,
             max_turns: 10,
             budget_cents: 0,
+            stage_timeout_secs: None,
         }
     }
 }
@@ -213,6 +216,7 @@ impl<'a> AgentEngine<'a> {
     ///
     /// # Errors
     /// Returns `RunError` if the run fails (budget exceeded, provider error, etc.).
+    #[allow(clippy::too_many_lines)]
     pub async fn run(&self, user_message: &str) -> Result<RunResult, RunError> {
         let run_start = std::time::Instant::now();
         let mut state = RunState {
@@ -235,7 +239,7 @@ impl<'a> AgentEngine<'a> {
         }
         state.messages.push(Message::user(user_message));
 
-        for _turn in 0..self.config.max_turns {
+        for turn in 0..self.config.max_turns {
             // Circuit breaker check before LLM call.
             if let Some(ref cb_mutex) = self.circuit_breaker {
                 let mut cb = cb_mutex.lock().expect("circuit breaker lock");
@@ -249,19 +253,32 @@ impl<'a> AgentEngine<'a> {
                 }
             }
 
-            let response = self
-                .provider
-                .chat(&state.messages, &self.tool_defs)
+            let chat_future = self.provider.chat(&state.messages, &self.tool_defs);
+            let chat_result = if let Some(secs) = self.config.stage_timeout_secs {
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(secs),
+                    chat_future,
+                )
                 .await
-                .map_err(|_| {
-                    if let Some(ref cb_mutex) = self.circuit_breaker {
-                        cb_mutex
-                            .lock()
-                            .expect("circuit breaker lock")
-                            .record_failure();
-                    }
-                    RunError::ProviderError
-                })?;
+                .map_err(|_elapsed| {
+                    state.events.push(super::RunEvent::StageTimeout {
+                        turn,
+                        timeout_secs: secs,
+                    });
+                    RunError::Timeout
+                })?
+            } else {
+                chat_future.await
+            };
+            let response = chat_result.map_err(|_| {
+                if let Some(ref cb_mutex) = self.circuit_breaker {
+                    cb_mutex
+                        .lock()
+                        .expect("circuit breaker lock")
+                        .record_failure();
+                }
+                RunError::ProviderError
+            })?;
 
             if let Some(ref cb_mutex) = self.circuit_breaker {
                 cb_mutex

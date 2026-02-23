@@ -136,6 +136,11 @@ pub enum RunEvent {
         step: String,
         reason: String,
     },
+    /// Provider call exceeded the configured `stage_timeout_secs` on this turn.
+    StageTimeout {
+        turn: usize,
+        timeout_secs: u64,
+    },
 }
 
 /// An ordered log of all events that occurred during a run.
@@ -439,6 +444,9 @@ fn summarize_event(event: &RunEvent, lines: &mut Vec<String>, turn: &mut usize) 
         RunEvent::StepFailed { step, reason } => {
             lines.push(format!("  ✗ step '{step}' failed: {reason}"));
         }
+        RunEvent::StageTimeout { turn, timeout_secs } => {
+            lines.push(format!("  ✗ turn {turn} timed out after {timeout_secs}s"));
+        }
     }
 }
 
@@ -491,6 +499,8 @@ pub enum RunError {
     CircuitBreakerOpen,
     GuardrailBlocked,
     EvalFailed,
+    /// Provider call exceeded `stage_timeout_secs`.
+    Timeout,
 }
 
 #[cfg(test)]
