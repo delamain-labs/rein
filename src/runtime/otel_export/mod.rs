@@ -111,7 +111,7 @@ fn pseudo_id(seed: u64, len: usize) -> String {
 
 /// Parse an RFC 3339 timestamp string and return nanoseconds since Unix epoch,
 /// or `None` if the string cannot be parsed or represents a pre-epoch time.
-fn try_rfc3339_to_unix_nanos(ts: &str) -> Option<u64> {
+pub(crate) fn try_rfc3339_to_unix_nanos(ts: &str) -> Option<u64> {
     use chrono::DateTime;
     DateTime::parse_from_rfc3339(ts)
         .ok()
@@ -150,6 +150,11 @@ pub fn to_otlp(trace: &StructuredTrace) -> OtelResourceSpans {
     // Uses try_ variant to correctly distinguish parse failure from a legitimately
     // epoch-zero completed_at (avoiding silent fallback for valid epoch timestamps).
     let end_ns = try_rfc3339_to_unix_nanos(&trace.completed_at).unwrap_or_else(|| {
+        eprintln!(
+            "rein[otel]: warning: could not parse completed_at '{}' as RFC 3339; \
+             falling back to start + duration — end timestamp may be approximate",
+            trace.completed_at
+        );
         start_ns.saturating_add(trace.stats.duration_ms.saturating_mul(1_000_000))
     });
 
