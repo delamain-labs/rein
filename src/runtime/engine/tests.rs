@@ -4,6 +4,7 @@ use super::*;
 use crate::ast::ValueExpr;
 use crate::ast::{AgentDef, Capability, Span};
 use crate::runtime::executor::MockExecutor;
+use crate::runtime::policy::PolicyEngine;
 use crate::runtime::provider::{ChatResponse, MockProvider, ToolCallRequest, ToolDef, Usage};
 
 fn make_agent(
@@ -334,4 +335,111 @@ async fn stream_callback_receives_text() {
     assert_eq!(texts.lock().unwrap().len(), 1);
     assert_eq!(texts.lock().unwrap()[0], "Hello streamed!");
     assert!(*completed.lock().unwrap());
+}
+
+// --- #302 PolicyEngine Tests ---
+
+fn make_policy_engine_with_threshold(metric: &str, threshold: f64) -> PolicyEngine {
+    use crate::ast::{CompareOp, PolicyDef, PolicyTier, Span, WhenComparison, WhenExpr, WhenValue};
+    let tier_supervised = PolicyTier {
+        name: "supervised".to_string(),
+        promote_when: Some(WhenExpr::Comparison(WhenComparison {
+            field: metric.to_string(),
+            op: CompareOp::Gt,
+            value: WhenValue::Number(threshold.to_string()),
+        })),
+        span: Span { start: 0, end: 1 },
+    };
+    let tier_autonomous = PolicyTier {
+        name: "autonomous".to_string(),
+        promote_when: None,
+        span: Span { start: 0, end: 1 },
+    };
+    let def = PolicyDef {
+        tiers: vec![tier_supervised, tier_autonomous],
+        span: Span { start: 0, end: 1 },
+    };
+    PolicyEngine::from_def(&def)
+}
+
+#[tokio::test]
+async fn engine_with_policy_starts_at_first_tier() {
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("done"));
+    let executor = MockExecutor::new();
+    let agent = make_agent(vec![], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+    let policy = make_policy_engine_with_threshold("tokens", 999_999.0);
+
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig::default(),
+    )
+    .with_policy(policy);
+    let result = engine.run("hi").await.unwrap();
+    assert_eq!(result.response, "done");
+    // No promotion at low token counts — no PolicyPromotion event
+    assert!(
+        !result
+            .trace
+            .events
+            .iter()
+            .any(|e| matches!(e, RunEvent::PolicyPromotion { .. }))
+    );
+}
+
+#[tokio::test]
+async fn engine_with_policy_emits_promotion_event_when_threshold_met() {
+    let provider = MockProvider::new();
+    // One turn, costs ~150 tokens (100 input + 50 output per simple_response)
+    provider.push_response(simple_response("done"));
+    let executor = MockExecutor::new();
+    let agent = make_agent(vec![], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+    // Threshold of 1 token — will promote immediately after first LLM call
+    let policy = make_policy_engine_with_threshold("tokens", 1.0);
+
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig::default(),
+    )
+    .with_policy(policy);
+    let result = engine.run("hi").await.unwrap();
+    assert_eq!(result.response, "done");
+    let promoted = result.trace.events.iter().any(|e| {
+        matches!(e, RunEvent::PolicyPromotion { from_tier, to_tier }
+            if from_tier == "supervised" && to_tier == "autonomous")
+    });
+    assert!(promoted, "expected PolicyPromotion event");
+}
+
+#[tokio::test]
+async fn engine_without_policy_has_no_promotion_events() {
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("done"));
+    let executor = MockExecutor::new();
+    let agent = make_agent(vec![], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig::default(),
+    );
+    let result = engine.run("hi").await.unwrap();
+    assert!(
+        !result
+            .trace
+            .events
+            .iter()
+            .any(|e| matches!(e, RunEvent::PolicyPromotion { .. }))
+    );
 }

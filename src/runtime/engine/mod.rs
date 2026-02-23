@@ -6,6 +6,7 @@ use super::executor::ToolExecutor;
 use super::guardrails::GuardrailEngine;
 use super::interceptor::{InterceptResult, ToolInterceptor};
 use super::permissions::ToolRegistry;
+use super::policy::PolicyEngine;
 use super::provider::{Message, Provider, ToolCallRequest, ToolDef};
 use super::{RunError, RunEvent, RunTrace, ToolCall};
 
@@ -102,6 +103,7 @@ pub struct AgentEngine<'a> {
     stream: Box<dyn StreamCallback + 'a>,
     guardrails: GuardrailEngine,
     circuit_breaker: Option<Mutex<CircuitBreaker>>,
+    policy_engine: Option<Mutex<PolicyEngine>>,
 }
 
 impl<'a> AgentEngine<'a> {
@@ -123,6 +125,7 @@ impl<'a> AgentEngine<'a> {
             stream: Box::new(NoopStream),
             guardrails: GuardrailEngine::empty(),
             circuit_breaker: None,
+            policy_engine: None,
         }
     }
 
@@ -144,6 +147,13 @@ impl<'a> AgentEngine<'a> {
     #[must_use]
     pub fn with_circuit_breaker(mut self, cb: CircuitBreaker) -> Self {
         self.circuit_breaker = Some(Mutex::new(cb));
+        self
+    }
+
+    /// Attach a policy engine for tier-based promotion tracking.
+    #[must_use]
+    pub fn with_policy(mut self, policy: PolicyEngine) -> Self {
+        self.policy_engine = Some(Mutex::new(policy));
         self
     }
 
@@ -217,6 +227,8 @@ impl<'a> AgentEngine<'a> {
 
             self.check_budget(&mut state, cost)?;
 
+            self.evaluate_policy(&mut state);
+
             // Apply guardrails to LLM output.
             let content = if self.guardrails.is_empty() {
                 response.content.clone()
@@ -273,6 +285,25 @@ impl<'a> AgentEngine<'a> {
             });
         }
         Ok(())
+    }
+
+    /// Evaluate policy promotion conditions after a turn and emit events.
+    fn evaluate_policy(&self, state: &mut RunState) {
+        let Some(ref policy_mutex) = self.policy_engine else {
+            return;
+        };
+        let mut policy = policy_mutex.lock().expect("policy engine lock");
+        #[allow(clippy::cast_precision_loss)]
+        let metrics = vec![
+            ("tokens".to_string(), state.total_tokens as f64),
+            ("cost".to_string(), state.total_cost_cents as f64),
+        ];
+        if let Some(ev) = policy.evaluate_promotion(&metrics) {
+            state.events.push(RunEvent::PolicyPromotion {
+                from_tier: ev.from_tier,
+                to_tier: ev.to_tier,
+            });
+        }
     }
 
     /// Process all tool calls from an LLM response.
