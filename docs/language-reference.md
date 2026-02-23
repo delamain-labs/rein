@@ -77,7 +77,7 @@ Global defaults applied to all agents.
 
 ```rein
 defaults {
-    model: gpt-4
+    model: "gpt-4o"
     budget: $100 per day
 }
 ```
@@ -86,7 +86,7 @@ defaults {
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `model` | identifier | No | Default model for all agents |
+| `model` | value expr | No | Default model for all agents |
 | `budget` | budget expr | No | Default budget constraint |
 
 ✅ Applied to agents at runtime.
@@ -99,7 +99,7 @@ Configure an AI model provider.
 
 ```rein
 provider openai {
-    model: gpt-4
+    model: "gpt-4o"
     key: env("OPENAI_API_KEY")
 }
 ```
@@ -108,10 +108,12 @@ provider openai {
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `model` | identifier | No | Model to use |
+| `model` | value expr | No | Model to use |
 | `key` | value expr | No | API key (typically via `env()`) |
 
-✅ Used for API key resolution at runtime.
+> **Note:** The field is `key`, not `api_key`.
+
+✅ Used for API key resolution and provider selection at runtime.
 
 ---
 
@@ -120,9 +122,9 @@ provider openai {
 Define an external tool integration.
 
 ```rein
-tool zendesk {
-    endpoint: "https://api.zendesk.com"
-    provider: zendesk_provider
+tool web_search {
+    endpoint: "https://api.search.example.com/v1"
+    key: env("SEARCH_API_KEY")
 }
 ```
 
@@ -130,10 +132,11 @@ tool zendesk {
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `endpoint` | string | No | Tool API endpoint |
-| `provider` | identifier | No | Associated provider |
+| `endpoint` | value expr | No | Tool API endpoint |
+| `provider` | value expr | No | Associated provider |
+| `key` | value expr | No | Tool API key |
 
-⚠️ Parse-only. Tool definitions are validated but not used by the runtime.
+⚠️ Parse-only. Tool definitions are validated but external tool calls are not yet wired.
 
 ---
 
@@ -143,12 +146,27 @@ The core building block. Defines an AI agent with capabilities, constraints, and
 
 ```rein
 agent support_bot {
-    model: gpt-4
-    can: read_tickets, respond_to_customers, check_order_status
-    cannot: issue_refunds, delete_accounts
-    budget: $50 per day
+    model: openai
+
+    can [
+        zendesk.read_ticket
+        zendesk.reply_ticket
+        zendesk.refund up to $50
+    ]
+
+    cannot [
+        zendesk.delete_ticket
+        zendesk.admin
+    ]
+
+    budget: $5 per request
+
     guardrails {
-        pii_redaction: on
+        output_filter {
+            pii_detection: redact
+            toxicity: block
+            prompt_injection: block
+        }
     }
 }
 ```
@@ -157,25 +175,26 @@ agent support_bot {
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `model` | identifier | Yes | AI model to use |
-| `can` | capability list | No | Allowed actions |
-| `cannot` | capability list | No | Denied actions |
+| `model` | value expr | Yes | AI model or provider name |
+| `can [...]` | capability list | No | Allowed actions (bracket list, newline-separated) |
+| `cannot [...]` | capability list | No | Denied actions (bracket list, newline-separated) |
 | `budget` | budget expr | No | Spending limit |
-| `from` | identifier | No | Inherit from an archetype |
-| `guardrails` | block | No | Safety guardrails (⚠️ parse-only) |
+| `guardrails` | block | No | Safety guardrails |
 
-**Capabilities** can include `up_to` constraints:
+**Capability syntax:** Capabilities use `namespace.action` format with newline-separated bracket lists (no commas):
 
 ```rein
-agent finance_bot {
-    model: gpt-4
-    can: issue_refunds up_to $500, view_transactions
-    cannot: wire_transfers, modify_accounts
-}
+can [
+    search.web
+    files.read
+    stripe.refund up to $50
+]
 ```
 
+The `up to $N` constraint is optional and sets a monetary cap on that capability.
+
 ✅ `model`, `can`, `cannot`, `budget` enforced at runtime.
-⚠️ `guardrails`, `from` (archetype inheritance) are parse-only.
+✅ `guardrails` enforced at runtime (output filtering, redaction, blocking).
 
 ---
 
@@ -185,41 +204,50 @@ Reusable agent templates. Agents inherit via `from`.
 
 ```rein
 archetype cautious_agent {
-    model: gpt-4
+    can [
+        files.read
+    ]
+
+    cannot [
+        files.delete
+        system.execute
+    ]
+
     budget: $25 per day
-    cannot: delete_data, send_emails
 }
 
-agent my_agent {
-    from: cautious_agent
-    can: read_files
+agent my_agent from cautious_agent {
+    model: openai
+
+    can [
+        search.web
+    ]
 }
 ```
 
-**Fields:** Same as `agent`.
+> **Note:** Inheritance uses `agent name from archetype`, not `from:` as a field.
 
-⚠️ Parse-only. Inheritance is not resolved at runtime.
+⚠️ Parse-only. Archetype inheritance is not resolved at runtime.
 
 ---
 
 ## Workflow
 
-Define multi-step workflows with triggers and stages.
+Define multi-step workflows with triggers.
 
 ```rein
-workflow ticket_resolution {
-    trigger: new_ticket
-    stages: triage, investigation, resolution
+workflow support_pipeline {
+    trigger: ticket_created
 
     step classify {
-        agent: support_bot
-        goal: "Classify the incoming ticket by urgency and category"
+        agent: triage
+        goal: "Classify the incoming support ticket"
     }
 
     step resolve {
-        agent: support_bot
-        goal: "Resolve the ticket based on classification"
-        when: urgency > 3
+        agent: resolver
+        goal: "Resolve the ticket automatically"
+        when: priority > 3
     }
 }
 ```
@@ -228,13 +256,13 @@ workflow ticket_resolution {
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `trigger` | identifier | No | Event that starts the workflow |
-| `stages` | comma-separated identifiers | No | Named stages |
+| `trigger` | identifier | No | Event that starts the workflow (no dots allowed) |
+| `stages` | comma-separated identifiers | No | Named stage references |
 | `step` | block (multiple) | No | Workflow steps |
-| `auto_resolve` | block | No | Auto-resolution conditions |
 
-✅ Basic sequential execution works.
-⚠️ Stages, auto_resolve, and advanced features are parse-only.
+> **Note:** Triggers must be plain identifiers (e.g., `ticket_created`). Function-style triggers like `schedule("0 9 * * *")` are not valid here; use the `schedule` block instead.
+
+✅ Basic sequential execution works via `rein run`.
 
 ---
 
@@ -247,10 +275,7 @@ step review_code {
     agent: code_reviewer
     goal: "Review the pull request for security issues"
     when: file_count > 10
-    send_to: slack_channel
-    on failure: retry 3 exponential then escalate
-    fallback: manual_review
-    one_of: "security_review", "code_review"
+    approve: human via slack("#reviews") timeout "2h"
 }
 ```
 
@@ -258,19 +283,28 @@ step review_code {
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `agent` | identifier | Yes | Agent to execute this step |
-| `goal` | string | No | Task description |
-| `when` | condition | No | Guard condition (⚠️ parse-only) |
-| `send_to` | identifier | No | Output destination |
-| `on failure` | retry policy | No | Failure handling (⚠️ parse-only) |
-| `fallback` | identifier | No | Fallback step (⚠️ parse-only) |
-| `one_of` | string list | No | Constraint group (⚠️ parse-only) |
-| `escalate` | block | No | Escalation config (⚠️ parse-only) |
-| `within` | block | No | Scoping constraints (⚠️ parse-only) |
-| `input` / `output` | type ref | No | Typed I/O (⚠️ parse-only) |
-| `for_each` | identifier | No | Iteration (⚠️ parse-only) |
+| `agent` | identifier | **Yes** | Agent to execute this step |
+| `goal` | string literal | No | Task description (must be a string, not `env()`) |
+| `when` | condition | No | Guard condition |
+| `send_to` | pipe expr | No | Output destination |
+| `input` | pipe expr | No | Input data pipeline |
+| `on failure` | retry policy | No | Failure handling (e.g., `retry 3 exponential then escalate`) |
+| `fallback` | identifier | No | Fallback step on failure |
+| `for_each` | identifier | No | Iterate over a collection |
+| `escalate` | block | No | Escalation config |
+| `approve` | approval expr | No | Human approval gate |
 
-✅ `agent` and `goal` used at runtime for basic execution.
+**Inline step shorthand:**
+
+```rein
+step classify: triage goal "Classify the ticket"
+```
+
+> **Note:** There is no `depends_on` field. Use `when:` conditions to express step ordering, or rely on sequential declaration order.
+
+✅ `agent` and `goal` used at runtime.
+✅ `approve` wired to approval handler.
+⚠️ `when`, `on failure`, `fallback`, `for_each`, `escalate`, `send_to` are parse-only.
 
 ---
 
@@ -283,8 +317,14 @@ workflow analysis {
     trigger: data_ready
 
     parallel {
-        step sentiment { agent: nlp_bot, goal: "Analyze sentiment" }
-        step entities  { agent: nlp_bot, goal: "Extract entities" }
+        step sentiment {
+            agent: nlp_bot
+            goal: "Analyze sentiment"
+        }
+        step entities {
+            agent: nlp_bot
+            goal: "Extract entities"
+        }
     }
 }
 ```
@@ -301,10 +341,19 @@ Conditional routing based on pattern matching.
 workflow router {
     trigger: incoming_request
 
-    route_on category {
-        "billing" -> billing_agent
-        "technical" -> tech_agent
-        _ -> general_agent
+    route on category {
+        "billing" -> step billing_step {
+            agent: billing_agent
+            goal: "Handle billing request"
+        }
+        "technical" -> step tech_step {
+            agent: tech_agent
+            goal: "Handle technical request"
+        }
+        _ -> step general_step {
+            agent: general_agent
+            goal: "Handle general request"
+        }
     }
 }
 ```
@@ -317,80 +366,82 @@ workflow router {
 
 ## Policy
 
-Conditional governance rules with trust tiers.
+Progressive trust tiers with promotion/demotion rules.
 
 ```rein
-policy data_access {
-    tier low {
-        can: read_public_data
-        budget: $10 per day
-        when: trust_score < 50%
+policy {
+    tier supervised {
+        promote when accuracy > 95%
     }
-
-    tier high {
-        can: read_public_data, read_private_data, export_data
-        budget: $100 per day
-        when: trust_score >= 80%
+    tier autonomous {
+        promote when accuracy > 99%
     }
+    tier fully_autonomous {}
 }
 ```
 
 **Tier fields:**
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `can` | capability list | No | Allowed actions at this tier |
-| `budget` | budget expr | No | Budget at this tier |
-| `when` | condition | No | Condition for this tier |
+| Field | Type | Description |
+|-------|------|-------------|
+| `promote when` | condition | Condition to promote to the next tier |
+| `can [...]` | capability list | Capabilities at this tier |
+| `cannot [...]` | capability list | Denied at this tier |
+| `budget` | budget expr | Budget limit at this tier |
 
-⚠️ Parse-only. Trust tiers are not enforced.
+> **Note:** Policy blocks are top-level, not nested inside agents. They can optionally have a name: `policy data_access { ... }`.
+
+🔧 Partial. Policy engine logs current tier at runtime; full tier promotion/demotion enforcement is in progress.
 
 ---
 
 ## Guardrails
 
-Safety constraints applied to agents.
+Safety constraints applied to agent output. Nested inside agent blocks.
 
 ```rein
 agent safe_bot {
-    model: gpt-4
+    model: openai
+
     guardrails {
-        pii_redaction: on
-        toxicity_filter: strict
-        max_response_length: 500
+        output_filter {
+            pii_detection: redact
+            toxicity: block
+            prompt_injection: block
+        }
     }
 }
 ```
 
-Guardrails are defined inline within an agent block.
+Guardrails use named sections (e.g., `output_filter`, `safety`) containing key-value rules.
 
-⚠️ Parse-only. No runtime filtering or redaction occurs.
+> **Note:** Guardrails are nested blocks inside agents, not flat key-value pairs. The section name (like `output_filter`) is required.
+
+✅ Enforced at runtime. Output is checked after each LLM response; matching content is blocked or redacted.
 
 ---
 
 ## Circuit Breaker
 
-Failure detection and automatic recovery.
+Failure detection and automatic recovery. Top-level block (not nested in agents).
 
 ```rein
-circuit_breaker api_safety {
-    threshold: 5
-    window: 60
-    cooldown: 300
-    action: halt
+circuit_breaker api_protection {
+    open after: 3 failures in 5 min
+    half_open after: 2 min
 }
 ```
 
 **Fields:**
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `threshold` | integer | No | Failure count to trip |
-| `window` | integer | No | Time window in seconds |
-| `cooldown` | integer | No | Recovery period in seconds |
-| `action` | identifier | No | Action when tripped |
+| Field | Syntax | Description |
+|-------|--------|-------------|
+| `open after` | `N failures in M min` | Trip threshold |
+| `half_open after` | `N min` | Recovery probe interval |
 
-⚠️ Parse-only.
+> **Note:** Circuit breakers are top-level blocks, not nested inside agent definitions.
+
+✅ Enforced at runtime. Tracks provider errors, opens circuit on threshold, transitions through half-open for recovery.
 
 ---
 
@@ -399,29 +450,55 @@ circuit_breaker api_safety {
 Observability and monitoring configuration.
 
 ```rein
-observe metrics {
-    export: prometheus
-    endpoint: "http://localhost:9090"
-    interval: 30
+observe system_health {
+    trace: "structured"
+    metrics: [cost, latency, errors]
+    alert when {
+        cost > $10.00
+    }
+    export: otlp
 }
 ```
 
-⚠️ Parse-only.
+**Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `trace` | string/ident | Trace format |
+| `metrics` | `[ident, ...]` | Metrics to collect (bracket list, comma-separated) |
+| `alert when { ... }` | condition block | Alert condition (uses `when` expression syntax) |
+| `export` | identifier | Export format (e.g., `otlp`, `prometheus`) |
+
+> **Note:** The fields are `trace`, `metrics`, `alert when { }`, and `export`. Not `watch`, `alert_when`, or `notify`.
+
+⚠️ Parse-only. OTLP trace export is available via `rein run --otel` but observe blocks are not wired to it.
 
 ---
 
 ## Fleet
 
-Multi-agent group definitions with scaling.
+Multi-agent group definitions with optional scaling.
 
 ```rein
 fleet support_team {
-    agents: support_bot, escalation_bot
-    min: 2
-    max: 10
-    scale_on: queue_depth
+    agents: [support_bot, escalation_bot]
+    policy: round_robin
+    budget: $500 per day
+    scaling {
+        min: 2
+        max: 10
+    }
 }
 ```
+
+**Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `agents` | `[ident, ...]` | List of agent names |
+| `policy` | identifier | Routing policy |
+| `budget` | budget expr | Fleet-wide budget |
+| `scaling` | block | Scaling configuration (`min`, `max`) |
 
 ⚠️ Parse-only.
 
@@ -429,14 +506,23 @@ fleet support_team {
 
 ## Channel
 
-Async communication channel definitions.
+Communication channel definitions.
 
 ```rein
-channel alerts {
-    provider: slack
-    target: "#incidents"
+channel notifications {
+    type: slack
+    retention: 30d
 }
 ```
+
+**Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | identifier | Channel type (e.g., `slack`, `webhook`). Supports array syntax: `type[]` |
+| `retention` | duration | Message retention period |
+
+> **Note:** The block keyword is `channel`, and fields are `type` and `retention`. Not `provider`, `target`, or `agents`.
 
 ⚠️ Parse-only.
 
@@ -444,37 +530,54 @@ channel alerts {
 
 ## Eval
 
-Quality gates with dataset assertions.
+Quality gates with dataset-based assertions.
 
 ```rein
-eval accuracy_check {
-    dataset: "test_cases.jsonl"
-    assert accuracy >= 90%
-    assert latency < 2000
-    on_fail: block_deploy
+eval quality_check {
+    dataset: "./evals/quality.yaml"
+    assert accuracy > 90%
+    assert latency < 5000
+    on failure: block deploy
 }
 ```
 
+**Fields:**
+
+| Field | Syntax | Description |
+|-------|--------|-------------|
+| `dataset` | string path | Path to evaluation dataset (required) |
+| `assert` | `metric op value` | Assertion (repeatable) |
+| `on failure` | `block deploy` / `alert` / `log` | Failure action |
+
 **Assertion operators:** `<`, `>`, `<=`, `>=`, `==`, `!=`
 
-⚠️ Parse-only.
+> **Note:** Eval blocks use `dataset`, `assert`, and `on failure`. Not `agent`, `given`, or `expect` (those belong in `scenario` blocks).
+
+The eval name is optional: `eval { ... }` is valid.
+
+⚠️ Parse-only. Assertion runner exists but is not wired to CLI.
 
 ---
 
 ## Consensus
 
-Multi-agent verification strategies.
+Multi-agent verification strategies. Top-level block.
 
 ```rein
 consensus review_panel {
+    agents: [reviewer_a, reviewer_b, reviewer_c]
     strategy: majority
-    require: 3 agree
-    agents: reviewer_1, reviewer_2, reviewer_3
-    timeout: 300
+    quorum: 2
 }
 ```
 
-**Strategies:** `majority`, `unanimous`
+**Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `agents` | `[ident, ...]` | Participating agents |
+| `strategy` | identifier | Voting strategy (`majority`, `unanimous`) |
+| `quorum` | integer | Minimum votes required |
 
 ⚠️ Parse-only.
 
@@ -482,58 +585,67 @@ consensus review_panel {
 
 ## Approval
 
-Human-in-the-loop approval workflows.
+Human-in-the-loop approval gates. Used as a field within workflow steps.
 
 ```rein
-approval expense_approval {
-    kind: human
-    via: slack
-    timeout: 3600
-    approve: manager
-    collaborate {
-        mode: suggest
-    }
+step deploy {
+    agent: deployer
+    goal: "Execute the deployment plan"
+    approve: human via slack("#deployments") timeout "4h"
 }
 ```
 
-**Kinds:** `human`, `auto`
-**Collaboration modes:** `edit`, `suggest`, `review`
+**Syntax:** `approve: human via channel("destination") timeout "duration"`
 
-⚠️ Parse-only.
+The approval handler supports:
+- **CLI prompt** (interactive terminal)
+- **Auto-approve / auto-reject** (for testing and CI)
+- **Extensible** via the `ApprovalHandler` trait
+
+✅ Approval handler runtime module is built. Wired to step execution.
 
 ---
 
 ## Escalate
 
-Define escalation paths for agent handoff.
+Escalation within workflow steps (not a top-level block).
 
 ```rein
-escalate to_human {
-    target: support_team
-    priority: high
-    via: pagerduty
+step handle_ticket {
+    agent: support_bot
+    goal: "Handle the support ticket"
+    on failure: retry 3 linear then escalate
+    escalate {
+        to: senior_agent
+        notify: slack("#escalations")
+    }
 }
 ```
 
-⚠️ Parse-only.
+The `escalate` keyword is recognized in step context. It is also used as part of `on failure` retry chains.
+
+⚠️ Parse-only. Escalation paths are not executed.
 
 ---
 
 ## Secrets
 
-Vault-based secret management.
+Secure secret management with vault integration. Note: the keyword is `secrets` (plural).
 
 ```rein
-secrets api_keys {
-    vault: hashicorp
-    bind {
-        openai_key: "secrets/ai/openai"
-        stripe_key: "secrets/payments/stripe"
-    }
+secrets {
+    openai_key: vault("secrets/ai/openai")
+    stripe_key: env("STRIPE_API_KEY")
 }
 ```
 
-**Vault sources:** `hashicorp`, `aws`, `gcp`, `azure`, `env`
+**Secret sources:**
+- `vault("path")` — HashiCorp Vault or similar
+- `env("VAR_NAME")` — Environment variable
+
+Each binding maps a name to a source: `name: vault("path")` or `name: env("VAR")`.
+
+> **Note:** The keyword is `secrets` (plural), not `secret`. Bindings use `vault()` or `env()` function syntax.
 
 ⚠️ Parse-only.
 
@@ -544,7 +656,7 @@ secrets api_keys {
 Agent memory system with tiered storage.
 
 ```rein
-memory agent_memory {
+memory agent_context {
     working {
         ttl: 3600
         max_tokens: 4000
@@ -554,20 +666,20 @@ memory agent_memory {
     }
     knowledge {
         source: "knowledge_base/"
-        embedding_model: text-embedding-ada-002
+        embedding_model: "text-embedding-ada-002"
     }
 }
 ```
 
-**Tiers:** `working`, `session`, `knowledge`
+**Tiers:** `working` (cleared per run), `session` (persists across runs), `knowledge` (long-term retrieval).
 
-⚠️ Parse-only.
+🔧 Partial. Working and session tiers are implemented in-process. Knowledge tier is deferred.
 
 ---
 
 ## Schedule
 
-Time-based workflow triggers.
+Time-based triggers.
 
 ```rein
 schedule daily_report {
@@ -575,13 +687,19 @@ schedule daily_report {
     workflow: generate_report
 }
 
-schedule every_hour {
+schedule health_check {
     every: 3600
-    workflow: health_check
+    workflow: run_health_check
 }
 ```
 
-**Formats:** `cron` (cron expression) or `every` (interval in seconds).
+**Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `cron` | string | Cron expression |
+| `every` | integer | Interval in seconds |
+| `workflow` | identifier | Workflow to trigger |
 
 ⚠️ Parse-only.
 
@@ -589,14 +707,24 @@ schedule every_hour {
 
 ## Scenario
 
-Declarative test definitions.
+Declarative test definitions with structured given/expect blocks.
 
 ```rein
 scenario happy_path {
-    given: "Customer asks about order status"
-    expect: "Agent retrieves order and responds with tracking info"
+    given {
+        query: "What is the capital of France?"
+        context: "geography"
+    }
+    expect {
+        answer: "Paris"
+        confidence: "high"
+    }
 }
 ```
+
+**Structure:** `given { key: "value" ... }` and `expect { key: "value" ... }` blocks with key-value pairs.
+
+> **Note:** Scenarios use nested `given { }` and `expect { }` blocks with key-value pairs, not flat `given:` / `expect:` fields.
 
 ⚠️ Parse-only.
 
@@ -604,24 +732,18 @@ scenario happy_path {
 
 ## Type Definitions
 
-Custom types with field definitions and range constraints.
+Custom types with field constraints.
 
 ```rein
 type Priority {
-    level: int 1..5
-    label: string
-    urgent: bool
-}
-
-type Temperature {
-    value: float -40.0..60.0
-    unit: string
+    level: one of [low, medium, high, critical]
+    confidence: percentage
 }
 ```
 
-**Built-in types:** `int`, `float`, `string`, `bool`
-
-Range syntax: `int 1..10`, `float 0.0..1.0`
+**Field types:**
+- `one of [value1, value2, ...]` — Enumerated values
+- `percentage` — Percentage value
 
 ⚠️ Parse-only. Types are validated syntactically but not enforced at runtime.
 
@@ -629,17 +751,21 @@ Range syntax: `int 1..10`, `float 0.0..1.0`
 
 ## Pipe Expressions
 
-Data transformation pipelines using `|>`.
+Data transformation pipelines using `|>`. Used in step `input` and `send_to` fields.
 
 ```rein
-results |> select name, score |> where score > 80 |> sort score desc |> unique
+step process {
+    agent: processor
+    goal: "Process the data"
+    input: results |> select name, score |> where score > 80
+}
 ```
 
 **Transforms:**
-- `select field1, field2` — project specific fields
-- `where field op value` — filter rows
-- `sort field [asc|desc]` — order results
-- `unique` — deduplicate
+- `select field1, field2` — Project specific fields
+- `where field op value` — Filter rows
+- `sort field [asc|desc]` — Order results
+- `unique` — Deduplicate
 
 **Operators in `where`:** `<`, `>`, `<=`, `>=`, `==`, `!=`
 
@@ -652,14 +778,16 @@ results |> select name, score |> where score > 80 |> sort score desc |> unique
 Multi-currency budget constraints with time periods.
 
 ```rein
-budget: $100 per day
+budget: $0.10 per request
 budget: €500 per month
 budget: £50 per hour
-budget: ¥10000 per month
+budget: ¥10000 per day
 ```
 
-**Supported currencies:** `$`, `€`, `£`, `¥`
-**Time periods:** `day`, `hour`, `month`
+**Supported currencies:** `$` (USD), `€` (EUR), `£` (GBP), `¥` (JPY)
+**Time periods:** Any identifier (commonly `request`, `day`, `hour`, `month`, `session`, `ticket`)
+
+Amounts are stored internally as integer cents to avoid floating-point precision issues.
 
 ✅ Budget limits are enforced at runtime.
 
@@ -667,7 +795,7 @@ budget: ¥10000 per month
 
 ## When Conditions
 
-Guard conditions on steps, policies, and auto-resolve blocks.
+Guard conditions on steps, policy tiers, and other blocks.
 
 ```rein
 when: confidence < 70%
@@ -688,11 +816,10 @@ when: risk > 50% or amount > $1000
 
 ## Env References
 
-Reference environment variables with optional defaults.
+Reference environment variables.
 
 ```rein
 key: env("OPENAI_API_KEY")
-key: env("API_KEY", "default_value")
 ```
 
 ✅ Resolved at runtime for provider configuration.
@@ -708,13 +835,13 @@ Run the validator to check `.rein` files:
 rein validate policy.rein
 
 # Output AST as JSON
-rein validate --ast policy.rein
+rein validate policy.rein --ast
 
 # JSON output format
-rein validate --format json policy.rein
+rein validate policy.rein --format json
 
 # Strict mode: warn on parse-only features
-rein validate --strict policy.rein
+rein validate policy.rein --strict
 ```
 
 ### Strict Mode
@@ -722,11 +849,28 @@ rein validate --strict policy.rein
 With `--strict`, the validator warns about features that parse correctly but are not enforced at runtime. This prevents a false sense of security.
 
 ```
-⚠ warning[W_UNENFORCED]: Guardrails blocks are parsed but not enforced at runtime.
-  Output filtering, PII redaction, and toxicity blocking will not be applied.
+⚠ warning[W_UNENFORCED]: consensus blocks are parsed but not enforced at runtime.
 ```
 
 Exit codes:
-- `0` — valid, no issues
-- `1` — parse or validation errors
-- `2` — no errors, but strict warnings present
+- `0` — Valid, no issues
+- `1` — Parse or validation errors
+- `2` — No errors, but strict warnings present
+
+---
+
+## Quick Syntax Reference
+
+| Thing you want | Correct syntax | Common mistake |
+|---------------|---------------|----------------|
+| Provider API key | `key: env("...")` | `api_key: env("...")` |
+| Capability list | `can [\n  a.b\n  c.d\n]` | `can: a, b, c` (no commas, use brackets) |
+| Secrets block | `secrets { ... }` | `secret { ... }` (must be plural) |
+| Workflow trigger | `trigger: event_name` | `trigger: schedule("...")` (use `schedule` block) |
+| Step ordering | `when: condition` | `depends_on: step_name` (not supported) |
+| Observe metrics | `metrics: [a, b]` | `watch: a, b` |
+| Observe alerts | `alert when { cost > $10 }` | `alert_when: cost > $10` |
+| Scenario test | `given { k: "v" }` | `given: "text"` (needs block syntax) |
+| Eval quality | `dataset: "path"` + `assert metric > N` | `agent: x` + `given: "..."` (wrong block) |
+| Circuit breaker | Top-level block | Nested in agent (not valid) |
+| Escalate | Inside step block | Top-level block (not valid) |

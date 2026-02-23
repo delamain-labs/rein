@@ -57,6 +57,11 @@ Open `agents/assistant.rein`:
 ```rein
 // My first Rein agent
 
+provider openai {
+    model: "gpt-4o"
+    key: env("OPENAI_API_KEY")
+}
+
 agent assistant {
     model: openai
 
@@ -137,11 +142,14 @@ rein explain agents/assistant.rein
 ```
 📋 Policy summary: agents/assistant.rein
 
+Providers (1)
+  • openai (model: gpt-4o)
+
 Agents (1)
   • assistant (model: openai)
     can: search.web, files.read
     cannot: files.delete
-    budget: USD10 per request
+    budget: $0.10 per request
 ```
 
 ---
@@ -152,21 +160,39 @@ Create `agents/support.rein`:
 
 ```rein
 provider openai {
-    model: gpt-4
+    model: "gpt-4o"
     key: env("OPENAI_API_KEY")
 }
 
 agent support_bot {
-    model: gpt-4
-    can: read_tickets, respond_to_customers, check_order_status
-    cannot: issue_refunds, delete_accounts, access_billing
+    model: openai
+
+    can [
+        tickets.read
+        tickets.respond
+        orders.check_status
+    ]
+
+    cannot [
+        billing.refund
+        accounts.delete
+    ]
+
     budget: $50 per day
 }
 
 agent escalation_bot {
-    model: gpt-4
-    can: issue_refunds up_to $200, escalate_to_human
-    cannot: delete_accounts
+    model: openai
+
+    can [
+        billing.refund up to $200
+        tickets.escalate
+    ]
+
+    cannot [
+        accounts.delete
+    ]
+
     budget: $100 per day
 }
 
@@ -233,8 +259,10 @@ jobs:
 Every agent needs a `model` field. Add one:
 ```rein
 agent my_agent {
-    model: gpt-4   // ← required
-    can: do_stuff
+    model: openai   // ← required
+    can [
+        tasks.execute
+    ]
 }
 ```
 
