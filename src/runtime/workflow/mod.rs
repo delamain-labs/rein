@@ -463,7 +463,7 @@ pub async fn run_steps(
     let mut results = Vec::new();
     let mut events: Vec<super::RunEvent> = Vec::new();
 
-    for (index, step) in ordered.iter().enumerate() {
+    for (index, step) in ordered.into_iter().enumerate() {
         events.push(super::RunEvent::StepStarted {
             step: step.name.clone(),
             index,
@@ -520,6 +520,9 @@ pub async fn run_steps(
                     step: step.name.clone(),
                     error: e.to_string(),
                 });
+                // TODO(#380): `events` (including the StepFailed entry above)
+                // is dropped here on early return. Surface partial events to
+                // the caller so failed runs produce an inspectable trace.
                 return Err(e);
             }
         };

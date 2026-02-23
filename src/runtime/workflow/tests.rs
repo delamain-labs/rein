@@ -1930,3 +1930,61 @@ async fn run_steps_returns_error_on_missing_agent() {
         WorkflowError::StageFailed { .. } | WorkflowError::AgentNotFound(_)
     ));
 }
+
+/// #356 — StepStarted and StepCompleted must wrap the for_each iteration set,
+/// not just the regular (non-for_each) execution path.
+#[tokio::test]
+async fn run_steps_emits_step_started_and_completed_for_for_each() {
+    let file = parse_file(r"agent bot { model: openai }");
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // Two items → two responses from the for_each loop.
+    provider.push_response(simple_response("out-x"));
+    provider.push_response(simple_response("out-y"));
+
+    let step = make_step_for_each("each_step", "bot", "items");
+    let workflow = WorkflowDef {
+        name: "wf".to_string(),
+        trigger: r#"{"items": ["x", "y"]}"#.to_string(),
+        stages: vec![],
+        steps: vec![step],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+    };
+
+    let (_, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
+
+    // StepStarted must be emitted before the for_each iterations.
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            crate::runtime::RunEvent::StepStarted { step, index: 0 }
+            if step == "each_step"
+        )),
+        "expected StepStarted {{ step: each_step, index: 0 }}"
+    );
+
+    // StepCompleted must be emitted after all iterations finish.
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            crate::runtime::RunEvent::StepCompleted { step }
+            if step == "each_step"
+        )),
+        "expected StepCompleted for each_step"
+    );
+}
