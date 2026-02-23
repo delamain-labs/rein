@@ -1838,7 +1838,7 @@ async fn run_parallel_populates_events() {
 }
 
 // ---------------------------------------------------------------------------
-// #356: StepStarted / StepCompleted / StepFailed events
+// #356: StepStarted / StepCompleted events (StepFailed emission deferred to #380)
 // ---------------------------------------------------------------------------
 
 #[tokio::test]

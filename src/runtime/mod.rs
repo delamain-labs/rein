@@ -128,6 +128,10 @@ pub enum RunEvent {
         step: String,
     },
     /// A workflow step failed (agent not found, provider error, etc.).
+    ///
+    /// NOTE: emission is deferred to #380; this variant is declared but no
+    /// callsite currently pushes it. Consumers should not rely on receiving
+    /// this event until #380 is resolved.
     StepFailed {
         step: String,
         reason: String,
