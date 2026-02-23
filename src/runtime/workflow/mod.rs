@@ -463,7 +463,12 @@ pub async fn run_steps(
     let mut results = Vec::new();
     let mut events: Vec<super::RunEvent> = Vec::new();
 
-    for step in ordered {
+    for (index, step) in ordered.iter().enumerate() {
+        events.push(super::RunEvent::StepStarted {
+            step: step.name.clone(),
+            index,
+        });
+
         let input = if step.depends_on.is_empty() {
             trigger_input.clone()
         } else {
@@ -484,27 +489,42 @@ pub async fn run_steps(
             input.clone()
         };
 
-        let (result, step_events) = if let Some(ref key) = step.for_each {
-            run_step_for_each(step, &for_each_input, key, ctx).await?
+        let step_result = if let Some(ref key) = step.for_each {
+            run_step_for_each(step, &for_each_input, key, ctx).await
         } else {
-            let (r, fallback_used) = run_step_with_fallback(step, &input, ctx).await?;
-            let mut evts = Vec::new();
-            if fallback_used {
-                let fallback_name = step
-                    .fallback
-                    .as_ref()
-                    .expect("run_step: fallback_used is only true when step.fallback is Some")
-                    .name
-                    .clone();
-                evts.push(super::RunEvent::StepFallback {
+            run_step_with_fallback(step, &input, ctx).await.map(|(r, fallback_used)| {
+                let mut evts = Vec::new();
+                if fallback_used {
+                    let fallback_name = step
+                        .fallback
+                        .as_ref()
+                        .expect("run_step: fallback_used is only true when step.fallback is Some")
+                        .name
+                        .clone();
+                    evts.push(super::RunEvent::StepFallback {
+                        step: step.name.clone(),
+                        fallback_step: fallback_name,
+                    });
+                }
+                (r, evts)
+            })
+        };
+
+        let (result, step_events) = match step_result {
+            Ok(v) => v,
+            Err(e) => {
+                events.push(super::RunEvent::StepFailed {
                     step: step.name.clone(),
-                    fallback_step: fallback_name,
+                    error: e.to_string(),
                 });
+                return Err(e);
             }
-            (r, evts)
         };
 
         events.extend(step_events);
+        events.push(super::RunEvent::StepCompleted {
+            step: step.name.clone(),
+        });
 
         // Check workflow-level auto_resolve conditions after each step.
         let resolved = if let Some(ref ar) = workflow.auto_resolve {

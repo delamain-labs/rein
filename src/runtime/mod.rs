@@ -118,6 +118,20 @@ pub enum RunEvent {
         step: String,
         condition: String,
     },
+    /// A workflow step is about to begin execution.
+    StepStarted {
+        step: String,
+        index: usize,
+    },
+    /// A workflow step completed successfully.
+    StepCompleted {
+        step: String,
+    },
+    /// A workflow step failed (agent not found, provider error, etc.).
+    StepFailed {
+        step: String,
+        error: String,
+    },
 }
 
 /// An ordered log of all events that occurred during a run.
@@ -352,6 +366,15 @@ fn summarize_event(event: &RunEvent, lines: &mut Vec<String>, turn: &mut usize) 
             lines.push(format!(
                 "  ✓ auto resolved after step '{step}': {condition}"
             ));
+        }
+        RunEvent::StepStarted { step, index } => {
+            lines.push(format!("  → step[{index}] '{step}' started"));
+        }
+        RunEvent::StepCompleted { step } => {
+            lines.push(format!("  ✓ step '{step}' completed"));
+        }
+        RunEvent::StepFailed { step, error } => {
+            lines.push(format!("  ✗ step '{step}' failed: {error}"));
         }
     }
 }
