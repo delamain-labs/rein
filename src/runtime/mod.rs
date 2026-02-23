@@ -144,8 +144,18 @@ impl RunTrace {
 
     /// Construct a trace from events paired with real wall-clock offsets (ms
     /// from run start). `timestamps_ms` must be the same length as `events`.
+    ///
+    /// Note: `timestamps_ms` carries `#[serde(skip)]` and is **not** round-tripped
+    /// through JSON. Deserialized traces fall back to the monotonic counter in
+    /// `to_structured`. This is intentional: timestamps are only needed at
+    /// export time, not during deserialization.
     #[must_use]
-    pub fn from_events_timed(events: Vec<RunEvent>, timestamps_ms: Vec<u64>) -> Self {
+    pub(crate) fn from_events_timed(events: Vec<RunEvent>, timestamps_ms: Vec<u64>) -> Self {
+        debug_assert_eq!(
+            events.len(),
+            timestamps_ms.len(),
+            "from_events_timed: events and timestamps_ms must have the same length"
+        );
         Self {
             events,
             timestamps_ms,

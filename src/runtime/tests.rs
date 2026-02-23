@@ -681,6 +681,42 @@ fn write_to_file_records_provided_timestamps() {
     );
 }
 
+// #352: from_events (no timestamps) must fall back to (i * 100) monotonic counter.
+#[test]
+fn structured_trace_fallback_uses_monotonic_counter() {
+    let events = vec![
+        RunEvent::LlmCall {
+            model: "gpt-4o".into(),
+            input_tokens: 10,
+            output_tokens: 5,
+            cost_cents: 1,
+        },
+        RunEvent::LlmCall {
+            model: "gpt-4o".into(),
+            input_tokens: 10,
+            output_tokens: 5,
+            cost_cents: 1,
+        },
+        RunEvent::LlmCall {
+            model: "gpt-4o".into(),
+            input_tokens: 10,
+            output_tokens: 5,
+            cost_cents: 1,
+        },
+    ];
+    let trace = RunTrace::from_events(events);
+    let structured = trace.to_structured("a", "t0", "t1", 300);
+    assert_eq!(structured.events[0].offset_ms, 0, "index 0 → 0 * 100 = 0");
+    assert_eq!(
+        structured.events[1].offset_ms, 100,
+        "index 1 → 1 * 100 = 100"
+    );
+    assert_eq!(
+        structured.events[2].offset_ms, 200,
+        "index 2 → 2 * 100 = 200"
+    );
+}
+
 // #352: to_structured must use real event timestamps, not fake (i * 100) offsets.
 #[test]
 fn structured_trace_uses_real_timestamps() {

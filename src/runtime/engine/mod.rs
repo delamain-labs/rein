@@ -105,8 +105,11 @@ struct RunState {
 impl RunState {
     /// Push an event and record its real wall-clock offset from run start.
     fn push(&mut self, event: RunEvent) {
-        self.event_timestamps_ms
-            .push(u64::try_from(self.start.elapsed().as_millis()).unwrap_or(u64::MAX));
+        // Saturate at u64::MAX (~585 million years). We clamp before casting so
+        // the truncation is intentional and the value is always representable.
+        #[allow(clippy::cast_possible_truncation)]
+        let elapsed_ms = self.start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+        self.event_timestamps_ms.push(elapsed_ms);
         self.events.push(event);
     }
 }
@@ -328,28 +331,38 @@ impl<'a> AgentEngine<'a> {
 
     /// Check budget and record the cost. Returns `Err` if exceeded.
     fn check_budget(&self, state: &mut RunState, cost: u64) -> Result<(), RunError> {
-        let budget_event = if let Some(ref mut tracker) = state.budget {
+        /// Outcome of a single budget check, carrying the event to emit.
+        enum BudgetOutcome {
+            /// Budget updated and still within limit.
+            WithinLimit(RunEvent),
+            /// Budget exceeded; emit this event then abort.
+            Exceeded(RunEvent),
+            /// No budget configured; nothing to do.
+            NoBudget,
+        }
+
+        let outcome = if let Some(ref mut tracker) = state.budget {
             if tracker.record_usage(cost).is_err() {
-                Some(Err(RunEvent::BudgetUpdate {
+                BudgetOutcome::Exceeded(RunEvent::BudgetUpdate {
                     spent_cents: state.total_cost_cents,
                     limit_cents: self.config.budget_cents,
-                }))
+                })
             } else {
-                Some(Ok(RunEvent::BudgetUpdate {
+                BudgetOutcome::WithinLimit(RunEvent::BudgetUpdate {
                     spent_cents: tracker.spent_cents(),
                     limit_cents: tracker.limit_cents(),
-                }))
+                })
             }
         } else {
-            None
+            BudgetOutcome::NoBudget
         };
-        match budget_event {
-            Some(Err(event)) => {
+        match outcome {
+            BudgetOutcome::Exceeded(event) => {
                 state.push(event);
                 return Err(RunError::BudgetExceeded);
             }
-            Some(Ok(event)) => state.push(event),
-            None => {}
+            BudgetOutcome::WithinLimit(event) => state.push(event),
+            BudgetOutcome::NoBudget => {}
         }
         Ok(())
     }
