@@ -2255,3 +2255,42 @@ async fn failed_step_output_inserted_into_outputs_map() {
     let step_b_r = results.iter().find(|r| r.stage_name == "step_b").unwrap();
     assert_eq!(step_b_r.agent_name, "<skipped>");
 }
+
+/// `CyclicDependency` is a hard error — `run_steps` must return `Err` and
+/// not attempt to execute any step when the dependency graph has a cycle.
+#[tokio::test]
+async fn cyclic_dependency_is_hard_error() {
+    let file = parse_file(r#"agent bot { model: openai }"#);
+
+    // step_a → step_b → step_a (cycle)
+    let step_a = make_step("step_a", "bot", vec!["step_b"]);
+    let step_b = make_step("step_b", "bot", vec!["step_a"]);
+
+    let workflow = make_workflow_steps("cyclic", "start", vec![step_a, step_b]);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+    };
+
+    let err = run_steps(&workflow, &ctx)
+        .await
+        .expect_err("cyclic dependency must return Err");
+
+    assert!(
+        matches!(
+            err,
+            crate::runtime::workflow::WorkflowError::CyclicDependency(_)
+        ),
+        "expected CyclicDependency hard error, got: {err:?}"
+    );
+    assert!(
+        err.is_hard_error(),
+        "CyclicDependency must be classified as a hard error"
+    );
+}

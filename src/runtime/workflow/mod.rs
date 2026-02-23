@@ -481,6 +481,18 @@ enum StepOutcome {
     HardError(WorkflowError),
 }
 
+/// Mutable loop state threaded through `run_steps` and `apply_step_result`.
+///
+/// Bundles the four collections that are mutated on every iteration so
+/// `apply_step_result` takes a single `&mut StepLoopState` rather than four
+/// separate `&mut` parameters.
+struct StepLoopState {
+    outputs: std::collections::HashMap<String, String>,
+    failed_steps: std::collections::HashSet<String>,
+    events: Vec<super::RunEvent>,
+    results: Vec<StageResult>,
+}
+
 /// Process the result of a single step execution, updating shared loop state.
 ///
 /// Extracts the success/failure logic from the `run_steps` loop so that the
@@ -489,14 +501,11 @@ fn apply_step_result(
     step: &crate::ast::StepDef,
     step_result: Result<(StageResult, Vec<super::RunEvent>), WorkflowError>,
     workflow: &WorkflowDef,
-    outputs: &mut std::collections::HashMap<String, String>,
-    failed_steps: &mut std::collections::HashSet<String>,
-    events: &mut Vec<super::RunEvent>,
-    results: &mut Vec<StageResult>,
+    state: &mut StepLoopState,
 ) -> StepOutcome {
     match step_result {
         Ok((result, step_events)) => {
-            events.extend(step_events);
+            state.events.extend(step_events);
 
             // Check workflow-level auto_resolve conditions after each step.
             let resolved = if let Some(ref ar) = workflow.auto_resolve {
@@ -505,18 +514,20 @@ fn apply_step_result(
                 None
             };
 
-            outputs.insert(step.name.clone(), result.output.clone());
+            state
+                .outputs
+                .insert(step.name.clone(), result.output.clone());
 
             if let Some(ref condition) = resolved {
-                events.push(super::RunEvent::AutoResolved {
+                state.events.push(super::RunEvent::AutoResolved {
                     step: step.name.clone(),
                     condition: condition.clone(),
                 });
-                results.push(result);
+                state.results.push(result);
                 return StepOutcome::AutoResolved;
             }
 
-            results.push(result);
+            state.results.push(result);
             StepOutcome::Continue
         }
         Err(e) => {
@@ -526,15 +537,15 @@ fn apply_step_result(
                 return StepOutcome::HardError(e);
             }
             let reason = e.to_string();
-            failed_steps.insert(step.name.clone());
+            state.failed_steps.insert(step.name.clone());
             // Insert an empty output so downstream steps that `filter_map`
             // over `outputs` can observe the gap explicitly.
-            outputs.insert(step.name.clone(), String::new());
-            events.push(super::RunEvent::StepFailed {
+            state.outputs.insert(step.name.clone(), String::new());
+            state.events.push(super::RunEvent::StepFailed {
                 step: step.name.clone(),
                 reason,
             });
-            results.push(StageResult {
+            state.results.push(StageResult {
                 stage_name: step.name.clone(),
                 agent_name: "<failed>".to_string(),
                 output: String::new(),
@@ -572,28 +583,30 @@ pub async fn run_steps(
     let ordered = resolve_dag(&workflow.steps)?;
     let trigger_input = format!("Trigger: {}", workflow.trigger);
 
-    let mut outputs: HashMap<String, String> = HashMap::new();
-    // Track steps that failed so their dependents can be skipped.
-    let mut failed_steps: HashSet<String> = HashSet::new();
-    let mut results = Vec::new();
-    let mut events: Vec<super::RunEvent> = Vec::new();
+    let mut state = StepLoopState {
+        outputs: HashMap::new(),
+        // Track steps that failed so their dependents can be skipped.
+        failed_steps: HashSet::new(),
+        results: Vec::new(),
+        events: Vec::new(),
+    };
 
     for (index, step) in ordered.into_iter().enumerate() {
         // Skip this step if any declared dependency failed.
         if let Some(failed_dep) = step
             .depends_on
             .iter()
-            .find(|dep| failed_steps.contains(*dep))
+            .find(|dep| state.failed_steps.contains(*dep))
         {
             let reason = format!("dependency '{failed_dep}' failed");
-            events.push(super::RunEvent::StepSkipped {
+            state.events.push(super::RunEvent::StepSkipped {
                 step: step.name.clone(),
                 reason,
             });
             // Insert empty output so downstream steps that `filter_map` over
             // `outputs` can observe the skipped entry explicitly.
-            outputs.insert(step.name.clone(), String::new());
-            results.push(StageResult {
+            state.outputs.insert(step.name.clone(), String::new());
+            state.results.push(StageResult {
                 stage_name: step.name.clone(),
                 agent_name: "<skipped>".to_string(),
                 output: String::new(),
@@ -601,7 +614,7 @@ pub async fn run_steps(
                 tokens: 0,
             });
             // Also mark this step as failed so its own dependents are skipped.
-            failed_steps.insert(step.name.clone());
+            state.failed_steps.insert(step.name.clone());
             continue;
         }
 
@@ -615,7 +628,7 @@ pub async fn run_steps(
         } else {
             step.depends_on
                 .iter()
-                .filter_map(|dep| outputs.get(dep))
+                .filter_map(|dep| state.outputs.get(dep))
                 .cloned()
                 .collect::<Vec<_>>()
                 .join("\n")
@@ -655,22 +668,14 @@ pub async fn run_steps(
                 })
         };
 
-        match apply_step_result(
-            step,
-            step_result,
-            workflow,
-            &mut outputs,
-            &mut failed_steps,
-            &mut events,
-            &mut results,
-        ) {
+        match apply_step_result(step, step_result, workflow, &mut state) {
             StepOutcome::Continue => {}
             StepOutcome::AutoResolved => break,
             StepOutcome::HardError(e) => return Err(e),
         }
     }
 
-    Ok((results, events))
+    Ok((state.results, state.events))
 }
 
 /// Execute a step once per item in a JSON array extracted from the input.
