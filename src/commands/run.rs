@@ -155,6 +155,7 @@ fn run_workflow_mode(
         tool_defs: &[],
         config: &wf_config,
         approval_handler,
+        audit_log: None,
     };
     let start = Instant::now();
     let wf_result =

@@ -29,6 +29,9 @@ pub struct WorkflowContext<'a> {
     pub tool_defs: &'a [ToolDef],
     pub config: &'a RunConfig,
     pub approval_handler: Option<Arc<dyn ApprovalHandler>>,
+    /// When set, approval decisions are wrapped with `AuditingApprovalHandler`
+    /// so every `ApprovalRequested` / `ApprovalResolved` event is persisted.
+    pub audit_log: Option<Arc<crate::runtime::audit::AuditLog>>,
 }
 
 /// The result of a completed workflow run.
@@ -377,10 +380,15 @@ pub async fn run_step(
                 .request_approval(&step.name, input, approval_def)
                 .await
         } else {
-            let handler = crate::runtime::approval::resolve_approval_handler(approval_def);
-            handler
-                .request_approval(&step.name, input, approval_def)
-                .await
+            let base = crate::runtime::approval::resolve_approval_handler(approval_def);
+            if let Some(log) = &ctx.audit_log {
+                crate::runtime::approval::AuditingApprovalHandler::new(base, Arc::clone(log))
+                    .with_agent(step.agent.clone())
+                    .request_approval(&step.name, input, approval_def)
+                    .await
+            } else {
+                base.request_approval(&step.name, input, approval_def).await
+            }
         };
         match status {
             ApprovalStatus::Approved => {}

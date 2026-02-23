@@ -254,6 +254,20 @@ impl ApprovalHandler for AutoTimedOutHandler {
     }
 }
 
+// Handler that always returns Pending, for testing the async-deferred path.
+struct AutoPendingHandler;
+#[async_trait::async_trait]
+impl ApprovalHandler for AutoPendingHandler {
+    async fn request_approval(
+        &self,
+        _step_name: &str,
+        _agent_output: &str,
+        _approval: &crate::ast::ApprovalDef,
+    ) -> ApprovalStatus {
+        ApprovalStatus::Pending
+    }
+}
+
 // --- #358 Approval Audit Events ---
 
 #[tokio::test]
@@ -313,6 +327,7 @@ async fn auditing_handler_records_rejected_decision() {
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[1].kind, AuditKind::ApprovalResolved);
     assert_eq!(entries[1].metadata["decision"], "rejected");
+    assert_eq!(entries[1].metadata["reason"], "policy violation");
 }
 
 #[tokio::test]
@@ -357,4 +372,54 @@ async fn auditing_handler_records_timed_out_decision() {
         entries[1].metadata["decision"], "timed_out",
         "timed_out decision must be recorded in metadata"
     );
+}
+
+#[tokio::test]
+async fn auditing_handler_records_pending_decision() {
+    use crate::runtime::audit::{AuditKind, AuditLog};
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
+
+    let handler = AuditingApprovalHandler::new(AutoPendingHandler, Arc::clone(&log));
+    let approval = make_approval_for_channel("cli", "");
+    let status = handler
+        .request_approval("async-step", "Agent output", &approval)
+        .await;
+
+    assert_eq!(status, ApprovalStatus::Pending);
+
+    let entries = log.read_all().unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[1].kind, AuditKind::ApprovalResolved);
+    assert_eq!(
+        entries[1].metadata["decision"], "pending",
+        "pending decision must be recorded in metadata"
+    );
+}
+
+#[tokio::test]
+async fn auditing_handler_populates_workflow_and_agent_context() {
+    use crate::runtime::audit::AuditLog;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
+
+    let handler = AuditingApprovalHandler::new(AutoApproveHandler, Arc::clone(&log))
+        .with_workflow("deploy-workflow")
+        .with_agent("deploy-bot");
+    let approval = make_approval_for_channel("cli", "");
+    handler
+        .request_approval("release", "output", &approval)
+        .await;
+
+    let entries = log.read_all().unwrap();
+    assert_eq!(entries[0].workflow.as_deref(), Some("deploy-workflow"));
+    assert_eq!(entries[0].agent.as_deref(), Some("deploy-bot"));
+    assert_eq!(entries[1].workflow.as_deref(), Some("deploy-workflow"));
+    assert_eq!(entries[1].agent.as_deref(), Some("deploy-bot"));
 }

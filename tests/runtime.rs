@@ -297,6 +297,7 @@ async fn integration_sequential_workflow() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
     };
 
     provider.push_response(simple_response("Category: billing. Priority: high."));
@@ -330,6 +331,7 @@ async fn integration_parallel_workflow() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
     };
 
     provider.push_response(simple_response("Sentiment: positive"));

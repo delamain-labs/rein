@@ -274,6 +274,21 @@ impl ApprovalHandler for SlackApprovalHandler {
     }
 }
 
+/// Blanket impl so `AuditingApprovalHandler<Box<dyn ApprovalHandler>>` works.
+#[async_trait::async_trait]
+impl ApprovalHandler for Box<dyn ApprovalHandler> {
+    async fn request_approval(
+        &self,
+        step_name: &str,
+        agent_output: &str,
+        approval: &ApprovalDef,
+    ) -> ApprovalStatus {
+        (**self)
+            .request_approval(step_name, agent_output, approval)
+            .await
+    }
+}
+
 /// Wraps any `ApprovalHandler` and emits `ApprovalRequested` / `ApprovalResolved`
 /// audit entries before and after each approval decision.
 ///
@@ -282,12 +297,33 @@ impl ApprovalHandler for SlackApprovalHandler {
 pub struct AuditingApprovalHandler<H> {
     inner: H,
     log: Arc<AuditLog>,
+    workflow_name: Option<String>,
+    agent_name: Option<String>,
 }
 
 impl<H> AuditingApprovalHandler<H> {
     #[must_use]
     pub fn new(inner: H, log: Arc<AuditLog>) -> Self {
-        Self { inner, log }
+        Self {
+            inner,
+            log,
+            workflow_name: None,
+            agent_name: None,
+        }
+    }
+
+    /// Attach a workflow name to every audit entry emitted by this handler.
+    #[must_use]
+    pub fn with_workflow(mut self, name: impl Into<String>) -> Self {
+        self.workflow_name = Some(name.into());
+        self
+    }
+
+    /// Attach an agent name to every audit entry emitted by this handler.
+    #[must_use]
+    pub fn with_agent(mut self, name: impl Into<String>) -> Self {
+        self.agent_name = Some(name.into());
+        self
     }
 }
 
@@ -307,6 +343,8 @@ impl<H: ApprovalHandler> ApprovalHandler for AuditingApprovalHandler<H> {
             format!("Approval requested for step '{step_name}'"),
         );
         requested.step = Some(step_name.to_string());
+        requested.workflow = self.workflow_name.clone();
+        requested.agent = self.agent_name.clone();
         requested.metadata = serde_json::json!({
             "channel": approval.channel,
             "timeout": approval.timeout,
@@ -349,6 +387,8 @@ impl<H: ApprovalHandler> ApprovalHandler for AuditingApprovalHandler<H> {
             format!("Approval resolved for step '{step_name}': {decision}"),
         );
         resolved.step = Some(step_name.to_string());
+        resolved.workflow.clone_from(&self.workflow_name);
+        resolved.agent.clone_from(&self.agent_name);
         resolved.metadata = serde_json::json!({
             "channel": approval.channel,
             "decision": decision,
