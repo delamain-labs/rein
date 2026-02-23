@@ -72,8 +72,13 @@ fn vault_falls_back_to_env() {
     };
     let resolver = SecretResolver::from_def(&def);
     let resolved = resolver.resolve_all().unwrap();
-    assert_eq!(resolved["db_pass"].value, "vault-value");
+    // Cleanup before assert so env var is removed even if assertion panics.
     unsafe { std::env::remove_var("VAULT_SECRET_REIN_KEY") };
+    assert_eq!(resolved["db_pass"].value, "vault-value");
+    assert_eq!(
+        resolved["db_pass"].source,
+        "vault(secret/rein/key)->env(VAULT_SECRET_REIN_KEY)"
+    );
 }
 
 #[test]
@@ -156,14 +161,16 @@ fn vault_fallback_source_indicates_env_fallback() {
     };
     let resolver = SecretResolver::from_def(&def);
     let resolved = resolver.resolve_all().unwrap();
-    // The source field must indicate that a real vault path was requested but
-    // the value came from an env var, so operators can detect the fallback.
-    assert!(
-        resolved["db_pass"].source.contains("env"),
-        "source must indicate env fallback, got: {}",
-        resolved["db_pass"].source
-    );
+    // Cleanup before assert so env var is removed even if assertion panics.
     unsafe { std::env::remove_var("VAULT_SECRET_REIN_KEY") };
+    // The source field must encode the composite vault(path)->env(KEY) format
+    // so operators can reconstruct exactly which vault path was attempted and
+    // which env var was used as fallback.
+    assert_eq!(
+        resolved["db_pass"].source,
+        "vault(secret/rein/key)->env(VAULT_SECRET_REIN_KEY)",
+        "source must be composite vault->env format"
+    );
 }
 
 #[test]
