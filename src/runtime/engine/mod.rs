@@ -527,7 +527,7 @@ impl<'a> AgentEngine<'a> {
 /// Returns `true` if the event contributes to any of the requested metric categories.
 ///
 /// Metric names:
-/// - `"cost"` → `LlmCall`, `BudgetUpdate`
+/// - `"cost"` → `LlmCall`, `BudgetUpdate`, `RunComplete`
 /// - `"tool_calls"` → `ToolCallAttempt`, `ToolCallResult`
 /// - `"latency"` → `LlmCall`
 /// - `"guardrails"` → `GuardrailTriggered`

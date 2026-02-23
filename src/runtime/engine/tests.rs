@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use serde_json::json;
 
@@ -699,10 +700,12 @@ fn event_matches_unknown_metric_returns_false() {
 }
 
 #[test]
-fn event_matches_unmapped_variants_always_return_false() {
-    // Variants not mapped to any metric must return false for all known metric names
-    // to avoid leaking internal events into filtered OTEL exports.
-    // Note: RunComplete IS mapped to "cost" — tested separately below.
+// Covers variants that are intentionally NOT mapped to any metric category.
+// These events must return false for every known metric name to prevent
+// internal runtime events from leaking into filtered OTEL exports.
+// Note: RunComplete IS mapped to "cost" and is excluded from this test —
+// it is covered by `run_complete_matches_cost_metric` below.
+fn unmapped_variants_return_false_for_all_known_metrics() {
     let all_metrics = ["cost", "tool_calls", "latency", "guardrails"];
     let cb = RunEvent::CircuitBreakerTripped {
         name: "cb".to_string(),
@@ -733,8 +736,6 @@ fn run_complete_matches_cost_metric() {
 
 // #335: Verify secrets injected via with_secrets() reach executor.execute() ctx.
 // Uses a SecretCapturingExecutor that records the last secrets map seen.
-use std::sync::Mutex;
-
 struct SecretCapturingExecutor {
     captured: Mutex<Option<HashMap<String, String>>>,
     response: String,
