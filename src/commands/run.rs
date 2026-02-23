@@ -1,6 +1,8 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use rein::runtime::workflow::StageResult;
+
 pub fn run_agent(
     path: &std::path::Path,
     message: Option<&str>,
@@ -201,7 +203,16 @@ fn run_workflow_mode(
                     "warning: {failed_count} step(s) failed, {skipped_count} skipped (see trace below)"
                 );
             }
-            if result.final_output.is_empty() && (failed_count > 0 || skipped_count > 0) {
+            // Show the "all steps failed" message only when no step actually
+            // ran to completion. A workflow where the terminal step produces
+            // empty output (a valid LLM response) and an earlier step failed
+            // must still print the real (empty) output, not the misleading
+            // sentinel message.
+            let has_real_execution = result
+                .stage_results
+                .iter()
+                .any(StageResult::is_real_execution);
+            if !has_real_execution && (failed_count > 0 || skipped_count > 0) {
                 eprintln!("Final output: (none — all steps failed or were skipped)");
             } else {
                 eprintln!("Final output: {}", result.final_output);
