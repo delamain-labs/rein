@@ -499,8 +499,12 @@ pub enum RunError {
     CircuitBreakerOpen,
     GuardrailBlocked,
     EvalFailed,
-    /// Provider call exceeded `stage_timeout_secs`.
-    Timeout,
+    /// Provider call exceeded `stage_timeout_secs`. Contains events emitted
+    /// up to (and including) the `StageTimeout` event so callers can inspect
+    /// the partial trace (e.g. in tests or structured error reporting).
+    Timeout {
+        partial_trace: RunTrace,
+    },
 }
 
 #[cfg(test)]

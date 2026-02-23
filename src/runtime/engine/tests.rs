@@ -906,6 +906,7 @@ async fn capped_tool_allowed_within_cap() {
 
 // #355: stage_timeout_secs must cause engine.run() to return RunError::Timeout
 // when the provider does not respond within the configured window.
+// The partial trace in the error must contain a StageTimeout event.
 #[tokio::test(start_paused = true)]
 async fn stage_timeout_fires_when_provider_hangs() {
     use crate::runtime::provider::{ChatResponse, Message, ProviderError, ToolDef};
@@ -946,8 +947,27 @@ async fn stage_timeout_fires_when_provider_hangs() {
     // waiting on timers. The 5-second timeout will fire automatically.
     let result = engine.run("hello").await;
     assert!(
-        matches!(result, Err(RunError::Timeout)),
+        matches!(result, Err(RunError::Timeout { .. })),
         "expected RunError::Timeout, got: {:?}",
         result
+    );
+
+    // Verify that the partial trace contains the StageTimeout event.
+    let Err(RunError::Timeout { partial_trace }) = result else {
+        unreachable!()
+    };
+    let has_timeout_event = partial_trace.events.iter().any(|e| {
+        matches!(
+            e,
+            RunEvent::StageTimeout {
+                turn: 0,
+                timeout_secs: 5
+            }
+        )
+    });
+    assert!(
+        has_timeout_event,
+        "partial_trace must contain a StageTimeout event; got: {:?}",
+        partial_trace.events
     );
 }
