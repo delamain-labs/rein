@@ -42,6 +42,8 @@ pub struct WorkflowResult {
     pub total_cost_cents: u64,
     /// Total tokens across all stages.
     pub total_tokens: u64,
+    /// Workflow-level trace events (fallback, `for_each`, `auto_resolve`).
+    pub events: Vec<super::RunEvent>,
 }
 
 /// The result of a single stage within a workflow.
@@ -155,6 +157,7 @@ pub(super) fn build_result(
         final_output,
         total_cost_cents: total_cost,
         total_tokens,
+        events: Vec::new(),
     }
 }
 
@@ -377,22 +380,23 @@ pub async fn run_step(
 /// Execute a step, running its fallback if the primary step fails.
 ///
 /// On primary failure, if `step.fallback` is set, the fallback step is executed
-/// instead. A `RunEvent::StepFallback` event is not yet wired into a unified trace
-/// (future work) but the behavior is correct.
+/// instead. Returns `(result, fallback_used)` — callers should emit a
+/// `RunEvent::StepFallback` when `fallback_used` is `true`.
 ///
 /// # Errors
 /// Returns `WorkflowError` if both the primary and fallback steps fail,
 /// or if the primary fails and no fallback is defined.
-pub async fn run_step_with_fallback(
+pub(crate) async fn run_step_with_fallback(
     step: &crate::ast::StepDef,
     input: &str,
     ctx: &WorkflowContext<'_>,
-) -> Result<StageResult, WorkflowError> {
+) -> Result<(StageResult, bool), WorkflowError> {
     match run_step(step, input, ctx).await {
-        Ok(result) => Ok(result),
+        Ok(result) => Ok((result, false)),
         Err(e) => {
             if let Some(ref fallback) = step.fallback {
-                run_step(fallback, input, ctx).await
+                let fallback_result = run_step(fallback, input, ctx).await?;
+                Ok((fallback_result, true))
             } else {
                 Err(e)
             }
@@ -415,7 +419,7 @@ pub async fn run_step_with_fallback(
 pub async fn run_steps(
     workflow: &WorkflowDef,
     ctx: &WorkflowContext<'_>,
-) -> Result<Vec<StageResult>, WorkflowError> {
+) -> Result<(Vec<StageResult>, Vec<super::RunEvent>), WorkflowError> {
     use std::collections::HashMap;
 
     let ordered = resolve_dag(&workflow.steps)?;
@@ -423,6 +427,7 @@ pub async fn run_steps(
 
     let mut outputs: HashMap<String, String> = HashMap::new();
     let mut results = Vec::new();
+    let mut events: Vec<super::RunEvent> = Vec::new();
 
     for step in ordered {
         let input = if step.depends_on.is_empty() {
@@ -445,11 +450,25 @@ pub async fn run_steps(
             input.clone()
         };
 
-        let result = if let Some(ref key) = step.for_each {
+        let (result, step_events) = if let Some(ref key) = step.for_each {
             run_step_for_each(step, &for_each_input, key, ctx).await?
         } else {
-            run_step_with_fallback(step, &input, ctx).await?
+            let (r, fallback_used) = run_step_with_fallback(step, &input, ctx).await?;
+            let mut evts = Vec::new();
+            if fallback_used {
+                let fallback_name = step
+                    .fallback
+                    .as_ref()
+                    .map_or_else(|| "unknown".to_string(), |f| f.name.clone());
+                evts.push(super::RunEvent::StepFallback {
+                    step: step.name.clone(),
+                    fallback_step: fallback_name,
+                });
+            }
+            (r, evts)
         };
+
+        events.extend(step_events);
 
         // Check workflow-level auto_resolve conditions after each step.
         let resolved = if let Some(ref ar) = workflow.auto_resolve {
@@ -459,27 +478,40 @@ pub async fn run_steps(
         };
 
         outputs.insert(step.name.clone(), result.output.clone());
-        results.push(result);
 
-        if resolved.is_some() {
+        if let Some(ref condition) = resolved {
+            events.push(super::RunEvent::AutoResolved {
+                step: step.name.clone(),
+                condition: condition.clone(),
+            });
+            results.push(result);
             break;
         }
+
+        results.push(result);
     }
 
-    Ok(results)
+    Ok((results, events))
 }
 
 /// Execute a step once per item in a JSON array extracted from the input.
 ///
 /// Parses `input` as JSON, extracts the array at `collection_key`, then runs
-/// the step for each element. Results are joined with newlines into a single
-/// `StageResult`.
+/// the step for each element. Iteration outputs are aggregated as a JSON array
+/// string (to avoid ambiguity with newlines in LLM output).
+///
+/// If the JSON key is missing or the input is not valid JSON, the step is
+/// executed once with the full input. This is intentional: callers with a
+/// JSON trigger will get iteration; callers with plain text get a single pass.
+///
+/// Returns `(StageResult, Vec<RunEvent>)`. The caller is responsible for
+/// inserting the returned events into the workflow trace.
 async fn run_step_for_each(
     step: &crate::ast::StepDef,
     input: &str,
     collection_key: &str,
     ctx: &WorkflowContext<'_>,
-) -> Result<StageResult, WorkflowError> {
+) -> Result<(StageResult, Vec<super::RunEvent>), WorkflowError> {
     // Try to parse the trigger as JSON and extract the array.
     let items: Vec<String> = serde_json::from_str::<serde_json::Value>(input)
         .ok()
@@ -492,35 +524,77 @@ async fn run_step_for_each(
         })
         .unwrap_or_default();
 
-    // If the key wasn't found or empty, fall back to running the step once with the full input.
+    // If the key wasn't found or empty, fall back to running the step once.
     if items.is_empty() {
-        return run_step_with_fallback(step, input, ctx).await;
+        let (result, fallback_used) = run_step_with_fallback(step, input, ctx).await?;
+        let mut evts = Vec::new();
+        if fallback_used {
+            let fallback_name = step
+                .fallback
+                .as_ref()
+                .map_or_else(|| "unknown".to_string(), |f| f.name.clone());
+            evts.push(super::RunEvent::StepFallback {
+                step: step.name.clone(),
+                fallback_step: fallback_name,
+            });
+        }
+        return Ok((result, evts));
     }
 
     let total = items.len();
-    let mut outputs = Vec::with_capacity(total);
+    let mut outputs: Vec<serde_json::Value> = Vec::with_capacity(total);
     let mut total_cost = 0u64;
     let mut total_tokens = 0u64;
+    let mut events: Vec<super::RunEvent> = Vec::new();
 
-    for item in &items {
-        let result = run_step_with_fallback(step, item, ctx).await?;
+    for (index, item) in items.iter().enumerate() {
+        let (result, fallback_used) = run_step_with_fallback(step, item, ctx).await?;
         total_cost += result.cost_cents;
         total_tokens += result.tokens;
-        outputs.push(result.output);
+        outputs.push(serde_json::Value::String(result.output));
+
+        events.push(super::RunEvent::ForEachIteration {
+            step: step.name.clone(),
+            index,
+            total,
+        });
+
+        if fallback_used {
+            let fallback_name = step
+                .fallback
+                .as_ref()
+                .map_or_else(|| "unknown".to_string(), |f| f.name.clone());
+            events.push(super::RunEvent::StepFallback {
+                step: step.name.clone(),
+                fallback_step: fallback_name,
+            });
+        }
     }
 
-    Ok(StageResult {
-        stage_name: step.name.clone(),
-        agent_name: step.agent.clone(),
-        output: outputs.join("\n"),
-        cost_cents: total_cost,
-        tokens: total_tokens,
-    })
+    // Aggregate outputs as a JSON array to avoid newline ambiguity.
+    let aggregated = serde_json::to_string(&serde_json::Value::Array(outputs)).unwrap_or_default();
+
+    Ok((
+        StageResult {
+            stage_name: step.name.clone(),
+            agent_name: step.agent.clone(),
+            output: aggregated,
+            cost_cents: total_cost,
+            tokens: total_tokens,
+        },
+        events,
+    ))
 }
 
 /// Evaluate `auto_resolve` conditions against a step's output (parsed as JSON).
 ///
-/// Returns a description of the matched condition, or `None` if conditions are not met.
+/// **AND semantics**: ALL conditions in the block must be satisfied. The first
+/// failing condition short-circuits to `None`. There is no OR combinator at the
+/// block level; add multiple `auto_resolve` blocks at the workflow level if OR
+/// behavior is needed (not yet supported — tracked as a future issue).
+///
+/// Returns a human-readable description of the matched condition set, or `None`
+/// if any condition is not met or the output cannot be parsed as JSON.
 fn auto_resolve_matches(output: &str, ar: &crate::ast::AutoResolveBlock) -> Option<String> {
     use crate::ast::{AutoResolveCondition, CompareOp};
 
@@ -579,13 +653,14 @@ pub async fn run_workflow(
 
     // Execute step blocks if present
     if !workflow.steps.is_empty() {
-        let step_results = run_steps(workflow, ctx).await?;
+        let (step_results, step_events) = run_steps(workflow, ctx).await?;
         for sr in step_results {
             result.total_cost_cents += sr.cost_cents;
             result.total_tokens += sr.tokens;
             result.final_output.clone_from(&sr.output);
             result.stage_results.push(sr);
         }
+        result.events.extend(step_events);
     }
 
     Ok(result)

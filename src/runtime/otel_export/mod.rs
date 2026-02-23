@@ -339,8 +339,10 @@ fn event_to_span_data(event: &super::RunEvent) -> (String, Vec<OtelAttribute>) {
             "rein.step.for_each".to_string(),
             vec![
                 attr_str("rein.step.name", step),
-                attr_int("rein.step.index", i64::try_from(*index).unwrap_or(i64::MAX)),
-                attr_int("rein.step.total", i64::try_from(*total).unwrap_or(i64::MAX)),
+                // -1 signals "index unknown / overflow" rather than i64::MAX
+                // which would be indistinguishable from a legitimate large index.
+                attr_int("rein.step.index", i64::try_from(*index).unwrap_or(-1)),
+                attr_int("rein.step.total", i64::try_from(*total).unwrap_or(-1)),
             ],
         ),
         RunEvent::AutoResolved { step, condition } => (

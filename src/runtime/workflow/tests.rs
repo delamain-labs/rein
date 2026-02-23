@@ -1417,9 +1417,16 @@ async fn step_fallback_runs_on_primary_failure() {
         approval_handler: None,
     };
 
-    let results = run_steps(&workflow, &ctx).await.expect("should succeed");
+    let (results, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].output, "fallback result");
+    // StepFallback event must be emitted when fallback executes.
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, crate::runtime::RunEvent::StepFallback { .. })),
+        "expected StepFallback event"
+    );
 }
 
 #[tokio::test]
@@ -1499,15 +1506,22 @@ async fn step_for_each_iterates_over_array() {
         ..workflow
     };
 
-    let results = run_steps(&workflow_with_trigger, &ctx)
+    let (results, events) = run_steps(&workflow_with_trigger, &ctx)
         .await
         .expect("should succeed");
-    // One aggregated StageResult per for_each step with all iteration outputs joined.
+    // One aggregated StageResult per for_each step with outputs as a JSON array.
     assert_eq!(results.len(), 1, "one result per for_each step");
     let output = &results[0].output;
+    // Outputs are serialized as a JSON array to avoid newline ambiguity.
     assert!(output.contains("processed a"), "missing iteration 0");
     assert!(output.contains("processed b"), "missing iteration 1");
     assert!(output.contains("processed c"), "missing iteration 2");
+    // One ForEachIteration event per item.
+    let iter_events: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, crate::runtime::RunEvent::ForEachIteration { .. }))
+        .collect();
+    assert_eq!(iter_events.len(), 3, "expected 3 ForEachIteration events");
 }
 
 #[tokio::test]
@@ -1560,10 +1574,17 @@ async fn workflow_auto_resolve_short_circuits_on_condition_met() {
         approval_handler: None,
     };
 
-    let results = run_steps(&workflow, &ctx).await.expect("should succeed");
+    let (results, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
     // Only the first step ran; second was short-circuited.
     assert_eq!(results.len(), 1, "should stop after auto_resolve");
     assert_eq!(results[0].stage_name, "first");
+    // AutoResolved event must be emitted.
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, crate::runtime::RunEvent::AutoResolved { .. })),
+        "expected AutoResolved event"
+    );
 }
 
 #[tokio::test]
@@ -1614,10 +1635,16 @@ async fn workflow_auto_resolve_does_not_short_circuit_when_condition_unmet() {
         approval_handler: None,
     };
 
-    let results = run_steps(&workflow, &ctx).await.expect("should succeed");
+    let (results, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
     assert_eq!(
         results.len(),
         2,
         "both steps should run when condition unmet"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, crate::runtime::RunEvent::AutoResolved { .. })),
+        "no AutoResolved event should be emitted"
     );
 }

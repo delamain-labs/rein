@@ -219,122 +219,121 @@ impl RunTrace {
     pub fn summary(&self) -> String {
         let mut lines = Vec::new();
         let mut turn = 0_usize;
-
         for event in &self.events {
-            match event {
-                RunEvent::LlmCall {
-                    model,
-                    input_tokens,
-                    output_tokens,
-                    cost_cents,
-                } => {
-                    turn += 1;
-                    lines.push(format!(
-                        "[turn {turn}] LLM call ({model}): {input_tokens} in / {output_tokens} out, {cost_cents}¢"
-                    ));
-                }
-                RunEvent::ToolCallAttempt {
-                    tool,
-                    allowed,
-                    reason,
-                } => {
-                    let status = if *allowed { "✓" } else { "✗" };
-                    let tool_name = format!("{}.{}", tool.namespace, tool.action);
-                    let suffix = reason.as_ref().map_or(String::new(), |r| format!(" ({r})"));
-                    lines.push(format!("  {status} tool: {tool_name}{suffix}"));
-                }
-                RunEvent::ToolCallResult { tool, result } => {
-                    let status = if result.success { "ok" } else { "err" };
-                    let tool_name = format!("{}.{}", tool.namespace, tool.action);
-                    let preview: String = result.output.chars().take(80).collect();
-                    lines.push(format!("  → {tool_name} [{status}]: {preview}"));
-                }
-                RunEvent::BudgetUpdate {
-                    spent_cents,
-                    limit_cents,
-                } => {
-                    lines.push(format!("  budget: {spent_cents}¢ / {limit_cents}¢"));
-                }
-                RunEvent::GuardrailTriggered {
-                    rule,
-                    action,
-                    blocked,
-                } => {
-                    let status = if *blocked { "BLOCKED" } else { "triggered" };
-                    lines.push(format!("  ⚠ guardrail [{status}]: {rule} ({action})"));
-                }
-                RunEvent::CircuitBreakerTripped {
-                    name,
-                    failures,
-                    threshold,
-                } => {
-                    lines.push(format!(
-                        "  🔌 circuit breaker '{name}' tripped ({failures}/{threshold} failures)"
-                    ));
-                }
-                RunEvent::PolicyPromotion { from_tier, to_tier } => {
-                    lines.push(format!("  ⬆ policy: promoted {from_tier} → {to_tier}"));
-                }
-                RunEvent::PolicyDemotion {
-                    from_tier,
-                    to_tier,
-                    reason,
-                } => {
-                    lines.push(format!(
-                        "  ⬇ policy: demoted {from_tier} → {to_tier} ({reason})"
-                    ));
-                }
-                RunEvent::ApprovalRequested {
-                    step,
-                    channel,
-                    status,
-                } => {
-                    lines.push(format!(
-                        "  🛑 approval: step '{step}' via {channel}: {status}"
-                    ));
-                }
-                RunEvent::EvalResult {
-                    metric,
-                    passed,
-                    detail,
-                } => {
-                    let status = if *passed { "✓" } else { "✗" };
-                    lines.push(format!("  {status} eval: {metric}: {detail}"));
-                }
-                RunEvent::RunComplete {
-                    total_cost_cents,
-                    total_tokens,
-                } => {
-                    lines.push(format!(
-                        "Done. {total_tokens} tokens, {total_cost_cents}¢ total."
-                    ));
-                }
-                e => lines.push(format_step_extension_event(e)),
-            }
+            summarize_event(event, &mut lines, &mut turn);
         }
-
         lines.join("\n")
     }
 }
 
-fn format_step_extension_event(event: &RunEvent) -> String {
+/// Format a single `RunEvent` into a human-readable line and push it to `lines`.
+/// `turn` tracks the current LLM call count for display.
+fn summarize_event(event: &RunEvent, lines: &mut Vec<String>, turn: &mut usize) {
     match event {
+        RunEvent::LlmCall {
+            model,
+            input_tokens,
+            output_tokens,
+            cost_cents,
+        } => {
+            *turn += 1;
+            lines.push(format!(
+                "[turn {turn}] LLM call ({model}): {input_tokens} in / {output_tokens} out, {cost_cents}¢"
+            ));
+        }
+        RunEvent::ToolCallAttempt {
+            tool,
+            allowed,
+            reason,
+        } => {
+            let status = if *allowed { "✓" } else { "✗" };
+            let tool_name = format!("{}.{}", tool.namespace, tool.action);
+            let suffix = reason.as_ref().map_or(String::new(), |r| format!(" ({r})"));
+            lines.push(format!("  {status} tool: {tool_name}{suffix}"));
+        }
+        RunEvent::ToolCallResult { tool, result } => {
+            let status = if result.success { "ok" } else { "err" };
+            let tool_name = format!("{}.{}", tool.namespace, tool.action);
+            let preview: String = result.output.chars().take(80).collect();
+            lines.push(format!("  → {tool_name} [{status}]: {preview}"));
+        }
+        RunEvent::BudgetUpdate {
+            spent_cents,
+            limit_cents,
+        } => {
+            lines.push(format!("  budget: {spent_cents}¢ / {limit_cents}¢"));
+        }
+        RunEvent::GuardrailTriggered {
+            rule,
+            action,
+            blocked,
+        } => {
+            let status = if *blocked { "BLOCKED" } else { "triggered" };
+            lines.push(format!("  ⚠ guardrail [{status}]: {rule} ({action})"));
+        }
+        RunEvent::CircuitBreakerTripped {
+            name,
+            failures,
+            threshold,
+        } => {
+            lines.push(format!(
+                "  🔌 circuit breaker '{name}' tripped ({failures}/{threshold} failures)"
+            ));
+        }
+        RunEvent::PolicyPromotion { from_tier, to_tier } => {
+            lines.push(format!("  ⬆ policy: promoted {from_tier} → {to_tier}"));
+        }
+        RunEvent::PolicyDemotion {
+            from_tier,
+            to_tier,
+            reason,
+        } => {
+            lines.push(format!(
+                "  ⬇ policy: demoted {from_tier} → {to_tier} ({reason})"
+            ));
+        }
+        RunEvent::ApprovalRequested {
+            step,
+            channel,
+            status,
+        } => {
+            lines.push(format!(
+                "  🛑 approval: step '{step}' via {channel}: {status}"
+            ));
+        }
+        RunEvent::EvalResult {
+            metric,
+            passed,
+            detail,
+        } => {
+            let status = if *passed { "✓" } else { "✗" };
+            lines.push(format!("  {status} eval: {metric}: {detail}"));
+        }
+        RunEvent::RunComplete {
+            total_cost_cents,
+            total_tokens,
+        } => {
+            lines.push(format!(
+                "Done. {total_tokens} tokens, {total_cost_cents}¢ total."
+            ));
+        }
         RunEvent::StepFallback {
             step,
             fallback_step,
         } => {
-            format!("  ↩ fallback: step '{step}' → '{fallback_step}'")
+            lines.push(format!("  ↩ fallback: step '{step}' → '{fallback_step}'"));
         }
         RunEvent::ForEachIteration { step, index, total } => {
-            format!(
+            lines.push(format!(
                 "  ↻ for each: step '{step}' iteration {}/{total}",
                 index + 1
-            )
+            ));
         }
         RunEvent::AutoResolved { step, condition } => {
-            format!("  ✓ auto resolved after step '{step}': {condition}")
+            lines.push(format!(
+                "  ✓ auto resolved after step '{step}': {condition}"
+            ));
         }
-        _ => String::new(),
     }
 }
 
