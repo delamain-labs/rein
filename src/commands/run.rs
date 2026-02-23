@@ -139,7 +139,10 @@ fn run_workflow_mode(
     executor: &rein::runtime::executor::NoopExecutor,
     budget_cents: u64,
 ) -> i32 {
-    let approval_handler = resolve_approval_handler();
+    // Only inject a global handler when env-var overrides are active (CI/testing).
+    // In normal runs `approval_handler` is `None` so each step resolves its own
+    // handler based on `ApprovalDef.channel` (CLI, Slack, webhook, …).
+    let approval_handler = resolve_env_approval_handler();
     let wf_config = rein::runtime::engine::RunConfig {
         system_prompt: None,
         max_turns: 10,
@@ -151,7 +154,7 @@ fn run_workflow_mode(
         executor,
         tool_defs: &[],
         config: &wf_config,
-        approval_handler: Some(approval_handler),
+        approval_handler,
     };
     let start = Instant::now();
     let wf_result =
@@ -259,15 +262,17 @@ fn resolve_secrets(
     Ok(map)
 }
 
-fn resolve_approval_handler() -> Arc<dyn rein::runtime::approval::ApprovalHandler> {
+/// Return a global approval handler override when an env-var is set, or `None`
+/// to let each workflow step resolve its own handler from `ApprovalDef.channel`.
+fn resolve_env_approval_handler() -> Option<Arc<dyn rein::runtime::approval::ApprovalHandler>> {
     if std::env::var("REIN_AUTO_APPROVE").as_deref() == Ok("1") {
-        Arc::new(rein::runtime::approval::AutoApproveHandler)
+        Some(Arc::new(rein::runtime::approval::AutoApproveHandler))
     } else if std::env::var("REIN_AUTO_REJECT").as_deref() == Ok("1") {
-        Arc::new(rein::runtime::approval::AutoRejectHandler::new(
+        Some(Arc::new(rein::runtime::approval::AutoRejectHandler::new(
             "auto-rejected by REIN_AUTO_REJECT",
-        ))
+        )))
     } else {
-        Arc::new(rein::runtime::approval::CliApprovalHandler)
+        None
     }
 }
 
