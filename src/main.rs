@@ -130,7 +130,8 @@ async fn main() {
             demo,
             otel,
         } => {
-            let exit_code = commands::run::run_agent(&file, message.as_deref(), dry_run, demo, otel);
+            let exit_code =
+                commands::run::run_agent(&file, message.as_deref(), dry_run, demo, otel);
             process::exit(exit_code);
         }
     }

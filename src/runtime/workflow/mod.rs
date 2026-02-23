@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use crate::ast::{ExecutionMode, ReinFile, RouteRule, Stage, WorkflowDef};
+use crate::runtime::approval::{ApprovalHandler, ApprovalStatus};
 
 use super::engine::{AgentEngine, RunConfig};
 use super::executor::ToolExecutor;
@@ -25,6 +28,7 @@ pub struct WorkflowContext<'a> {
     pub executor: &'a dyn ToolExecutor,
     pub tool_defs: &'a [ToolDef],
     pub config: &'a RunConfig,
+    pub approval_handler: Option<Arc<dyn ApprovalHandler>>,
 }
 
 /// The result of a completed workflow run.
@@ -66,6 +70,10 @@ pub enum WorkflowError {
     PersistenceFailure(String),
     /// A circular route was detected.
     CircularRoute(String),
+    /// A step's approval gate was rejected.
+    ApprovalRejected { step: String, reason: String },
+    /// A step's approval gate timed out.
+    ApprovalTimedOut { step: String },
 }
 
 impl std::fmt::Display for WorkflowError {
@@ -78,6 +86,12 @@ impl std::fmt::Display for WorkflowError {
             Self::StageNotFound(name) => write!(f, "route target stage not found: {name}"),
             Self::PersistenceFailure(msg) => write!(f, "state persistence failed: {msg}"),
             Self::CircularRoute(name) => write!(f, "circular route detected at stage '{name}'"),
+            Self::ApprovalRejected { step, reason } => {
+                write!(f, "approval rejected for step '{step}': {reason}")
+            }
+            Self::ApprovalTimedOut { step } => {
+                write!(f, "approval timed out for step '{step}'")
+            }
         }
     }
 }
@@ -253,7 +267,29 @@ pub async fn run_step(
     input: &str,
     ctx: &WorkflowContext<'_>,
 ) -> Result<StageResult, WorkflowError> {
-    // Build the effective input: original input + goal context
+    // Check approval gate before execution
+    if let Some(approval_def) = &step.approval
+        && let Some(handler) = &ctx.approval_handler
+    {
+        let status = handler
+            .request_approval(&step.name, input, approval_def)
+            .await;
+        match status {
+            ApprovalStatus::Approved => {}
+            ApprovalStatus::Rejected { reason } => {
+                return Err(WorkflowError::ApprovalRejected {
+                    step: step.name.clone(),
+                    reason,
+                });
+            }
+            ApprovalStatus::TimedOut | ApprovalStatus::Pending => {
+                return Err(WorkflowError::ApprovalTimedOut {
+                    step: step.name.clone(),
+                });
+            }
+        }
+    }
+
     let effective_input = if let Some(ref goal) = step.goal {
         format!("{input}\n\nGoal: {goal}")
     } else {

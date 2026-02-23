@@ -60,6 +60,7 @@ async fn single_stage_workflow() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
+        approval_handler: None,
     };
 
     provider.push_response(simple_response("Triaged: low priority"));
@@ -90,6 +91,7 @@ async fn two_stage_pipeline_passes_output() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
+        approval_handler: None,
     };
 
     // Stage 1: triage
@@ -136,6 +138,7 @@ async fn three_stage_pipeline() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
+        approval_handler: None,
     };
 
     provider.push_response(simple_response("output_a"));
@@ -162,6 +165,7 @@ async fn unknown_agent_returns_error() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
+        approval_handler: None,
     };
 
     provider.push_response(simple_response("ok"));
@@ -183,6 +187,7 @@ async fn stage_failure_returns_error() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
+        approval_handler: None,
     };
 
     provider.push_error("provider down");
@@ -213,6 +218,7 @@ async fn parallel_workflow_runs_all_stages() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
+        approval_handler: None,
     };
 
     provider.push_response(simple_response("output_a"));
@@ -241,6 +247,7 @@ async fn parallel_unknown_agent_errors() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
+        approval_handler: None,
     };
 
     // Queue response for agent "a" so it doesn't fail first
@@ -262,6 +269,7 @@ async fn run_workflow_dispatches_by_mode() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
+        approval_handler: None,
     };
 
     // Sequential
@@ -342,6 +350,7 @@ async fn conditional_routes_to_then_stage() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
+        approval_handler: None,
     };
 
     // triage → escalate (conditional match) → respond (Next from escalate)
@@ -369,6 +378,7 @@ async fn conditional_routes_to_else_stage() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
+        approval_handler: None,
     };
 
     provider.push_response(simple_response("Priority: low. Simple question."));
@@ -431,6 +441,7 @@ async fn conditional_no_else_ends_workflow() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
+        approval_handler: None,
     };
 
     provider.push_response(simple_response("needs_action: no. All clear."));
@@ -460,6 +471,7 @@ async fn resumable_fresh_run_no_checkpoint() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
+        approval_handler: None,
     };
 
     provider.push_response(simple_response("output_a"));
@@ -498,6 +510,7 @@ async fn resumable_resumes_after_first_stage() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
+        approval_handler: None,
     };
 
     // Only stage b gets a response — if stage a runs it would consume this
@@ -558,6 +571,7 @@ async fn resumable_resumes_mid_pipeline() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
+        approval_handler: None,
     };
 
     // Only c and d get responses — a and b are replayed from the checkpoint.
@@ -622,6 +636,7 @@ async fn resumable_different_workflow_name_restarts_fresh() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
+        approval_handler: None,
     };
 
     // Both stages must run — the checkpoint is for a different workflow.
@@ -667,6 +682,7 @@ async fn resumable_conditional_routing_on_resume() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
+        approval_handler: None,
     };
 
     // Triage is in the checkpoint; only escalate and respond need responses.
@@ -718,6 +734,7 @@ async fn resumable_corrupt_checkpoint_returns_persistence_error() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
+        approval_handler: None,
     };
 
     let tmp = NamedTempFile::new().unwrap();
@@ -843,6 +860,7 @@ async fn conditional_route_to_nonexistent_stage_errors() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
+        approval_handler: None,
     };
     provider.push_response(simple_response("priority: high"));
 
@@ -909,6 +927,7 @@ async fn circular_route_returns_error() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
+        approval_handler: None,
     };
     provider.push_response(simple_response("go: yes"));
     provider.push_response(simple_response("go: yes"));
@@ -969,6 +988,7 @@ async fn step_execution_runs_agent_with_goal() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
+        approval_handler: None,
     };
 
     provider.push_response(simple_response("Draft complete!"));
@@ -978,4 +998,197 @@ async fn step_execution_runs_agent_with_goal() {
     assert_eq!(result.stage_results[0].stage_name, "draft");
     assert_eq!(result.stage_results[0].agent_name, "writer");
     assert_eq!(result.final_output, "Draft complete!");
+}
+
+// --- #301 Approval Handler Tests ---
+
+#[tokio::test]
+async fn step_with_auto_approve_proceeds() {
+    use crate::ast::{ApprovalDef, ApprovalKind, Span as AstSpan};
+    use crate::runtime::approval::AutoApproveHandler;
+    use std::sync::Arc;
+
+    let file = parse_file(
+        r#"
+        agent writer { model: openai }
+    "#,
+    );
+    let workflow = WorkflowDef {
+        name: "approval_test".to_string(),
+        trigger: "start".to_string(),
+        stages: vec![],
+        steps: vec![crate::ast::StepDef {
+            name: "draft".to_string(),
+            agent: "writer".to_string(),
+            goal: Some("Write a draft".to_string()),
+            input: None,
+            output_constraints: vec![],
+            depends_on: vec![],
+            when: None,
+            on_failure: None,
+            send_to: None,
+            fallback: None,
+            for_each: None,
+            typed_input: None,
+            typed_outputs: vec![],
+            escalate: None,
+            approval: Some(ApprovalDef {
+                kind: ApprovalKind::Approve,
+                channel: "cli".to_string(),
+                destination: "#ops".to_string(),
+                timeout: Some("1h".to_string()),
+                mode: None,
+                span: AstSpan::new(0, 1),
+            }),
+            span: AstSpan::new(0, 1),
+        }],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: Some(Arc::new(AutoApproveHandler)),
+    };
+
+    provider.push_response(simple_response("Draft approved and complete"));
+
+    let result = run_workflow(&workflow, &ctx).await.unwrap();
+    assert_eq!(result.final_output, "Draft approved and complete");
+}
+
+#[tokio::test]
+async fn step_with_auto_reject_returns_error() {
+    use crate::ast::{ApprovalDef, ApprovalKind, Span as AstSpan};
+    use crate::runtime::approval::AutoRejectHandler;
+    use std::sync::Arc;
+
+    let file = parse_file(
+        r#"
+        agent writer { model: openai }
+    "#,
+    );
+    let workflow = WorkflowDef {
+        name: "reject_test".to_string(),
+        trigger: "start".to_string(),
+        stages: vec![],
+        steps: vec![crate::ast::StepDef {
+            name: "risky_step".to_string(),
+            agent: "writer".to_string(),
+            goal: Some("Do something risky".to_string()),
+            input: None,
+            output_constraints: vec![],
+            depends_on: vec![],
+            when: None,
+            on_failure: None,
+            send_to: None,
+            fallback: None,
+            for_each: None,
+            typed_input: None,
+            typed_outputs: vec![],
+            escalate: None,
+            approval: Some(ApprovalDef {
+                kind: ApprovalKind::Approve,
+                channel: "cli".to_string(),
+                destination: "#ops".to_string(),
+                timeout: Some("1h".to_string()),
+                mode: None,
+                span: AstSpan::new(0, 1),
+            }),
+            span: AstSpan::new(0, 1),
+        }],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: Some(Arc::new(AutoRejectHandler::new("test rejection"))),
+    };
+
+    let result = run_workflow(&workflow, &ctx).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("rejected"),
+        "error should mention rejection: {err}"
+    );
+}
+
+#[tokio::test]
+async fn step_without_approval_def_skips_handler() {
+    let file = parse_file(
+        r#"
+        agent writer { model: openai }
+    "#,
+    );
+    let workflow = WorkflowDef {
+        name: "no_approval_test".to_string(),
+        trigger: "start".to_string(),
+        stages: vec![],
+        steps: vec![crate::ast::StepDef {
+            name: "simple_step".to_string(),
+            agent: "writer".to_string(),
+            goal: None,
+            input: None,
+            output_constraints: vec![],
+            depends_on: vec![],
+            when: None,
+            on_failure: None,
+            send_to: None,
+            fallback: None,
+            for_each: None,
+            typed_input: None,
+            typed_outputs: vec![],
+            escalate: None,
+            approval: None,
+            span: Span::new(0, 1),
+        }],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    // No approval handler — should not crash
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+    };
+
+    provider.push_response(simple_response("Done without approval"));
+
+    let result = run_workflow(&workflow, &ctx).await.unwrap();
+    assert_eq!(result.final_output, "Done without approval");
 }

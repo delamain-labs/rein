@@ -22,10 +22,7 @@ pub fn check_unenforced(file: &ReinFile) -> Vec<Diagnostic> {
     diags
 }
 
-fn check_consensus(
-    blocks: &[crate::ast::ConsensusDef],
-    diags: &mut Vec<Diagnostic>,
-) {
+fn check_consensus(blocks: &[crate::ast::ConsensusDef], diags: &mut Vec<Diagnostic>) {
     if let Some(first) = blocks.first() {
         diags.push(Diagnostic::warning(
             "W_UNENFORCED",
@@ -35,10 +32,7 @@ fn check_consensus(
     }
 }
 
-fn check_observe(
-    blocks: &[crate::ast::ObserveDef],
-    diags: &mut Vec<Diagnostic>,
-) {
+fn check_observe(blocks: &[crate::ast::ObserveDef], diags: &mut Vec<Diagnostic>) {
     if let Some(first) = blocks.first() {
         diags.push(Diagnostic::warning(
             "W_UNENFORCED",
@@ -48,10 +42,7 @@ fn check_observe(
     }
 }
 
-fn check_secrets(
-    blocks: &[crate::ast::SecretsDef],
-    diags: &mut Vec<Diagnostic>,
-) {
+fn check_secrets(blocks: &[crate::ast::SecretsDef], diags: &mut Vec<Diagnostic>) {
     if let Some(first) = blocks.first() {
         diags.push(Diagnostic::warning(
             "W_UNENFORCED",
@@ -61,10 +52,7 @@ fn check_secrets(
     }
 }
 
-fn check_fleets(
-    blocks: &[crate::ast::FleetDef],
-    diags: &mut Vec<Diagnostic>,
-) {
+fn check_fleets(blocks: &[crate::ast::FleetDef], diags: &mut Vec<Diagnostic>) {
     if let Some(first) = blocks.first() {
         diags.push(Diagnostic::warning(
             "W_UNENFORCED",
@@ -74,10 +62,7 @@ fn check_fleets(
     }
 }
 
-fn check_channels(
-    blocks: &[crate::ast::ChannelDef],
-    diags: &mut Vec<Diagnostic>,
-) {
+fn check_channels(blocks: &[crate::ast::ChannelDef], diags: &mut Vec<Diagnostic>) {
     if let Some(first) = blocks.first() {
         diags.push(Diagnostic::warning(
             "W_UNENFORCED",
@@ -87,10 +72,7 @@ fn check_channels(
     }
 }
 
-fn check_scenarios(
-    blocks: &[crate::ast::ScenarioDef],
-    diags: &mut Vec<Diagnostic>,
-) {
+fn check_scenarios(blocks: &[crate::ast::ScenarioDef], diags: &mut Vec<Diagnostic>) {
     if let Some(first) = blocks.first() {
         diags.push(Diagnostic::warning(
             "W_UNENFORCED",
@@ -100,10 +82,7 @@ fn check_scenarios(
     }
 }
 
-fn check_escalate(
-    workflows: &[crate::ast::WorkflowDef],
-    diags: &mut Vec<Diagnostic>,
-) {
+fn check_escalate(workflows: &[crate::ast::WorkflowDef], diags: &mut Vec<Diagnostic>) {
     for wf in workflows {
         for step in &wf.steps {
             if step.escalate.is_some() {
@@ -132,10 +111,9 @@ mod tests {
 
     #[test]
     fn warns_on_consensus_block() {
-        let file = parse(
-            r#"consensus panel { agents: [a, b] strategy: majority require: 2 of 3 agree }"#,
-        )
-        .unwrap();
+        let file =
+            parse(r#"consensus panel { agents: [a, b] strategy: majority require: 2 of 3 agree }"#)
+                .unwrap();
         let diags = check_unenforced(&file);
         assert!(diags.iter().any(|d| d.message.contains("consensus")));
     }
@@ -149,8 +127,7 @@ mod tests {
 
     #[test]
     fn warns_on_secrets_block() {
-        let file =
-            parse(r#"secrets { api_key: env("KEY") }"#).unwrap();
+        let file = parse(r#"secrets { api_key: env("KEY") }"#).unwrap();
         let diags = check_unenforced(&file);
         assert!(diags.iter().any(|d| d.message.contains("secrets")));
     }
@@ -171,10 +148,7 @@ mod tests {
 
     #[test]
     fn warns_on_scenario_block() {
-        let file = parse(
-            r#"scenario test { given { q: "hi" } expect { a: "hello" } }"#,
-        )
-        .unwrap();
+        let file = parse(r#"scenario test { given { q: "hi" } expect { a: "hello" } }"#).unwrap();
         let diags = check_unenforced(&file);
         assert!(diags.iter().any(|d| d.message.contains("scenario")));
     }
