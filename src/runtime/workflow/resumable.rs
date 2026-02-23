@@ -64,6 +64,13 @@ fn find_resume_start<'a>(
 /// Returns `WorkflowError` if an agent is missing, a stage fails, a route
 /// references a nonexistent stage, circular routing is detected, or state
 /// persistence fails.
+///
+/// # Limitations
+/// `WorkflowResult.events` only contains events from stages executed in the
+/// current invocation. Stages replayed from a prior checkpoint have no
+/// recoverable events — they were not persisted to the state file. A full
+/// logical run resumed partway through will therefore produce an incomplete
+/// event trace compared to an equivalent fresh run.
 pub async fn run_sequential_resumable(
     workflow: &WorkflowDef,
     ctx: &WorkflowContext<'_>,

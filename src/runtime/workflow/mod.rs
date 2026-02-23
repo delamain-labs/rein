@@ -42,7 +42,11 @@ pub struct WorkflowResult {
     pub total_cost_cents: u64,
     /// Total tokens across all stages.
     pub total_tokens: u64,
-    /// Workflow-level trace events (fallback, `for_each`, `auto_resolve`).
+    /// All `RunEvent`s collected during the workflow run. For stage-based
+    /// executions (sequential/parallel) this includes agent-level events
+    /// from every stage: `LlmCall`, `ToolCallAttempt`, `BudgetUpdate`, etc.
+    /// For step-based executions this contains workflow-level events:
+    /// `StepFallback`, `ForEachIteration`, `AutoResolved`.
     pub events: Vec<super::RunEvent>,
 }
 

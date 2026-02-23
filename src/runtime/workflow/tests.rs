@@ -1722,7 +1722,9 @@ async fn auto_resolve_empty_conditions_does_not_short_circuit() {
 
 #[tokio::test]
 async fn run_sequential_populates_events() {
-    // #336: run_sequential must surface RunEvents from agent runs in WorkflowResult.events
+    // #336: run_sequential must surface RunEvents from agent runs in WorkflowResult.events.
+    // Each agent run emits at least one LlmCall event, so we assert both non-empty
+    // and the presence of an LlmCall to pin the contract.
     let file = parse_file("agent a { model: openai }");
     let workflow = make_workflow("pipe", "hello", &["a"]);
     let provider = MockProvider::new();
@@ -1742,14 +1744,19 @@ async fn run_sequential_populates_events() {
         .expect("should succeed");
 
     assert!(
-        !result.events.is_empty(),
-        "run_sequential must populate WorkflowResult.events from agent run traces"
+        result
+            .events
+            .iter()
+            .any(|e| matches!(e, crate::runtime::RunEvent::LlmCall { .. })),
+        "run_sequential events must include at least one LlmCall from the agent run trace"
     );
 }
 
 #[tokio::test]
 async fn run_parallel_populates_events() {
-    // #336: run_parallel must surface RunEvents from agent runs in WorkflowResult.events
+    // #336: run_parallel must surface RunEvents from agent runs in WorkflowResult.events.
+    // Two agents are run, each emitting at least one LlmCall, so we assert at least
+    // two events total and the presence of an LlmCall.
     let file = parse_file(
         r"
         agent a { model: openai }
@@ -1775,7 +1782,15 @@ async fn run_parallel_populates_events() {
     let result = run_parallel(&workflow, &ctx).await.expect("should succeed");
 
     assert!(
-        !result.events.is_empty(),
-        "run_parallel must populate WorkflowResult.events from agent run traces"
+        result
+            .events
+            .iter()
+            .any(|e| matches!(e, crate::runtime::RunEvent::LlmCall { .. })),
+        "run_parallel events must include at least one LlmCall from the agent run traces"
+    );
+    assert!(
+        result.events.len() >= 2,
+        "run_parallel with 2 stages must produce at least 2 events, got {}",
+        result.events.len()
     );
 }
