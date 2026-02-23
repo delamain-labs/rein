@@ -2082,11 +2082,47 @@ async fn failed_dependency_skips_dependent_step() {
     );
 }
 
+/// Build a `StepDef` with the given approval gate. Avoids 24-line boilerplate
+/// duplication in every approval test.
+fn make_approved_step(name: &str, agent: &str, approval: crate::ast::ApprovalDef) -> StepDef {
+    use crate::ast::Span as AstSpan;
+    StepDef {
+        name: name.to_string(),
+        agent: agent.to_string(),
+        goal: None,
+        input: None,
+        output_constraints: vec![],
+        depends_on: vec![],
+        when: None,
+        on_failure: None,
+        send_to: None,
+        fallback: None,
+        for_each: None,
+        typed_input: None,
+        typed_outputs: vec![],
+        escalate: None,
+        approval: Some(approval),
+        span: AstSpan::new(0, 1),
+    }
+}
+
+/// CLI approval gate used across multiple approval tests.
+fn make_cli_approval_def() -> crate::ast::ApprovalDef {
+    use crate::ast::{ApprovalDef, ApprovalKind, Span as AstSpan};
+    ApprovalDef {
+        kind: ApprovalKind::Approve,
+        channel: "cli".to_string(),
+        destination: "#ops".to_string(),
+        timeout: Some("1m".to_string()),
+        mode: None,
+        span: AstSpan::new(0, 1),
+    }
+}
+
 /// `ApprovalTimedOut` is a hard error and must abort `run_steps` immediately
 /// (not be absorbed as a soft failure).
 #[tokio::test]
 async fn approval_timed_out_aborts_workflow() {
-    use crate::ast::{ApprovalDef, ApprovalKind, Span as AstSpan};
     use crate::runtime::approval::ApprovalStatus;
     use std::sync::Arc;
 
@@ -2104,31 +2140,7 @@ async fn approval_timed_out_aborts_workflow() {
     }
 
     let file = parse_file(r#"agent bot { model: openai }"#);
-    let step_a = crate::ast::StepDef {
-        name: "gated".to_string(),
-        agent: "bot".to_string(),
-        goal: None,
-        input: None,
-        output_constraints: vec![],
-        depends_on: vec![],
-        when: None,
-        on_failure: None,
-        send_to: None,
-        fallback: None,
-        for_each: None,
-        typed_input: None,
-        typed_outputs: vec![],
-        escalate: None,
-        approval: Some(ApprovalDef {
-            kind: ApprovalKind::Approve,
-            channel: "cli".to_string(),
-            destination: "#ops".to_string(),
-            timeout: Some("1m".to_string()),
-            mode: None,
-            span: AstSpan::new(0, 1),
-        }),
-        span: AstSpan::new(0, 1),
-    };
+    let step_a = make_approved_step("gated", "bot", make_cli_approval_def());
     let workflow = make_workflow_steps("timed_out_wf", "start", vec![step_a]);
 
     let provider = MockProvider::new();
@@ -2155,7 +2167,6 @@ async fn approval_timed_out_aborts_workflow() {
 /// (not be absorbed as a soft failure). Mirrors `approval_timed_out_aborts_workflow`.
 #[tokio::test]
 async fn approval_rejected_aborts_workflow() {
-    use crate::ast::{ApprovalDef, ApprovalKind, Span as AstSpan};
     use crate::runtime::approval::ApprovalStatus;
     use std::sync::Arc;
 
@@ -2175,31 +2186,7 @@ async fn approval_rejected_aborts_workflow() {
     }
 
     let file = parse_file(r#"agent bot { model: openai }"#);
-    let step_a = crate::ast::StepDef {
-        name: "gated".to_string(),
-        agent: "bot".to_string(),
-        goal: None,
-        input: None,
-        output_constraints: vec![],
-        depends_on: vec![],
-        when: None,
-        on_failure: None,
-        send_to: None,
-        fallback: None,
-        for_each: None,
-        typed_input: None,
-        typed_outputs: vec![],
-        escalate: None,
-        approval: Some(ApprovalDef {
-            kind: ApprovalKind::Approve,
-            channel: "cli".to_string(),
-            destination: "#ops".to_string(),
-            timeout: Some("1m".to_string()),
-            mode: None,
-            span: AstSpan::new(0, 1),
-        }),
-        span: AstSpan::new(0, 1),
-    };
+    let step_a = make_approved_step("gated", "bot", make_cli_approval_def());
     let workflow = make_workflow_steps("rejected_wf", "start", vec![step_a]);
 
     let provider = MockProvider::new();
@@ -2252,10 +2239,13 @@ async fn independent_step_runs_even_if_sibling_fails() {
         .expect("run_steps must not abort when only independent step fails");
 
     // step_b should have produced output
-    let step_b_result = results.iter().find(|r| r.output == "step_b_output");
-    assert!(
-        step_b_result.is_some(),
-        "step_b should have run and produced output; results: {results:?}"
+    let step_b_result = results
+        .iter()
+        .find(|r| r.stage_name == "step_b")
+        .expect("step_b should have a result entry");
+    assert_eq!(
+        step_b_result.output, "step_b_output",
+        "step_b output mismatch; results: {results:?}"
     );
 }
 
@@ -2451,5 +2441,75 @@ async fn for_each_step_failure_cascades_to_dependent() {
             .any(|e| matches!(e, crate::runtime::RunEvent::StepCompleted { step, .. } if step == "step_c")),
         "step_c should have completed; events: {:?}",
         result.events
+    );
+}
+
+/// #363/#374 — Partial `for_each` failure: iteration 0 succeeds, iteration 1
+/// fails (provider queue empty → `ProviderError::Api`). The whole step must be
+/// recorded as `StepFailed` and partial results from iteration 0 must be
+/// discarded. All-or-nothing semantics are required by the `for_each` contract.
+#[tokio::test]
+async fn for_each_partial_failure_discards_completed_iterations() {
+    let file = parse_file(r#"agent bot { model: openai }"#);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // Push only one response: iteration 0 succeeds, iteration 1 fails
+    // because the provider queue is empty (returns ProviderError::Api 500).
+    provider.push_response(simple_response("iter0_output"));
+
+    let step = make_step_for_each("batch", "bot", "items");
+    let workflow = WorkflowDef {
+        name: "wf".to_string(),
+        trigger: r#"{"items": ["item0", "item1"]}"#.to_string(),
+        stages: vec![],
+        steps: vec![step],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+    };
+
+    // run_steps returns Ok (soft error), but the step is recorded as failed.
+    let (results, events) = run_steps(&workflow, &ctx)
+        .await
+        .expect("soft error must not abort run_steps");
+
+    // The step must be marked as failed, not completed.
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+        results[0].agent_name, SENTINEL_FAILED,
+        "partial for_each failure must use SENTINEL_FAILED"
+    );
+    // Partial output from iteration 0 must be discarded.
+    assert!(
+        results[0].output.is_empty(),
+        "partial for_each results must be discarded; got: {:?}",
+        results[0].output
+    );
+    // A StepFailed event must be emitted.
+    assert!(
+        events.iter().any(
+            |e| matches!(e, crate::runtime::RunEvent::StepFailed { step, .. } if step == "batch")
+        ),
+        "expected StepFailed for 'batch'; events: {events:?}"
+    );
+    // No StepCompleted event for the step (it did not complete).
+    assert!(
+        !events.iter().any(
+            |e| matches!(e, crate::runtime::RunEvent::StepCompleted { step } if step == "batch")
+        ),
+        "StepCompleted must not be emitted when for_each fails; events: {events:?}"
     );
 }

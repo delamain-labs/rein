@@ -500,7 +500,12 @@ enum StepOutcome {
 /// separate `&mut` parameters.
 struct StepLoopState {
     outputs: std::collections::HashMap<String, String>,
-    failed_steps: std::collections::HashSet<String>,
+    /// Steps that are blocked from running — either they failed (soft error)
+    /// or were skipped because a dependency was blocked. Dependents of any
+    /// step in this set are skipped via the skip-guard in `run_steps`.
+    /// Named `blocked_steps` rather than `failed_steps` to make clear that
+    /// the set includes cascade-skipped steps, not just steps that errored.
+    blocked_steps: std::collections::HashSet<String>,
     events: Vec<super::RunEvent>,
     results: Vec<StageResult>,
 }
@@ -552,7 +557,7 @@ fn apply_step_result(
                 return StepOutcome::HardError(e);
             }
             let reason = e.to_string();
-            state.failed_steps.insert(step.name.clone());
+            state.blocked_steps.insert(step.name.clone());
             // Insert an empty output so the step appears in `outputs` for
             // downstream input-building. Note: `outputs.get(dep)` will return
             // `Some("")` for failed entries — not `None` — so `filter_map`
@@ -605,18 +610,17 @@ pub async fn run_steps(
 
     let mut state = StepLoopState {
         outputs: HashMap::new(),
-        // Track steps that failed so their dependents can be skipped.
-        failed_steps: HashSet::new(),
+        blocked_steps: HashSet::new(),
         results: Vec::new(),
         events: Vec::new(),
     };
 
     for (index, step) in ordered.into_iter().enumerate() {
-        // Skip this step if any declared dependency failed.
+        // Skip this step if any declared dependency is blocked (failed or cascade-skipped).
         if let Some(failed_dep) = step
             .depends_on
             .iter()
-            .find(|dep| state.failed_steps.contains(*dep))
+            .find(|dep| state.blocked_steps.contains(*dep))
         {
             let reason = format!("dependency '{failed_dep}' failed");
             state.events.push(super::RunEvent::StepSkipped {
@@ -636,8 +640,8 @@ pub async fn run_steps(
                 cost_cents: 0,
                 tokens: 0,
             });
-            // Also mark this step as failed so its own dependents are skipped.
-            state.failed_steps.insert(step.name.clone());
+            // Also mark this step as blocked so its own dependents are skipped.
+            state.blocked_steps.insert(step.name.clone());
             continue;
         }
 
@@ -921,10 +925,12 @@ pub async fn run_workflow(
         for sr in step_results {
             result.total_cost_cents += sr.cost_cents;
             result.total_tokens += sr.tokens;
-            // Only propagate non-empty output so that failed/skipped steps
-            // (which produce "" via their sentinel StageResult) do not
-            // overwrite the last real output with an empty string.
-            if !sr.output.is_empty() {
+            // Only update final_output for steps that actually ran. Sentinel
+            // agent names mark steps that failed (SENTINEL_FAILED) or were
+            // cascade-skipped (SENTINEL_SKIPPED); their output is always "".
+            // Filtering by sentinel rather than by empty string correctly
+            // handles agents that legitimately produce empty output.
+            if sr.agent_name != SENTINEL_FAILED && sr.agent_name != SENTINEL_SKIPPED {
                 result.final_output.clone_from(&sr.output);
             }
             result.stage_results.push(sr);

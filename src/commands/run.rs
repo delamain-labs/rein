@@ -214,11 +214,22 @@ fn run_workflow_mode(
                 );
             }
             eprintln!("Duration: {duration:.2?}");
+            // Exit 0: all steps succeeded.
+            // Exit 1: partial success — at least one step failed or was skipped
+            //         (workflow ran to completion; shell consumers can re-run
+            //         individual steps). `skipped_count > 0` is only possible
+            //         when `failed_count > 0` under current semantics (skips
+            //         only cascade from failures), so the exit code is the same.
+            // Exit 2: hard abort — see Err arm below.
             i32::from(failed_count > 0)
         }
         Err(e) => {
             eprintln!("Workflow failed: {e}");
-            1
+            // Exit 2: hard abort (policy rejection, cyclic deps, infra failure).
+            // Distinct from exit 1 (partial success) so shell consumers can
+            // tell whether the workflow completed with some failures vs. was
+            // terminated before all steps ran.
+            2
         }
     }
 }
