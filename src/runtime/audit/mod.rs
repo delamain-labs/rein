@@ -8,6 +8,12 @@ use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Monotonic counter for `generate_id()` to ensure uniqueness within a process
+/// even when two IDs are generated within the same nanosecond.
+static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// A single audit log entry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -66,8 +72,13 @@ pub enum AuditKind {
 }
 
 /// Persistent audit log backed by JSON-lines files.
+///
+/// Writes are serialized via an internal `Mutex<()>` so concurrent calls from
+/// parallel workflow steps produce well-formed JSONL with no interleaved lines.
 pub struct AuditLog {
     path: PathBuf,
+    /// Guards `append` so concurrent parallel-step writes do not interleave.
+    write_lock: Mutex<()>,
 }
 
 /// Error type for audit operations.
@@ -108,11 +119,18 @@ impl AuditLog {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        Ok(Self { path })
+        Ok(Self {
+            path,
+            write_lock: Mutex::new(()),
+        })
     }
 
     /// Append an entry to the audit log (append-only).
+    ///
+    /// Acquires `write_lock` before opening the file so concurrent calls from
+    /// parallel workflow steps do not interleave partial JSONL lines.
     pub fn append(&self, entry: &AuditEntry) -> Result<(), AuditError> {
+        let _guard = self.write_lock.lock().expect("audit write_lock poisoned");
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -164,13 +182,18 @@ impl AuditLog {
     }
 
     /// Generate a unique event ID.
+    ///
+    /// Combines a nanosecond wall-clock timestamp with a process-local atomic
+    /// sequence number so IDs remain unique even when two events are generated
+    /// within the same nanosecond (e.g. in parallel workflow steps or tests).
     pub fn generate_id() -> String {
         use std::time::{SystemTime, UNIX_EPOCH};
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        format!("audit-{nanos:x}")
+        let seq = ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("audit-{nanos:x}-{seq}")
     }
 }
 

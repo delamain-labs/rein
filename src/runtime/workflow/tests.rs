@@ -1262,6 +1262,101 @@ async fn step_without_approval_def_skips_handler() {
     assert_eq!(result.final_output, "Done without approval");
 }
 
+// --- #358 Audit log wiring tests ---
+
+#[tokio::test]
+async fn step_with_audit_log_records_approval_events() {
+    use crate::ast::{ApprovalDef, ApprovalKind, Span as AstSpan};
+    use crate::runtime::approval::AutoApproveHandler;
+    use crate::runtime::audit::{AuditKind, AuditLog};
+    use std::sync::Arc;
+
+    let tmp = tempfile::NamedTempFile::new().expect("temp file");
+    let log = Arc::new(AuditLog::new(tmp.path()).expect("AuditLog::new"));
+
+    let file = parse_file(r#"agent writer { model: openai }"#);
+    let workflow = WorkflowDef {
+        name: "audit_test_workflow".to_string(),
+        trigger: "start".to_string(),
+        stages: vec![],
+        steps: vec![crate::ast::StepDef {
+            name: "gated_step".to_string(),
+            agent: "writer".to_string(),
+            goal: None,
+            input: None,
+            output_constraints: vec![],
+            depends_on: vec![],
+            when: None,
+            on_failure: None,
+            send_to: None,
+            fallback: None,
+            for_each: None,
+            typed_input: None,
+            typed_outputs: vec![],
+            escalate: None,
+            approval: Some(ApprovalDef {
+                kind: ApprovalKind::Approve,
+                channel: "cli".to_string(),
+                destination: "#ops".to_string(),
+                timeout: None,
+                mode: None,
+                span: AstSpan::new(0, 1),
+            }),
+            span: AstSpan::new(0, 1),
+        }],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("approved output"));
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: Some(Arc::new(AutoApproveHandler)),
+        audit_log: Some(Arc::clone(&log)),
+    };
+
+    let result = run_workflow(&workflow, &ctx)
+        .await
+        .expect("workflow should succeed");
+    assert_eq!(result.final_output, "approved output");
+
+    // The audit log must contain exactly two entries: ApprovalRequested + ApprovalResolved.
+    let entries = log.read_all().expect("read audit log");
+    assert_eq!(
+        entries.len(),
+        2,
+        "expected 2 audit entries, got: {entries:#?}"
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.kind == AuditKind::ApprovalRequested),
+        "missing ApprovalRequested entry"
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.kind == AuditKind::ApprovalResolved),
+        "missing ApprovalResolved entry"
+    );
+    // Both entries must reference the correct workflow and step.
+    for entry in &entries {
+        assert_eq!(entry.workflow.as_deref(), Some("audit_test_workflow"));
+        assert_eq!(entry.step.as_deref(), Some("gated_step"));
+    }
+}
+
 // --- #303 DAG depends_on Tests ---
 
 fn make_step(name: &str, agent: &str, depends_on: Vec<&str>) -> StepDef {
