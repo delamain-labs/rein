@@ -382,7 +382,11 @@ impl<'a> AgentEngine<'a> {
             reason: None,
         });
 
-        match self.executor.execute(&tool_call).await {
+        let ctx = super::executor::ToolCallContext {
+            tool_call: &tool_call,
+            secrets: &self.secrets,
+        };
+        match self.executor.execute(&ctx).await {
             Ok(output) => {
                 state.messages.push(Message::tool(call_id, &output.output));
                 state.events.push(RunEvent::ToolCallResult {

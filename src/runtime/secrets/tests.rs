@@ -45,7 +45,10 @@ fn env_not_found_returns_error() {
     assert!(result.is_err());
     assert_eq!(
         result.unwrap_err(),
-        SecretError::EnvNotFound("NONEXISTENT_VAR_REIN_TEST".to_string())
+        SecretError::EnvNotFound {
+            binding: "missing".to_string(),
+            var: "NONEXISTENT_VAR_REIN_TEST".to_string(),
+        }
     );
 }
 
