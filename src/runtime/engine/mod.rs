@@ -272,6 +272,12 @@ impl<'a> AgentEngine<'a> {
                         timeout_secs: secs,
                     });
                     let partial = RunTrace::from_events(std::mem::take(&mut state.events));
+                    self.export_partial(
+                        &partial,
+                        state.total_tokens,
+                        state.total_cost_cents,
+                        run_start.elapsed(),
+                    );
                     return Err(RunError::Timeout {
                         partial_trace: partial,
                     });
@@ -348,7 +354,7 @@ impl<'a> AgentEngine<'a> {
         messages: &[Message],
     ) -> Result<super::provider::ChatResponse, CallError> {
         let chat_future = self.provider.chat(messages, &self.tool_defs);
-        let result = if let Some(secs) = self.config.stage_timeout_secs {
+        let result = if let Some(secs) = self.config.stage_timeout_secs.filter(|&s| s > 0) {
             match tokio::time::timeout(std::time::Duration::from_secs(secs), chat_future).await {
                 Ok(r) => r,
                 Err(_elapsed) => {
@@ -584,6 +590,26 @@ impl<'a> AgentEngine<'a> {
             total_tokens: state.total_tokens,
             total_cost_cents: state.total_cost_cents,
         }
+    }
+
+    /// Export a partial trace to the configured OTEL sink (e.g. on timeout).
+    ///
+    /// Constructs a synthetic `RunResult` from the partial trace so that the
+    /// `StageTimeout` span is reachable even when the run did not complete.
+    fn export_partial(
+        &self,
+        trace: &RunTrace,
+        total_tokens: u64,
+        total_cost_cents: u64,
+        duration: std::time::Duration,
+    ) {
+        let result = RunResult {
+            response: String::new(),
+            trace: trace.clone(),
+            total_tokens,
+            total_cost_cents,
+        };
+        self.apply_otel_export(&result, duration);
     }
 
     /// Apply OTEL export after a run completes (side-effect only, never fails loudly).

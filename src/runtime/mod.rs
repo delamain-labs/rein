@@ -517,11 +517,7 @@ impl std::fmt::Display for RunError {
             Self::CircuitBreakerOpen => write!(f, "circuit breaker open"),
             Self::GuardrailBlocked => write!(f, "guardrail blocked"),
             Self::EvalFailed => write!(f, "eval failed"),
-            Self::Timeout { partial_trace } => write!(
-                f,
-                "provider timed out (partial trace: {} events)",
-                partial_trace.events.len()
-            ),
+            Self::Timeout { .. } => write!(f, "provider timed out"),
         }
     }
 }

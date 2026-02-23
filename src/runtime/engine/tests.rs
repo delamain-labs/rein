@@ -1008,6 +1008,36 @@ async fn no_timeout_when_stage_timeout_secs_is_none() {
     );
 }
 
+// #355: stage_timeout_secs = 0 is treated as no timeout (same as None).
+// A zero-second duration would fire immediately before any I/O, so it is
+// filtered out in call_provider_with_timeout to prevent a footgun.
+#[tokio::test]
+async fn zero_stage_timeout_treated_as_no_timeout() {
+    let agent = make_agent(vec![], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+    let executor = MockExecutor::new();
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("done"));
+
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig {
+            stage_timeout_secs: Some(0),
+            ..RunConfig::default()
+        },
+    );
+
+    let result = engine.run("hello").await;
+    assert!(
+        result.is_ok(),
+        "stage_timeout_secs=0 should not block the run: {:?}",
+        result
+    );
+}
+
 // #355: a timeout counts as a provider failure for circuit-breaker purposes.
 // The partial trace's last event must be StageTimeout, and the circuit breaker
 // must open after a single timeout when threshold = 1.
@@ -1047,6 +1077,18 @@ async fn stage_timeout_records_circuit_breaker_failure() {
         matches!(result, Err(RunError::Timeout { .. })),
         "first run should time out"
     );
+    // Partial trace must contain a StageTimeout event — same contract as the
+    // non-CB timeout path.
+    if let Err(RunError::Timeout { partial_trace }) = &result {
+        assert!(
+            partial_trace
+                .events
+                .iter()
+                .any(|e| matches!(e, RunEvent::StageTimeout { .. })),
+            "partial trace must contain StageTimeout; got: {:?}",
+            partial_trace.events
+        );
+    }
 
     // Second run: circuit breaker is now open after the failure above.
     let result2 = engine.run("hello").await;
