@@ -70,6 +70,16 @@ pub struct StageResult {
     pub tokens: u64,
 }
 
+impl StageResult {
+    /// Returns `true` if this result represents a step that actually executed
+    /// (as opposed to a step that failed or was skipped, which are recorded
+    /// using sentinel `agent_name` values).
+    #[must_use]
+    pub fn is_real_execution(&self) -> bool {
+        self.agent_name != SENTINEL_FAILED && self.agent_name != SENTINEL_SKIPPED
+    }
+}
+
 /// Errors that can occur during workflow execution.
 #[derive(Debug)]
 pub enum WorkflowError {

@@ -2433,7 +2433,7 @@ async fn for_each_step_failure_cascades_to_dependent() {
         );
     }
 
-    // step_c is independent and should have run.
+    // step_c is independent and should have run with the expected output.
     assert!(
         result
             .events
@@ -2441,6 +2441,15 @@ async fn for_each_step_failure_cascades_to_dependent() {
             .any(|e| matches!(e, crate::runtime::RunEvent::StepCompleted { step, .. } if step == "step_c")),
         "step_c should have completed; events: {:?}",
         result.events
+    );
+    let step_c_result = result
+        .stage_results
+        .iter()
+        .find(|r| r.stage_name == "step_c")
+        .expect("step_c must have a result entry");
+    assert_eq!(
+        step_c_result.output, "follower ran",
+        "step_c output mismatch"
     );
 }
 
@@ -2512,4 +2521,41 @@ async fn for_each_partial_failure_discards_completed_iterations() {
         ),
         "StepCompleted must not be emitted when for_each fails; events: {events:?}"
     );
+}
+
+/// #363 — When ALL steps in a workflow fail, `final_output` must be an empty
+/// string. Callers (e.g. the CLI) must handle this case explicitly rather than
+/// treating it as a normal completion with empty output.
+#[tokio::test]
+async fn all_steps_fail_gives_empty_final_output() {
+    // No valid agents in the file → every step fails with AgentNotFound.
+    let file = parse_file(r#"agent other { model: openai }"#);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    let step_a = make_step("step_a", "ghost_a", vec![]);
+    let step_b = make_step("step_b", "ghost_b", vec![]);
+    let workflow = make_workflow_steps("all_fail", "start", vec![step_a, step_b]);
+
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+    };
+
+    let result = run_workflow(&workflow, &ctx)
+        .await
+        .expect("partial success must not return Err");
+
+    assert!(
+        result.final_output.is_empty(),
+        "final_output must be empty when all steps fail; got: {:?}",
+        result.final_output
+    );
+    // Both steps should have failed entries in stage_results.
+    assert_eq!(result.stage_results.len(), 2);
+    assert!(result.stage_results.iter().all(|r| !r.is_real_execution()));
 }

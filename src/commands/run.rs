@@ -1,8 +1,6 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use rein::runtime::workflow::{SENTINEL_FAILED, SENTINEL_SKIPPED};
-
 pub fn run_agent(
     path: &std::path::Path,
     message: Option<&str>,
@@ -194,10 +192,13 @@ fn run_workflow_mode(
             let completed_stages = result
                 .stage_results
                 .iter()
-                .filter(|r| r.agent_name != SENTINEL_FAILED && r.agent_name != SENTINEL_SKIPPED)
+                .filter(|r| r.is_real_execution())
                 .count();
             eprintln!("--- Workflow complete ({completed_stages} stages) ---");
             if failed_count > 0 || skipped_count > 0 {
+                // `failed_count > 0` implies `result.events` is non-empty (at least one
+                // `StepFailed` event was pushed), so the trace block below always fires
+                // when this warning is shown.
                 eprintln!(
                     "warning: {failed_count} step(s) failed, {skipped_count} skipped (see trace below)"
                 );
