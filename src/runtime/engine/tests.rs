@@ -555,10 +555,9 @@ async fn engine_secrets_not_leaked_in_trace() {
     .with_secrets(secrets);
     let result = engine.run("hi").await.unwrap();
 
-    // Secret values must never appear in the serialized trace.
-    // This is a future-proof guardrail: today secrets are not used by the engine
-    // loop, but as usage grows (e.g. injected into system prompt) this test will
-    // catch accidental leakage before it reaches production.
+    // Secrets are stored on the engine but never forwarded into RunEvent payloads.
+    // This test is a guardrail: if a future change inadvertently pipes secret values
+    // into trace events (e.g. as tool arguments or LLM messages), this will catch it.
     let trace_json = serde_json::to_string(&result.trace).unwrap();
     assert!(
         !trace_json.contains("super-secret-value"),
