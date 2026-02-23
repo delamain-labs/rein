@@ -168,6 +168,14 @@ fn detect_pii(text: &str) -> bool {
         }
     }
 
+    // Credit card pattern: 13-19 digits (possibly with dashes)
+    for word in text.split_whitespace() {
+        let digits: String = word.chars().filter(char::is_ascii_digit).collect();
+        if (13..=19).contains(&digits.len()) {
+            return true;
+        }
+    }
+
     // Phone pattern: sequences of 10+ digits
     let digit_count = text.chars().filter(char::is_ascii_digit).count();
     if digit_count >= 10 {
@@ -272,6 +280,9 @@ fn redact_pii(text: &str) -> String {
         }
     }
 
+    // Redact credit card patterns (NNNN-NNNN-NNNN-NNNN or 16 digits).
+    result = redact_credit_cards(&result);
+
     // Redact SSN patterns.
     let chars: Vec<char> = result.chars().collect();
     let mut redacted = String::with_capacity(result.len());
@@ -290,4 +301,24 @@ fn redact_pii(text: &str) -> String {
     }
 
     redacted
+}
+
+/// Redact credit card number patterns.
+fn redact_credit_cards(text: &str) -> String {
+    let mut result = text.to_string();
+    // Match NNNN-NNNN-NNNN-NNNN pattern
+    let words: Vec<&str> = text.split_whitespace().collect();
+    for word in &words {
+        let clean: String = word
+            .chars()
+            .filter(|c| c.is_ascii_digit() || *c == '-')
+            .collect();
+        let stripped = clean.trim_end_matches(|c: char| !c.is_ascii_digit());
+        let digits: String = stripped.chars().filter(char::is_ascii_digit).collect();
+        if (13..=19).contains(&digits.len()) && stripped.len() >= 13 {
+            let to_redact = word.trim_end_matches(|c: char| !c.is_ascii_digit() && c != '-');
+            result = result.replacen(to_redact, "[REDACTED_CC]", 1);
+        }
+    }
+    result
 }
