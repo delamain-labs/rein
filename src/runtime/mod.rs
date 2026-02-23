@@ -146,7 +146,10 @@ impl RunTrace {
     /// from run start). `timestamps_ms` must be the same length as `events`.
     #[must_use]
     pub fn from_events_timed(events: Vec<RunEvent>, timestamps_ms: Vec<u64>) -> Self {
-        Self { events, timestamps_ms }
+        Self {
+            events,
+            timestamps_ms,
+        }
     }
 
     /// Serialize to pretty-printed JSON.

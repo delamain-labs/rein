@@ -127,7 +127,8 @@ fn otlp_root_span_has_real_timestamps() {
 // #343: unparseable started_at falls back to epoch 0 (detectable sentinel in OTLP viewers).
 #[test]
 fn invalid_started_at_falls_back_to_epoch_zero() {
-    let trace = RunTrace::from_events(vec![]).to_structured("agent", "not-a-date", "not-a-date", 500);
+    let trace =
+        RunTrace::from_events(vec![]).to_structured("agent", "not-a-date", "not-a-date", 500);
     let root = &to_otlp(&trace).scope_spans[0].spans[0];
     assert_eq!(
         root.start_time_unix_nano, 0,

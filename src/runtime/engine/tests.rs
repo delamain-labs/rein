@@ -838,7 +838,13 @@ async fn capped_tool_denied_after_cap_exceeded() {
     provider.push_response(tool_call_response("api.call", json!({})));
     provider.push_response(simple_response("done"));
 
-    let engine = AgentEngine::new(&provider, &executor, &registry, vec![], RunConfig::default());
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig::default(),
+    );
     let result = engine.run("go").await.expect("should complete");
 
     let allowed_count = result
@@ -854,8 +860,14 @@ async fn capped_tool_denied_after_cap_exceeded() {
         .filter(|e| matches!(e, RunEvent::ToolCallAttempt { allowed: false, .. }))
         .count();
 
-    assert_eq!(allowed_count, 1, "exactly one call should be allowed (within cap)");
-    assert_eq!(denied_count, 1, "exactly one call should be denied (cap reached)");
+    assert_eq!(
+        allowed_count, 1,
+        "exactly one call should be allowed (within cap)"
+    );
+    assert_eq!(
+        denied_count, 1,
+        "exactly one call should be denied (cap reached)"
+    );
 }
 
 // A tool with a generous cap should be allowed as long as cost stays under it.
@@ -870,7 +882,13 @@ async fn capped_tool_allowed_within_cap() {
     provider.push_response(tool_call_response("api.call", json!({})));
     provider.push_response(simple_response("done"));
 
-    let engine = AgentEngine::new(&provider, &executor, &registry, vec![], RunConfig::default());
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig::default(),
+    );
     let result = engine.run("go").await.expect("should complete");
 
     let denied_count = result
