@@ -1648,3 +1648,70 @@ async fn workflow_auto_resolve_does_not_short_circuit_when_condition_unmet() {
         "no AutoResolved event should be emitted"
     );
 }
+
+// --- #323 ---
+
+#[tokio::test]
+async fn auto_resolve_empty_conditions_does_not_short_circuit() {
+    // An `auto resolve when {}` block with no conditions must NOT short-circuit.
+    // Previously auto_resolve_matches returned Some("") on empty conditions, which
+    // triggered an AutoResolved event and aborted the workflow after step 1.
+    let file = parse_file(
+        r#"
+        agent bot { model: openai }
+        "#,
+    );
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // Use valid JSON output so auto_resolve_matches actually parses it
+    // (plain text would return None early via JSON parse failure).
+    provider.push_response(simple_response(r#"{"status": "done"}"#));
+    provider.push_response(simple_response(r#"{"status": "done"}"#));
+
+    let workflow = WorkflowDef {
+        name: "wf".to_string(),
+        trigger: "go".to_string(),
+        mode: ExecutionMode::Sequential,
+        stages: vec![],
+        steps: vec![
+            make_step("step1", "bot", vec![]),
+            make_step("step2", "bot", vec![]),
+        ],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: Some(AutoResolveBlock {
+            conditions: vec![], // empty — must NOT short-circuit
+            span: Span::new(0, 1),
+        }),
+        within_blocks: vec![],
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+    };
+
+    let (results, events) = run_steps(&workflow, &ctx)
+        .await
+        .expect("workflow should succeed");
+
+    // Both steps must run — empty conditions must not trigger early exit.
+    assert_eq!(
+        results.len(),
+        2,
+        "both steps should run when conditions is empty"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, crate::runtime::RunEvent::AutoResolved { .. })),
+        "empty conditions must not emit AutoResolved"
+    );
+}
