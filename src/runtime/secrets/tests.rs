@@ -139,6 +139,33 @@ fn count_reports_bindings() {
     assert_eq!(resolver.count(), 2);
 }
 
+// #357: Vault fallback to env var must warn explicitly and mark source as env-based.
+#[test]
+#[serial]
+fn vault_fallback_source_indicates_env_fallback() {
+    unsafe { std::env::set_var("VAULT_SECRET_REIN_KEY", "vault-value") };
+    let def = SecretsDef {
+        bindings: vec![SecretBinding {
+            name: "db_pass".to_string(),
+            source: SecretSource::Vault {
+                path: "secret/rein/key".to_string(),
+            },
+            span: span(),
+        }],
+        span: span(),
+    };
+    let resolver = SecretResolver::from_def(&def);
+    let resolved = resolver.resolve_all().unwrap();
+    // The source field must indicate that a real vault path was requested but
+    // the value came from an env var, so operators can detect the fallback.
+    assert!(
+        resolved["db_pass"].source.contains("env"),
+        "source must indicate env fallback, got: {}",
+        resolved["db_pass"].source
+    );
+    unsafe { std::env::remove_var("VAULT_SECRET_REIN_KEY") };
+}
+
 #[test]
 fn resolve_unregistered_binding_returns_binding_not_found() {
     let def = SecretsDef {

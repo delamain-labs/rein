@@ -124,11 +124,18 @@ fn resolve_source(name: &str, source: &SecretSource) -> Result<ResolvedSecret, S
                     .collect::<String>()
             );
             match std::env::var(&env_key) {
-                Ok(value) => Ok(ResolvedSecret {
-                    name: name.to_string(),
-                    value,
-                    source: format!("vault({path})"),
-                }),
+                Ok(value) => {
+                    eprintln!(
+                        "warning: vault path '{path}' is not configured — falling back to \
+                         env var '{env_key}'. Add real Vault integration or use \
+                         `env: {env_key}` explicitly."
+                    );
+                    Ok(ResolvedSecret {
+                        name: name.to_string(),
+                        value,
+                        source: format!("vault({path})->env({env_key})"),
+                    })
+                }
                 Err(_) => Err(SecretError::VaultUnavailable(path.clone())),
             }
         }
