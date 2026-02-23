@@ -212,7 +212,13 @@ fn resolve_otel_mode(
                     metrics: obs.metrics.clone(),
                 };
             }
-            Some(_) => return OtelMode::FileOnComplete,
+            Some("file" | "otlp") => return OtelMode::FileOnComplete,
+            Some(other) => {
+                eprintln!(
+                    "warning: unrecognized observe export target '{other}'; defaulting to file output"
+                );
+                return OtelMode::FileOnComplete;
+            }
             None => {}
         }
     }

@@ -584,3 +584,116 @@ async fn engine_without_secrets_runs_successfully() {
     let result = engine.run("hi").await.unwrap();
     assert_eq!(result.response, "done");
 }
+
+// --- #318: event_matches_metrics unit tests ---
+
+#[test]
+fn event_matches_cost_metric() {
+    let llm = RunEvent::LlmCall {
+        model: "gpt-4o".into(),
+        input_tokens: 10,
+        output_tokens: 5,
+        cost_cents: 1,
+    };
+    let budget = RunEvent::BudgetUpdate {
+        spent_cents: 1,
+        limit_cents: 100,
+    };
+    let tool = RunEvent::ToolCallAttempt {
+        tool: crate::runtime::ToolCall {
+            namespace: "a".into(),
+            action: "b".into(),
+            arguments: serde_json::json!({}),
+        },
+        allowed: true,
+        reason: None,
+    };
+    assert!(event_matches_metrics(&llm, &["cost".to_string()]));
+    assert!(event_matches_metrics(&budget, &["cost".to_string()]));
+    assert!(!event_matches_metrics(&tool, &["cost".to_string()]));
+}
+
+#[test]
+fn event_matches_tool_calls_metric() {
+    let attempt = RunEvent::ToolCallAttempt {
+        tool: crate::runtime::ToolCall {
+            namespace: "a".into(),
+            action: "b".into(),
+            arguments: serde_json::json!({}),
+        },
+        allowed: true,
+        reason: None,
+    };
+    let result_ev = RunEvent::ToolCallResult {
+        tool: crate::runtime::ToolCall {
+            namespace: "a".into(),
+            action: "b".into(),
+            arguments: serde_json::json!({}),
+        },
+        result: crate::runtime::ToolResult {
+            success: true,
+            output: "ok".into(),
+        },
+    };
+    let budget = RunEvent::BudgetUpdate {
+        spent_cents: 1,
+        limit_cents: 100,
+    };
+    assert!(event_matches_metrics(&attempt, &["tool_calls".to_string()]));
+    assert!(event_matches_metrics(
+        &result_ev,
+        &["tool_calls".to_string()]
+    ));
+    assert!(!event_matches_metrics(&budget, &["tool_calls".to_string()]));
+}
+
+#[test]
+fn event_matches_latency_metric() {
+    let llm = RunEvent::LlmCall {
+        model: "gpt-4o".into(),
+        input_tokens: 10,
+        output_tokens: 5,
+        cost_cents: 1,
+    };
+    let budget = RunEvent::BudgetUpdate {
+        spent_cents: 1,
+        limit_cents: 100,
+    };
+    assert!(event_matches_metrics(&llm, &["latency".to_string()]));
+    assert!(!event_matches_metrics(&budget, &["latency".to_string()]));
+}
+
+#[test]
+fn event_matches_guardrails_metric() {
+    let guardrail = RunEvent::GuardrailTriggered {
+        rule: "no_pii".into(),
+        action: "block".into(),
+        blocked: true,
+    };
+    let llm = RunEvent::LlmCall {
+        model: "gpt-4o".into(),
+        input_tokens: 10,
+        output_tokens: 5,
+        cost_cents: 1,
+    };
+    assert!(event_matches_metrics(
+        &guardrail,
+        &["guardrails".to_string()]
+    ));
+    assert!(!event_matches_metrics(&llm, &["guardrails".to_string()]));
+}
+
+#[test]
+fn event_matches_unknown_metric_returns_false() {
+    let llm = RunEvent::LlmCall {
+        model: "gpt-4o".into(),
+        input_tokens: 10,
+        output_tokens: 5,
+        cost_cents: 1,
+    };
+    assert!(!event_matches_metrics(
+        &llm,
+        &["not_a_real_metric".to_string()]
+    ));
+    assert!(!event_matches_metrics(&llm, &[]));
+}
