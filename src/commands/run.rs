@@ -136,7 +136,7 @@ fn run_workflow_mode(
     workflow: &rein::ast::WorkflowDef,
     file: &rein::ast::ReinFile,
     provider: &dyn rein::runtime::provider::Provider,
-    executor: &rein::runtime::executor::NoopExecutor,
+    executor: &dyn rein::runtime::executor::ToolExecutor,
     budget_cents: u64,
 ) -> i32 {
     // Only inject a global handler when env-var overrides are active (CI/testing).

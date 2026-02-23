@@ -42,7 +42,11 @@ pub struct WorkflowResult {
     pub total_cost_cents: u64,
     /// Total tokens across all stages.
     pub total_tokens: u64,
-    /// Workflow-level trace events (fallback, `for_each`, `auto_resolve`).
+    /// All `RunEvent`s collected during the workflow run. For stage-based
+    /// executions (sequential/parallel) this includes agent-level events
+    /// from every stage: `LlmCall`, `ToolCallAttempt`, `BudgetUpdate`, etc.
+    /// For step-based executions this contains workflow-level events:
+    /// `StepFallback`, `ForEachIteration`, `AutoResolved`.
     pub events: Vec<super::RunEvent>,
 }
 
@@ -111,7 +115,7 @@ pub(super) async fn run_stage(
     agent_name: &str,
     input: &str,
     ctx: &WorkflowContext<'_>,
-) -> Result<StageResult, WorkflowError> {
+) -> Result<(StageResult, Vec<super::RunEvent>), WorkflowError> {
     let agent = ctx
         .file
         .agents
@@ -136,19 +140,24 @@ pub(super) async fn run_stage(
             error: e,
         })?;
 
-    Ok(StageResult {
-        stage_name: stage_name.to_string(),
-        agent_name: agent_name.to_string(),
-        output: result.response,
-        cost_cents: result.total_cost_cents,
-        tokens: result.total_tokens,
-    })
+    let events = result.trace.events;
+    Ok((
+        StageResult {
+            stage_name: stage_name.to_string(),
+            agent_name: agent_name.to_string(),
+            output: result.response,
+            cost_cents: result.total_cost_cents,
+            tokens: result.total_tokens,
+        },
+        events,
+    ))
 }
 
 /// Collect stage results into a `WorkflowResult`.
 pub(super) fn build_result(
     stage_results: Vec<StageResult>,
     final_output: String,
+    events: Vec<super::RunEvent>,
 ) -> WorkflowResult {
     let total_cost = stage_results.iter().map(|r| r.cost_cents).sum();
     let total_tokens = stage_results.iter().map(|r| r.tokens).sum();
@@ -157,7 +166,7 @@ pub(super) fn build_result(
         final_output,
         total_cost_cents: total_cost,
         total_tokens,
-        events: Vec::new(),
+        events,
     }
 }
 
@@ -208,6 +217,7 @@ pub async fn run_sequential(
     ctx: &WorkflowContext<'_>,
 ) -> Result<WorkflowResult, WorkflowError> {
     let mut stage_results = Vec::new();
+    let mut all_events: Vec<super::RunEvent> = Vec::new();
     let mut current_input = format!("Trigger: {}", workflow.trigger);
     let mut visited = std::collections::HashSet::new();
 
@@ -218,11 +228,13 @@ pub async fn run_sequential(
             return Err(WorkflowError::CircularRoute(stage.name.clone()));
         }
 
-        let result = run_stage(&stage.name, &stage.agent, &current_input, ctx).await?;
+        let (result, stage_events) =
+            run_stage(&stage.name, &stage.agent, &current_input, ctx).await?;
 
         current_input.clone_from(&result.output);
         let output = result.output.clone();
         stage_results.push(result);
+        all_events.extend(stage_events);
 
         current_stage = resolve_next_stage(workflow, stage, &output)?;
     }
@@ -232,7 +244,7 @@ pub async fn run_sequential(
         .map(|r| r.output.clone())
         .unwrap_or_default();
 
-    Ok(build_result(stage_results, final_output))
+    Ok(build_result(stage_results, final_output, all_events))
 }
 
 /// Build initial execution state from a prior checkpoint, or return a fresh
@@ -250,10 +262,13 @@ pub async fn run_parallel(
 ) -> Result<WorkflowResult, WorkflowError> {
     let trigger_input = format!("Trigger: {}", workflow.trigger);
     let mut stage_results = Vec::new();
+    let mut all_events: Vec<super::RunEvent> = Vec::new();
 
     for stage in &workflow.stages {
-        let result = run_stage(&stage.name, &stage.agent, &trigger_input, ctx).await?;
+        let (result, stage_events) =
+            run_stage(&stage.name, &stage.agent, &trigger_input, ctx).await?;
         stage_results.push(result);
+        all_events.extend(stage_events);
     }
 
     let final_output = stage_results
@@ -262,7 +277,7 @@ pub async fn run_parallel(
         .collect::<Vec<_>>()
         .join("\n");
 
-    Ok(build_result(stage_results, final_output))
+    Ok(build_result(stage_results, final_output, all_events))
 }
 
 /// Resolve step execution order using Kahn's topological sort algorithm.
@@ -381,7 +396,11 @@ pub async fn run_step(
         input.to_string()
     };
 
-    run_stage(&step.name, &step.agent, &effective_input, ctx).await
+    // run_stage now returns (StageResult, events); run_step discards the events
+    // since its callers (run_step_with_fallback → run_steps) aggregate events separately.
+    run_stage(&step.name, &step.agent, &effective_input, ctx)
+        .await
+        .map(|(result, _events)| result)
 }
 
 /// Execute a step, running its fallback if the primary step fails.
