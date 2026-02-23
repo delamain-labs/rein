@@ -817,18 +817,23 @@ fn capped_cap(ns: &str, action: &str, max_cents: u64) -> Capability {
     }
 }
 
-// When cumulative LLM cost attributed to a capped tool exceeds the cap,
+// When cumulative LLM cost attributed to a capped tool reaches the cap,
 // further calls to that tool must be denied.
 #[tokio::test]
 async fn capped_tool_denied_after_cap_exceeded() {
-    // Cap api.call at 1 cent. The mock LLM will cost more than that (150 tokens
-    // at gpt-4o rates) so the second tool call should be denied.
+    // Cap api.call at 1 cent.
+    // Mock LLM cost: 100 input + 50 output = 150 tokens at gpt-4o rates.
+    // gpt-4o pricing: 250¢/M input + 1000¢/M output.
+    // Cost = (100 × 250 + 50 × 1000) / 1_000_000 = 0.075¢ → div_ceil → 1¢.
+    // After Turn 1: per_tool_spent["api.call"] = 1¢ = cap → Turn 2 call is denied.
     let agent = make_agent(vec![capped_cap("api", "call", 1)], vec![], None);
     let registry = ToolRegistry::from_agent(&agent);
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
 
-    // Turn 1: LLM requests api.call → executor responds → LLM gives final answer
+    // Turn 1: tool call allowed (spent 0 < cap 1), cost attributed → spent = 1.
+    // Turn 2: tool call denied (spent 1 >= cap 1), LLM sees denial message.
+    // Turn 3: LLM gives final answer.
     provider.push_response(tool_call_response("api.call", json!({})));
     provider.push_response(tool_call_response("api.call", json!({})));
     provider.push_response(simple_response("done"));
@@ -836,23 +841,21 @@ async fn capped_tool_denied_after_cap_exceeded() {
     let engine = AgentEngine::new(&provider, &executor, &registry, vec![], RunConfig::default());
     let result = engine.run("go").await.expect("should complete");
 
-    let attempts: Vec<_> = result
+    let allowed_count = result
         .trace
         .events
         .iter()
-        .filter(|e| matches!(e, RunEvent::ToolCallAttempt { .. }))
-        .collect();
-
-    // At least one attempt must have been denied (cap exceeded).
-    let denied_count = attempts
+        .filter(|e| matches!(e, RunEvent::ToolCallAttempt { allowed: true, .. }))
+        .count();
+    let denied_count = result
+        .trace
+        .events
         .iter()
         .filter(|e| matches!(e, RunEvent::ToolCallAttempt { allowed: false, .. }))
         .count();
-    assert!(
-        denied_count >= 1,
-        "expected at least one denied call after cap exceeded; trace: {:?}",
-        result.trace.events
-    );
+
+    assert_eq!(allowed_count, 1, "exactly one call should be allowed (within cap)");
+    assert_eq!(denied_count, 1, "exactly one call should be denied (cap reached)");
 }
 
 // A tool with a generous cap should be allowed as long as cost stays under it.
