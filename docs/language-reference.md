@@ -467,11 +467,12 @@ observe system_health {
 | `trace` | string/ident | Trace format |
 | `metrics` | `[ident, ...]` | Metrics to collect (bracket list, comma-separated) |
 | `alert when { ... }` | condition block | Alert condition (uses `when` expression syntax) |
-| `export` | identifier | Export format (e.g., `otlp`, `prometheus`) |
+| `export` | identifier | Export format. Supported at runtime: `otlp`, `stdout`. Other values parse but are not yet implemented. |
 
 > **Note:** The fields are `trace`, `metrics`, `alert when { }`, and `export`. Not `watch`, `alert_when`, or `notify`.
 
 ⚠️ Parse-only. OTLP trace export is available via `rein run --otel` but observe blocks are not wired to it.
+Using `export: prometheus` or `export: datadog` will parse successfully but produce a `W_EXPORT_UNSUPPORTED` warning in strict mode (`rein validate --strict`).
 
 ---
 
