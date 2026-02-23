@@ -336,3 +336,20 @@ pub fn to_otlp_json(trace: &StructuredTrace) -> Result<String, serde_json::Error
     let resource_spans = to_otlp(trace);
     serde_json::to_string_pretty(&resource_spans)
 }
+
+/// Determines how OTEL traces are exported after a run.
+#[derive(Debug, Clone, Default)]
+pub enum OtelMode {
+    /// No export (default).
+    #[default]
+    None,
+    /// Write OTLP JSON to a timestamped file on completion.
+    FileOnComplete,
+    /// Print OTLP JSON spans to stdout on completion.
+    /// `metrics` restricts which event types are included.
+    StdoutOnComplete {
+        /// Metric names to include ("latency", "cost", "`tool_calls`", "guardrails").
+        /// An empty vec means include all events.
+        metrics: Vec<String>,
+    },
+}

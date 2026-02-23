@@ -5,6 +5,7 @@ use super::circuit_breaker::CircuitBreaker;
 use super::executor::ToolExecutor;
 use super::guardrails::GuardrailEngine;
 use super::interceptor::{InterceptResult, ToolInterceptor};
+use super::otel_export::OtelMode;
 use super::permissions::ToolRegistry;
 use super::policy::PolicyEngine;
 use super::provider::{Message, Provider, ToolCallRequest, ToolDef};
@@ -104,6 +105,7 @@ pub struct AgentEngine<'a> {
     guardrails: GuardrailEngine,
     circuit_breaker: Option<Mutex<CircuitBreaker>>,
     policy_engine: Option<Mutex<PolicyEngine>>,
+    otel_mode: OtelMode,
 }
 
 impl<'a> AgentEngine<'a> {
@@ -126,6 +128,7 @@ impl<'a> AgentEngine<'a> {
             guardrails: GuardrailEngine::empty(),
             circuit_breaker: None,
             policy_engine: None,
+            otel_mode: OtelMode::None,
         }
     }
 
@@ -157,11 +160,19 @@ impl<'a> AgentEngine<'a> {
         self
     }
 
+    /// Set the OTEL export mode driven by an `observe` block or `--otel` flag.
+    #[must_use]
+    pub fn with_otel_mode(mut self, mode: OtelMode) -> Self {
+        self.otel_mode = mode;
+        self
+    }
+
     /// Run the agent with the given user message.
     ///
     /// # Errors
     /// Returns `RunError` if the run fails (budget exceeded, provider error, etc.).
     pub async fn run(&self, user_message: &str) -> Result<RunResult, RunError> {
+        let run_start = std::time::Instant::now();
         let mut state = RunState {
             messages: Vec::new(),
             events: Vec::new(),
@@ -254,7 +265,9 @@ impl<'a> AgentEngine<'a> {
 
             if response.tool_calls.is_empty() {
                 self.stream.on_complete();
-                return Ok(Self::finish(state, content));
+                let result = Self::finish(state, content);
+                self.apply_otel_export(&result, run_start.elapsed());
+                return Ok(result);
             }
 
             state.messages.push(Message::assistant(&response.content));
@@ -266,7 +279,9 @@ impl<'a> AgentEngine<'a> {
                 .await;
         }
 
-        Ok(Self::finish(state, "Max turns reached".to_string()))
+        let result = Self::finish(state, "Max turns reached".to_string());
+        self.apply_otel_export(&result, run_start.elapsed());
+        Ok(result)
     }
 
     /// Check budget and record the cost. Returns `Err` if exceeded.
@@ -385,6 +400,71 @@ impl<'a> AgentEngine<'a> {
         }
     }
 
+    /// Apply OTEL export after a run completes (side-effect only, never fails loudly).
+    fn apply_otel_export(&self, result: &RunResult, duration: std::time::Duration) {
+        match &self.otel_mode {
+            OtelMode::None => {}
+            OtelMode::FileOnComplete => {
+                Self::export_otel_to_file(result, duration);
+            }
+            OtelMode::StdoutOnComplete { metrics } => {
+                Self::export_otel_to_stdout(result, duration, metrics);
+            }
+        }
+    }
+
+    /// Build a `StructuredTrace` with wall-clock timestamps from a completed run.
+    fn build_structured_trace(
+        result: &RunResult,
+        duration: std::time::Duration,
+    ) -> super::StructuredTrace {
+        let now = chrono::Utc::now();
+        let started =
+            now - chrono::Duration::from_std(duration).unwrap_or(chrono::Duration::zero());
+        result.trace.to_structured(
+            "agent",
+            &started.to_rfc3339(),
+            &now.to_rfc3339(),
+            duration.as_millis().try_into().unwrap_or(u64::MAX),
+        )
+    }
+
+    /// Write OTLP JSON to a timestamped file.
+    fn export_otel_to_file(result: &RunResult, duration: std::time::Duration) {
+        let structured = Self::build_structured_trace(result, duration);
+        match super::otel_export::to_otlp_json(&structured) {
+            Ok(json) => {
+                let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+                let path = format!("rein-trace-{ts}.json");
+                match std::fs::write(&path, &json) {
+                    Ok(()) => eprintln!("OTLP trace written to {path}"),
+                    Err(e) => eprintln!("Failed to write OTLP trace: {e}"),
+                }
+            }
+            Err(e) => eprintln!("Failed to serialize OTLP trace: {e}"),
+        }
+    }
+
+    /// Print filtered OTLP JSON spans to stdout.
+    fn export_otel_to_stdout(
+        result: &RunResult,
+        duration: std::time::Duration,
+        metrics: &[String],
+    ) {
+        use super::otel_export::to_otlp;
+        let mut structured = Self::build_structured_trace(result, duration);
+        if !metrics.is_empty() {
+            structured
+                .events
+                .retain(|te| event_matches_metrics(&te.event, metrics));
+        }
+        let resource_spans = to_otlp(&structured);
+        match serde_json::to_string_pretty(&resource_spans) {
+            Ok(json) => println!("{json}"),
+            Err(e) => eprintln!("Failed to serialize OTLP trace: {e}"),
+        }
+    }
+
     /// Extract namespace from a tool name like `zendesk.read_ticket`.
     fn extract_namespace(name: &str) -> String {
         name.find('.').map_or_else(
@@ -406,4 +486,28 @@ impl<'a> AgentEngine<'a> {
             |i| name[i + 1..].to_string(),
         )
     }
+}
+
+/// Returns `true` if the event contributes to any of the requested metric categories.
+///
+/// Metric names:
+/// - `"cost"` → `LlmCall`, `BudgetUpdate`
+/// - `"tool_calls"` → `ToolCallAttempt`, `ToolCallResult`
+/// - `"latency"` → `LlmCall`
+/// - `"guardrails"` → `GuardrailTriggered`
+fn event_matches_metrics(event: &RunEvent, metrics: &[String]) -> bool {
+    use super::RunEvent;
+    metrics.iter().any(|m| match m.as_str() {
+        "cost" => matches!(
+            event,
+            RunEvent::LlmCall { .. } | RunEvent::BudgetUpdate { .. }
+        ),
+        "tool_calls" => matches!(
+            event,
+            RunEvent::ToolCallAttempt { .. } | RunEvent::ToolCallResult { .. }
+        ),
+        "latency" => matches!(event, RunEvent::LlmCall { .. }),
+        "guardrails" => matches!(event, RunEvent::GuardrailTriggered { .. }),
+        _ => false,
+    })
 }
