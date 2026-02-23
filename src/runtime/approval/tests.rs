@@ -394,9 +394,13 @@ async fn auditing_handler_records_pending_decision() {
     let entries = log.read_all().unwrap();
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[1].kind, AuditKind::ApprovalResolved);
+    // Pending maps to "timed_out" in the audit record because the workflow
+    // engine terminates Pending the same way as TimedOut (ApprovalTimedOut error).
+    // Recording "pending" would mislead compliance consumers into thinking the
+    // workflow is still running when it has already been terminated.
     assert_eq!(
-        entries[1].metadata["decision"], "pending",
-        "pending decision must be recorded in metadata"
+        entries[1].metadata["decision"], "timed_out",
+        "pending decision must be recorded as timed_out in metadata"
     );
 }
 

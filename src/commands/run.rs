@@ -158,18 +158,24 @@ fn run_workflow_mode(
         budget_cents,
     };
     // Construct an AuditLog if the caller requested one via --audit-log.
-    let audit_log = audit_log_path.and_then(|p| match rein::runtime::audit::AuditLog::new(p) {
-        Ok(log) => Some(Arc::new(log)),
-        Err(e) => {
-            // TODO(#377): replace with tracing::warn! once `tracing` is in Cargo.toml.
-            eprintln!(
-                "warn: could not initialize audit log '{}': {e} — \
-                 approval audit will be skipped for this run",
-                p.display()
-            );
-            None
+    // Failure is fatal: an operator who explicitly passes --audit-log expects
+    // full audit coverage. Silently continuing with no log would produce a
+    // run with zero audit coverage while the operator believes they have it.
+    let audit_log: Option<Arc<rein::runtime::audit::AuditLog>> = if let Some(p) = audit_log_path {
+        match rein::runtime::audit::AuditLog::new(p) {
+            Ok(log) => Some(Arc::new(log)),
+            Err(e) => {
+                eprintln!(
+                    "error: could not initialize audit log '{}': {e}",
+                    p.display()
+                );
+                eprintln!("hint: check that the parent directory exists and is writable");
+                return 1;
+            }
         }
-    });
+    } else {
+        None
+    };
     let ctx = rein::runtime::workflow::WorkflowContext {
         file,
         provider,
@@ -479,33 +485,20 @@ mod tests {
         assert!(matches!(mode, OtelMode::FileOnComplete));
     }
 
-    // #358: audit log open failure must be fail-open — workflow continues
-    // with audit_log = None and the caller emits a warning.
+    // #358: AuditLog::new returns Err for unwritable paths. The CLI layer
+    // (run_workflow_mode) is responsible for turning this Err into exit code 1;
+    // this unit test verifies that AuditLog::new itself correctly fails rather
+    // than silently succeeding, so the CLI logic has a reliable signal to act on.
     #[test]
-    fn audit_log_open_failure_is_fail_open() {
-        // A directory path cannot be opened as a file — triggers AuditLog::new error.
-        let dir = tempfile::tempdir().expect("tempdir");
-        let bad_path = dir.path(); // directory, not a file — creation will fail on write
-        // We can't easily test eprintln! output, but we can verify the function
-        // returns None (fail-open) rather than panicking.
-        let result = bad_path
-            .join("deeply/nested/nonexistent/audit.jsonl")
-            .into_os_string()
-            .into_string()
-            .ok()
-            .and_then(|p| {
-                let path = std::path::PathBuf::from(p);
-                // Override: use a path under a non-existent root to force failure.
-                rein::runtime::audit::AuditLog::new(std::path::Path::new(
-                    "/nonexistent_root_that_cannot_exist/audit.jsonl",
-                ))
-                .ok()
-            });
-        // The path is under a non-existent root — AuditLog::new should fail.
-        // On macOS/Linux the root "/" is readable but this sub-path is not writable,
-        // so new() may succeed (it only creates dirs, not the file itself).
-        // Accept either outcome; the key assertion is no panic.
-        let _ = result; // no panic = pass
+    fn audit_log_new_fails_for_unwritable_path() {
+        // A path under a non-existent root cannot be created.
+        let result = rein::runtime::audit::AuditLog::new(std::path::Path::new(
+            "/nonexistent_root_that_cannot_exist/audit.jsonl",
+        ));
+        assert!(
+            result.is_err(),
+            "AuditLog::new should return Err for unwritable paths so CLI can fail-hard"
+        );
     }
 
     // #358: resolve_secrets_with_audit tests Arc<dyn ApprovalHandler> wrapping

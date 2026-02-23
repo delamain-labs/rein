@@ -385,12 +385,11 @@ impl<H: ApprovalHandler> ApprovalHandler for AuditingApprovalHandler<H> {
         let decision = match &status {
             ApprovalStatus::Approved => "approved",
             ApprovalStatus::Rejected { .. } => "rejected",
-            ApprovalStatus::TimedOut => "timed_out",
-            // `Pending` is returned by the inner handler if it defers to an
-            // async polling mechanism. In practice the CLI/webhook handlers
-            // always resolve synchronously, so this arm is unlikely to fire
-            // in production. It is kept here for completeness.
-            ApprovalStatus::Pending => "pending",
+            // Both TimedOut and Pending are mapped to WorkflowError::ApprovalTimedOut
+            // by the workflow engine. The audit record uses "timed_out" for both so
+            // compliance consumers do not incorrectly infer the workflow is still
+            // running when it has already been terminated.
+            ApprovalStatus::TimedOut | ApprovalStatus::Pending => "timed_out",
         };
         // Capture the rejection reason if present so the audit record can
         // reconstruct _why_ an approval was rejected (not just that it was).
