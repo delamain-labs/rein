@@ -150,15 +150,13 @@ fn pre_epoch_started_at_falls_back_to_epoch_zero() {
 // This is tested indirectly: the fallback produces a non-zero end_ns equal to start + duration.
 #[test]
 fn invalid_completed_at_falls_back_to_start_plus_duration() {
-    // started_at = 2026-01-01T00:00:00Z = 1_767_225_600_000_000_000 ns
-    let start_ns: u64 = 1_767_225_600 * 1_000_000_000;
+    let started_at = "2026-01-01T00:00:00Z";
+    // Derive start_ns from the same helper to keep the test self-consistent.
+    let start_ns: u64 =
+        try_rfc3339_to_unix_nanos(started_at).expect("test timestamp must be valid RFC 3339");
     let duration_ms: u64 = 2_000;
-    let trace = RunTrace { events: vec![] }.to_structured(
-        "agent",
-        "2026-01-01T00:00:00Z",
-        "not-a-date",
-        duration_ms,
-    );
+    let trace =
+        RunTrace { events: vec![] }.to_structured("agent", started_at, "not-a-date", duration_ms);
     let root = &to_otlp(&trace).scope_spans[0].spans[0];
     assert_eq!(
         root.end_time_unix_nano,

@@ -111,7 +111,7 @@ fn pseudo_id(seed: u64, len: usize) -> String {
 
 /// Parse an RFC 3339 timestamp string and return nanoseconds since Unix epoch,
 /// or `None` if the string cannot be parsed or represents a pre-epoch time.
-fn try_rfc3339_to_unix_nanos(ts: &str) -> Option<u64> {
+pub(crate) fn try_rfc3339_to_unix_nanos(ts: &str) -> Option<u64> {
     use chrono::DateTime;
     DateTime::parse_from_rfc3339(ts)
         .ok()
