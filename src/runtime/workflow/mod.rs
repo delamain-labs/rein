@@ -46,6 +46,7 @@ pub struct WorkflowResult {
     /// executions (sequential/parallel) this includes agent-level events
     /// from every stage: `LlmCall`, `ToolCallAttempt`, `BudgetUpdate`, etc.
     /// For step-based executions this contains workflow-level events:
+    /// `StepStarted`, `StepCompleted`, `StepFailed`, `StepSkipped`,
     /// `StepFallback`, `ForEachIteration`, `AutoResolved`.
     pub events: Vec<super::RunEvent>,
 }

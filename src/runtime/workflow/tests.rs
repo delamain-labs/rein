@@ -2138,6 +2138,81 @@ async fn approval_timed_out_aborts_workflow() {
     );
 }
 
+/// `ApprovalRejected` is a hard error and must abort `run_steps` immediately
+/// (not be absorbed as a soft failure). Mirrors `approval_timed_out_aborts_workflow`.
+#[tokio::test]
+async fn approval_rejected_aborts_workflow() {
+    use crate::ast::{ApprovalDef, ApprovalKind, Span as AstSpan};
+    use crate::runtime::approval::ApprovalStatus;
+    use std::sync::Arc;
+
+    struct RejectHandler;
+    #[async_trait::async_trait]
+    impl crate::runtime::approval::ApprovalHandler for RejectHandler {
+        async fn request_approval(
+            &self,
+            _step: &str,
+            _output: &str,
+            _approval: &crate::ast::ApprovalDef,
+        ) -> ApprovalStatus {
+            ApprovalStatus::Rejected {
+                reason: "policy violation".to_string(),
+            }
+        }
+    }
+
+    let file = parse_file(r#"agent bot { model: openai }"#);
+    let step_a = crate::ast::StepDef {
+        name: "gated".to_string(),
+        agent: "bot".to_string(),
+        goal: None,
+        input: None,
+        output_constraints: vec![],
+        depends_on: vec![],
+        when: None,
+        on_failure: None,
+        send_to: None,
+        fallback: None,
+        for_each: None,
+        typed_input: None,
+        typed_outputs: vec![],
+        escalate: None,
+        approval: Some(ApprovalDef {
+            kind: ApprovalKind::Approve,
+            channel: "cli".to_string(),
+            destination: "#ops".to_string(),
+            timeout: Some("1m".to_string()),
+            mode: None,
+            span: AstSpan::new(0, 1),
+        }),
+        span: AstSpan::new(0, 1),
+    };
+    let workflow = make_workflow_steps("rejected_wf", "start", vec![step_a]);
+
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    provider.push_response(simple_response("output"));
+
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: Some(Arc::new(RejectHandler)),
+    };
+
+    let result = run_steps(&workflow, &ctx).await;
+    assert!(
+        matches!(result, Err(WorkflowError::ApprovalRejected { .. })),
+        "ApprovalRejected must abort run_steps immediately; got: {result:?}"
+    );
+    assert!(
+        matches!(result, Err(ref e) if e.is_hard_error()),
+        "ApprovalRejected must be classified as a hard error"
+    );
+}
+
 /// Steps with no dependency on the failed step should still execute.
 #[tokio::test]
 async fn independent_step_runs_even_if_sibling_fails() {
