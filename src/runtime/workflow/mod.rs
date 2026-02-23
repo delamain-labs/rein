@@ -115,16 +115,28 @@ impl WorkflowError {
     /// step should be recorded as failed and the workflow should continue,
     /// skipping any steps that depend on the failed step.
     ///
-    /// New variants are hard errors by default — they must be explicitly opted
-    /// into soft behaviour by adding a `false` arm here.
+    /// Classification uses an exhaustive `match` (no wildcard) so that adding a
+    /// new `WorkflowError` variant produces a compile error until its hard/soft
+    /// status is made explicit.
+    ///
+    /// Hard errors: policy enforcement, topology bugs, infrastructure failures.
+    /// Soft errors: transient agent/LLM failures where the step is skipped and
+    /// dependent steps are cascaded; the workflow continues.
     #[must_use]
     pub fn is_hard_error(&self) -> bool {
-        matches!(
-            self,
+        match self {
+            // Policy enforcement — workflow must not continue after a rejected
+            // or timed-out human approval gate. Topology bugs (cyclic deps,
+            // circular routes) mean the graph itself is malformed. State
+            // persistence failure risks data corruption if execution continues.
             Self::ApprovalRejected { .. }
-                | Self::ApprovalTimedOut { .. }
-                | Self::CyclicDependency(_)
-        )
+            | Self::ApprovalTimedOut { .. }
+            | Self::CyclicDependency(_)
+            | Self::CircularRoute(_)
+            | Self::PersistenceFailure(_) => true,
+            // Soft — step is recorded as failed; dependents are skipped.
+            Self::AgentNotFound(_) | Self::StageFailed { .. } | Self::StageNotFound(_) => false,
+        }
     }
 }
 
@@ -515,13 +527,16 @@ fn apply_step_result(
             }
             let reason = e.to_string();
             failed_steps.insert(step.name.clone());
+            // Insert an empty output so downstream steps that `filter_map`
+            // over `outputs` can observe the gap explicitly.
+            outputs.insert(step.name.clone(), String::new());
             events.push(super::RunEvent::StepFailed {
                 step: step.name.clone(),
                 reason,
             });
             results.push(StageResult {
                 stage_name: step.name.clone(),
-                agent_name: step.agent.clone(),
+                agent_name: "<failed>".to_string(),
                 output: String::new(),
                 cost_cents: 0,
                 tokens: 0,
@@ -575,9 +590,12 @@ pub async fn run_steps(
                 step: step.name.clone(),
                 reason,
             });
+            // Insert empty output so downstream steps that `filter_map` over
+            // `outputs` can observe the skipped entry explicitly.
+            outputs.insert(step.name.clone(), String::new());
             results.push(StageResult {
                 stage_name: step.name.clone(),
-                agent_name: step.agent.clone(),
+                agent_name: "<skipped>".to_string(),
                 output: String::new(),
                 cost_cents: 0,
                 tokens: 0,

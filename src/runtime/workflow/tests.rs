@@ -1512,6 +1512,10 @@ async fn step_without_fallback_propagates_error() {
         results[0].output.is_empty(),
         "failed step output must be empty"
     );
+    assert_eq!(
+        results[0].agent_name, "<failed>",
+        "failed StageResult must use '<failed>' sentinel so consumers can distinguish it"
+    );
     // A StepFailed event must be emitted so the trace is observable.
     assert!(
         events.iter().any(
@@ -2160,4 +2164,85 @@ async fn independent_step_runs_even_if_sibling_fails() {
         step_b_result.is_some(),
         "step_b should have run and produced output; results: {results:?}"
     );
+}
+
+/// #363 — Skipped StageResult uses "<skipped>" sentinel so consumers can
+/// distinguish it from a successfully-run step that returned no output.
+#[tokio::test]
+async fn skipped_step_result_uses_sentinel_agent_name() {
+    let file = parse_file(r#"agent bot { model: openai }"#);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // step_a: fails; step_b: depends on step_a → skipped.
+    let step_a = make_step("step_a", "nonexistent", vec![]);
+    let step_b = make_step("step_b", "bot", vec!["step_a"]);
+    let workflow = make_workflow_steps("sentinel_test", "start", vec![step_a, step_b]);
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+    };
+
+    let (results, _events) = run_steps(&workflow, &ctx)
+        .await
+        .expect("soft error must not abort run");
+
+    let step_b_result = results.iter().find(|r| r.stage_name == "step_b").unwrap();
+    assert_eq!(
+        step_b_result.agent_name, "<skipped>",
+        "skipped StageResult must use '<skipped>' sentinel"
+    );
+}
+
+/// #363 — A step whose dependency failed still sees an (empty) entry in the
+/// `outputs` map. Downstream steps using `filter_map` must not silently drop
+/// the gap; it is observable via the empty string, not a missing key.
+#[tokio::test]
+async fn failed_step_output_inserted_into_outputs_map() {
+    let file = parse_file(r#"agent bot { model: openai }"#);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // step_a (fails) → step_b (depends on step_a, skipped).
+    // step_c is independent and should run normally.
+    let step_a = make_step("step_a", "nonexistent", vec![]);
+    let step_b = make_step("step_b", "bot", vec!["step_a"]);
+    let step_c = make_step("step_c", "bot", vec![]);
+    let workflow = make_workflow_steps("outputs_gap", "start", vec![step_a, step_b, step_c]);
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+    };
+
+    provider.push_response(simple_response("step_c_out"));
+
+    let (results, events) = run_steps(&workflow, &ctx)
+        .await
+        .expect("independent step must run");
+
+    // step_c ran and produced output
+    let step_c_r = results.iter().find(|r| r.stage_name == "step_c").unwrap();
+    assert_eq!(step_c_r.output, "step_c_out");
+
+    // step_a failed → StepFailed event; step_b skipped → StepSkipped event
+    assert!(events.iter().any(
+        |e| matches!(e, crate::runtime::RunEvent::StepFailed { step, .. } if step == "step_a")
+    ));
+    assert!(events.iter().any(
+        |e| matches!(e, crate::runtime::RunEvent::StepSkipped { step, .. } if step == "step_b")
+    ));
+
+    // Failed and skipped results carry sentinels
+    let step_a_r = results.iter().find(|r| r.stage_name == "step_a").unwrap();
+    assert_eq!(step_a_r.agent_name, "<failed>");
+    let step_b_r = results.iter().find(|r| r.stage_name == "step_b").unwrap();
+    assert_eq!(step_b_r.agent_name, "<skipped>");
 }
