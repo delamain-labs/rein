@@ -148,3 +148,25 @@ fn resolve_unregistered_binding_returns_binding_not_found() {
     let err = resolver.resolve("nonexistent").unwrap_err();
     assert_eq!(err, SecretError::BindingNotFound("nonexistent".to_string()));
 }
+
+#[test]
+fn vault_path_with_non_alphanumeric_chars_maps_to_valid_env_key() {
+    // Paths with dots, @, and other non-ASCII-alphanumeric chars must all become '_'.
+    // "secret/my.service@v2" → VAULT_SECRET_MY_SERVICE_V2
+    let expected_env_key = "VAULT_SECRET_MY_SERVICE_V2";
+    unsafe { std::env::set_var(expected_env_key, "svcval") };
+    let def = SecretsDef {
+        bindings: vec![SecretBinding {
+            name: "svc".to_string(),
+            source: SecretSource::Vault {
+                path: "secret/my.service@v2".to_string(),
+            },
+            span: span(),
+        }],
+        span: span(),
+    };
+    let resolver = SecretResolver::from_def(&def);
+    let resolved = resolver.resolve_all().unwrap();
+    assert_eq!(resolved["svc"].value, "svcval");
+    unsafe { std::env::remove_var(expected_env_key) };
+}

@@ -271,7 +271,7 @@ fn resolve_secrets(
                         let env_key = format!(
                             "VAULT_{}",
                             path.chars()
-                                .map(|c| if c.is_alphanumeric() {
+                                .map(|c| if c.is_ascii_alphanumeric() {
                                     c.to_ascii_uppercase()
                                 } else {
                                     '_'

@@ -26,9 +26,9 @@ fn secrets_debug_redacts_values() {
     map.insert("KEY".to_string(), "another-secret".to_string());
     let secrets = Secrets::from(map);
     let debug_output = format!("{secrets:?}");
-    assert!(
-        debug_output.contains("redacted"),
-        "debug output must contain 'redacted', got: {debug_output}"
+    assert_eq!(
+        debug_output, "Secrets([redacted, 2 keys])",
+        "debug output must use exact redacted format"
     );
     assert!(
         !debug_output.contains("super-secret"),
@@ -37,10 +37,6 @@ fn secrets_debug_redacts_values() {
     assert!(
         !debug_output.contains("another-secret"),
         "debug output must not reveal secret values, got: {debug_output}"
-    );
-    assert!(
-        debug_output.contains('2'),
-        "debug output must show key count, got: {debug_output}"
     );
 }
 

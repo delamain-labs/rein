@@ -6,6 +6,7 @@ use super::ToolCall;
 ///
 /// Implements `Debug` with redacted output so that secrets are never
 /// accidentally written to logs or OTEL spans.
+#[derive(Clone, Default)]
 pub struct Secrets(HashMap<String, String>);
 
 impl std::fmt::Debug for Secrets {
