@@ -352,8 +352,6 @@ impl<H: ApprovalHandler> ApprovalHandler for AuditingApprovalHandler<H> {
         agent_output: &str,
         approval: &ApprovalDef,
     ) -> ApprovalStatus {
-        let start = std::time::Instant::now();
-
         // Emit ApprovalRequested before delegating.
         let mut requested = audit::entry(
             AuditKind::ApprovalRequested,
@@ -372,6 +370,9 @@ impl<H: ApprovalHandler> ApprovalHandler for AuditingApprovalHandler<H> {
             eprintln!("rein[audit]: warning: could not write ApprovalRequested entry: {e}");
         }
 
+        // Start the clock after writing ApprovalRequested so elapsed_ms
+        // reflects only the inner handler decision time, not the I/O overhead.
+        let start = std::time::Instant::now();
         let status = self
             .inner
             .request_approval(step_name, agent_output, approval)
