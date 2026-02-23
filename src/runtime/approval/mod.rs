@@ -285,6 +285,7 @@ pub struct AuditingApprovalHandler<H> {
 }
 
 impl<H> AuditingApprovalHandler<H> {
+    #[must_use]
     pub fn new(inner: H, log: Arc<AuditLog>) -> Self {
         Self { inner, log }
     }
@@ -311,8 +312,8 @@ impl<H: ApprovalHandler> ApprovalHandler for AuditingApprovalHandler<H> {
             "timeout": approval.timeout,
         });
         if let Err(e) = self.log.append(&requested) {
-            // TODO: replace with tracing::warn! once the `tracing` crate is
-            // available.
+            // TODO(#377): replace with tracing::warn! once the `tracing` crate
+            // is added to Cargo.toml.
             eprintln!("rein[audit]: warning: could not write ApprovalRequested entry: {e}");
         }
 
@@ -323,8 +324,6 @@ impl<H: ApprovalHandler> ApprovalHandler for AuditingApprovalHandler<H> {
 
         // Saturate at u64::MAX rather than failing; a run long enough to
         // overflow (~585 million years) is not realistic in practice.
-        // TODO: replace eprintln! with tracing::warn! once the `tracing` crate
-        // is added to Cargo.toml.
         #[allow(clippy::cast_possible_truncation)]
         let elapsed_ms = start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
         let decision = match &status {
@@ -337,6 +336,12 @@ impl<H: ApprovalHandler> ApprovalHandler for AuditingApprovalHandler<H> {
             // in production. It is kept here for completeness.
             ApprovalStatus::Pending => "pending",
         };
+        // Capture the rejection reason if present so the audit record can
+        // reconstruct _why_ an approval was rejected (not just that it was).
+        let rejection_reason = match &status {
+            ApprovalStatus::Rejected { reason } => Some(reason.as_str()),
+            _ => None,
+        };
 
         // Emit ApprovalResolved after delegating.
         let mut resolved = audit::entry(
@@ -348,10 +353,11 @@ impl<H: ApprovalHandler> ApprovalHandler for AuditingApprovalHandler<H> {
             "channel": approval.channel,
             "decision": decision,
             "elapsed_ms": elapsed_ms,
+            "reason": rejection_reason,
         });
         if let Err(e) = self.log.append(&resolved) {
-            // TODO: replace with tracing::warn! once the `tracing` crate is
-            // available.
+            // TODO(#377): replace with tracing::warn! once the `tracing` crate
+            // is added to Cargo.toml.
             eprintln!("rein[audit]: warning: could not write ApprovalResolved entry: {e}");
         }
 
