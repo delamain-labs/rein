@@ -201,14 +201,22 @@ impl RunTrace {
 
     /// Write the structured trace to a file as JSON.
     ///
+    /// `started_at` and `completed_at` must be RFC 3339 strings (e.g. from
+    /// `chrono::Utc::now().to_rfc3339()`). `duration_ms` is the wall-clock
+    /// run duration in milliseconds. All three values are recorded in the
+    /// trace and used by OTLP exporters to produce accurate span timestamps.
+    ///
     /// # Errors
     /// Returns IO or serialization errors.
     pub fn write_to_file(
         &self,
         path: &std::path::Path,
         agent_name: &str,
+        started_at: &str,
+        completed_at: &str,
+        duration_ms: u64,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let trace = self.to_structured(agent_name, "", "", 0);
+        let trace = self.to_structured(agent_name, started_at, completed_at, duration_ms);
         let json = serde_json::to_string_pretty(&trace)?;
         std::fs::write(path, json)?;
         Ok(())

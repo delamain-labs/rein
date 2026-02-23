@@ -200,10 +200,8 @@ pub fn to_otlp(trace: &StructuredTrace) -> OtelResourceSpans {
             // RunEvents have no intrinsic duration — they mark when the event
             // occurred, not how long it took. OTLP collectors render these as
             // instant markers rather than duration bars.
-            start_time_unix_nano: start_ns
-                .saturating_add(te.offset_ms.saturating_mul(1_000_000)),
-            end_time_unix_nano: start_ns
-                .saturating_add(te.offset_ms.saturating_mul(1_000_000)),
+            start_time_unix_nano: start_ns.saturating_add(te.offset_ms.saturating_mul(1_000_000)),
+            end_time_unix_nano: start_ns.saturating_add(te.offset_ms.saturating_mul(1_000_000)),
             attributes: attrs,
             status: OtelStatus {
                 code: 1,

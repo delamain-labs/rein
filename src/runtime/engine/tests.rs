@@ -737,7 +737,7 @@ fn run_complete_matches_cost_metric() {
 // #335: Verify secrets injected via with_secrets() reach executor.execute() ctx.
 // Uses a SecretCapturingExecutor that records the last secrets map seen.
 struct SecretCapturingExecutor {
-    captured: Mutex<Option<HashMap<String, String>>>,
+    captured: Mutex<Option<crate::runtime::executor::Secrets>>,
     response: String,
 }
 
@@ -749,7 +749,7 @@ impl SecretCapturingExecutor {
         }
     }
 
-    fn captured_secrets(&self) -> Option<HashMap<String, String>> {
+    fn captured_secrets(&self) -> Option<crate::runtime::executor::Secrets> {
         self.captured.lock().expect("lock").clone()
     }
 }

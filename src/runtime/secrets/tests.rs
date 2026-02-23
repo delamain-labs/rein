@@ -1,5 +1,7 @@
 #![allow(clippy::undocumented_unsafe_blocks)]
 
+use serial_test::serial;
+
 use super::*;
 use crate::ast::{SecretBinding, SecretSource, SecretsDef, Span};
 
@@ -8,6 +10,7 @@ fn span() -> Span {
 }
 
 #[test]
+#[serial]
 fn resolves_env_secret() {
     unsafe { std::env::set_var("TEST_REIN_SECRET", "my-api-key") };
     let def = SecretsDef {
@@ -28,6 +31,7 @@ fn resolves_env_secret() {
 }
 
 #[test]
+#[serial]
 fn env_not_found_returns_error() {
     unsafe { std::env::remove_var("NONEXISTENT_VAR_REIN_TEST") };
     let def = SecretsDef {
@@ -53,6 +57,7 @@ fn env_not_found_returns_error() {
 }
 
 #[test]
+#[serial]
 fn vault_falls_back_to_env() {
     unsafe { std::env::set_var("VAULT_SECRET_REIN_KEY", "vault-value") };
     let def = SecretsDef {
@@ -72,6 +77,7 @@ fn vault_falls_back_to_env() {
 }
 
 #[test]
+#[serial]
 fn vault_unavailable_without_env() {
     unsafe { std::env::remove_var("VAULT_SECRET_MISSING_PATH") };
     let def = SecretsDef {
@@ -89,6 +95,7 @@ fn vault_unavailable_without_env() {
 }
 
 #[test]
+#[serial]
 fn resolve_single_by_name() {
     unsafe { std::env::set_var("TEST_REIN_SINGLE", "single-val") };
     let def = SecretsDef {
@@ -150,6 +157,7 @@ fn resolve_unregistered_binding_returns_binding_not_found() {
 }
 
 #[test]
+#[serial]
 fn vault_path_with_non_alphanumeric_chars_maps_to_valid_env_key() {
     // Paths with dots, @, and other non-ASCII-alphanumeric chars must all become '_'.
     // "secret/my.service@v2" → VAULT_SECRET_MY_SERVICE_V2
