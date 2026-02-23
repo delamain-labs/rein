@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde_json::json;
 
 use super::*;
@@ -503,6 +505,82 @@ async fn engine_with_otel_mode_none_runs_successfully() {
         RunConfig::default(),
     )
     .with_otel_mode(OtelMode::None);
+    let result = engine.run("hi").await.unwrap();
+    assert_eq!(result.response, "done");
+}
+
+// --- #306 SecretsDef Tests ---
+
+#[tokio::test]
+async fn engine_with_secrets_runs_successfully() {
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("done"));
+    let executor = MockExecutor::new();
+    let agent = make_agent(vec![], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+
+    let mut secrets = HashMap::new();
+    secrets.insert("api_key".to_string(), "secret-value-123".to_string());
+
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig::default(),
+    )
+    .with_secrets(secrets);
+    let result = engine.run("hi").await.unwrap();
+    assert_eq!(result.response, "done");
+}
+
+#[tokio::test]
+async fn engine_secrets_not_leaked_in_trace() {
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("done"));
+    let executor = MockExecutor::new();
+    let agent = make_agent(vec![], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+
+    let mut secrets = HashMap::new();
+    secrets.insert("api_key".to_string(), "super-secret-value".to_string());
+
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig::default(),
+    )
+    .with_secrets(secrets);
+    let result = engine.run("hi").await.unwrap();
+
+    // Secrets are stored on the engine but never forwarded into RunEvent payloads.
+    // This test is a guardrail: if a future change inadvertently pipes secret values
+    // into trace events (e.g. as tool arguments or LLM messages), this will catch it.
+    let trace_json = serde_json::to_string(&result.trace).unwrap();
+    assert!(
+        !trace_json.contains("super-secret-value"),
+        "secret value leaked into trace"
+    );
+}
+
+#[tokio::test]
+async fn engine_without_secrets_runs_successfully() {
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("done"));
+    let executor = MockExecutor::new();
+    let agent = make_agent(vec![], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+
+    // No with_secrets() call — default empty map.
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig::default(),
+    );
     let result = engine.run("hi").await.unwrap();
     assert_eq!(result.response, "done");
 }

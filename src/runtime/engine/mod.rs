@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use super::budget::{BudgetTracker, calculate_cost};
@@ -108,6 +109,8 @@ pub struct AgentEngine<'a> {
     otel_mode: OtelMode,
     /// Agent name embedded in OTEL spans (e.g. `rein.run.<agent>`).
     agent_name: Option<String>,
+    /// Resolved secrets injected from `secrets { }` blocks. Never emitted to trace.
+    secrets: HashMap<String, String>,
 }
 
 impl<'a> AgentEngine<'a> {
@@ -132,6 +135,7 @@ impl<'a> AgentEngine<'a> {
             policy_engine: None,
             otel_mode: OtelMode::None,
             agent_name: None,
+            secrets: HashMap::new(),
         }
     }
 
@@ -174,6 +178,14 @@ impl<'a> AgentEngine<'a> {
     #[must_use]
     pub fn with_agent_name(mut self, name: String) -> Self {
         self.agent_name = Some(name);
+        self
+    }
+
+    /// Inject resolved secrets from `secrets { }` blocks.
+    /// Values are never emitted to the trace or OTEL spans.
+    #[must_use]
+    pub fn with_secrets(mut self, secrets: HashMap<String, String>) -> Self {
+        self.secrets = secrets;
         self
     }
 
