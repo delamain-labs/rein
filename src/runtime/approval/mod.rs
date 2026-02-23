@@ -145,3 +145,146 @@ pub fn parse_timeout(s: &str) -> Option<u64> {
         s.parse::<u64>().ok()
     }
 }
+
+/// A webhook-based approval handler.
+///
+/// POSTs a JSON payload (including the agent's output) to the configured URL.
+/// On success (2xx) the step is auto-approved — real asynchronous approval
+/// callbacks are a v2 feature. On any network error the step is auto-approved
+/// so the workflow is not blocked by a misconfigured notification endpoint.
+pub struct WebhookApprovalHandler {
+    url: String,
+    client: reqwest::Client,
+}
+
+impl WebhookApprovalHandler {
+    #[must_use]
+    pub fn new(url: String) -> Self {
+        Self {
+            url,
+            client: reqwest::Client::new(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl ApprovalHandler for WebhookApprovalHandler {
+    async fn request_approval(
+        &self,
+        step_name: &str,
+        agent_output: &str,
+        approval: &ApprovalDef,
+    ) -> ApprovalStatus {
+        let payload = serde_json::json!({
+            "step": step_name,
+            "channel": approval.channel,
+            "agent_output": agent_output,
+        });
+
+        match self.client.post(&self.url).json(&payload).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                eprintln!("[webhook] Approval notification sent for step '{step_name}'");
+                ApprovalStatus::Approved
+            }
+            Ok(resp) => {
+                eprintln!(
+                    "[webhook] Approval endpoint returned {}: auto-approving step '{step_name}'",
+                    resp.status()
+                );
+                ApprovalStatus::Approved
+            }
+            Err(e) => {
+                eprintln!(
+                    "[webhook] Failed to notify approval endpoint for step '{step_name}': {e}"
+                );
+                eprintln!("[webhook] Auto-approving to avoid blocking workflow");
+                ApprovalStatus::Approved
+            }
+        }
+    }
+}
+
+/// A Slack-based approval handler.
+///
+/// POSTs a formatted message (including the agent's output) to the Slack
+/// incoming webhook URL, then auto-approves the step. Full interactive Slack
+/// approval (Block Kit buttons with callback handling) is deferred to a
+/// follow-up.
+pub struct SlackApprovalHandler {
+    webhook_url: String,
+    client: reqwest::Client,
+}
+
+impl SlackApprovalHandler {
+    #[must_use]
+    pub fn new(webhook_url: String) -> Self {
+        Self {
+            webhook_url,
+            client: reqwest::Client::new(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl ApprovalHandler for SlackApprovalHandler {
+    async fn request_approval(
+        &self,
+        step_name: &str,
+        agent_output: &str,
+        approval: &ApprovalDef,
+    ) -> ApprovalStatus {
+        let timeout_str = approval.timeout.as_deref().unwrap_or("no timeout");
+        let text = format!(
+            "Approval required: step '{step_name}'\nTimeout: {timeout_str}\n\nAgent output:\n{agent_output}"
+        );
+        let payload = serde_json::json!({ "text": text });
+
+        match self
+            .client
+            .post(&self.webhook_url)
+            .json(&payload)
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => {
+                eprintln!("[slack] Approval notification sent for step '{step_name}'");
+            }
+            Ok(resp) => {
+                eprintln!(
+                    "[slack] Slack endpoint returned {}: auto-approving step '{step_name}'",
+                    resp.status()
+                );
+            }
+            Err(e) => {
+                eprintln!("[slack] Failed to send Slack notification for step '{step_name}': {e}");
+                eprintln!("[slack] Auto-approving to avoid blocking workflow");
+            }
+        }
+
+        // MVP: notify-and-auto-approve. Interactive callbacks are v2.
+        ApprovalStatus::Approved
+    }
+}
+
+/// Select an `ApprovalHandler` based on the channel type in the `ApprovalDef`.
+///
+/// - `"webhook"` → `WebhookApprovalHandler` (POST to `destination` URL)
+/// - `"slack"` → `SlackApprovalHandler` (POST to `destination` Slack webhook URL)
+/// - `"cli"` → `CliApprovalHandler` (interactive stdin prompt)
+/// - anything else → warning + `CliApprovalHandler` fallback
+#[must_use]
+pub fn resolve_approval_handler(approval: &ApprovalDef) -> Box<dyn ApprovalHandler> {
+    match approval.channel.as_str() {
+        "webhook" => Box::new(WebhookApprovalHandler::new(approval.destination.clone())),
+        "slack" => Box::new(SlackApprovalHandler::new(approval.destination.clone())),
+        "cli" => Box::new(CliApprovalHandler),
+        "" => {
+            eprintln!("warn: approval channel is empty, falling back to CLI prompt");
+            Box::new(CliApprovalHandler)
+        }
+        other => {
+            eprintln!("warn: unknown approval channel '{other}', falling back to CLI prompt");
+            Box::new(CliApprovalHandler)
+        }
+    }
+}

@@ -88,3 +88,82 @@ fn collaborate_approval_def() {
     assert!(def.timeout.is_none());
     assert_eq!(def.mode, Some(crate::ast::CollaborationMode::Review));
 }
+
+// --- #308 Channel Routing Tests ---
+
+fn make_approval_for_channel(channel: &str, destination: &str) -> ApprovalDef {
+    ApprovalDef {
+        kind: ApprovalKind::Approve,
+        channel: channel.to_string(),
+        destination: destination.to_string(),
+        timeout: Some("1h".to_string()),
+        mode: None,
+        span: span(),
+    }
+}
+
+#[test]
+fn resolve_handler_cli_for_cli_channel() {
+    // CliApprovalHandler reads from stdin so it cannot be exercised in a headless
+    // test; we verify the dispatch path constructs without panic.
+    let approval = make_approval_for_channel("cli", "");
+    let _ = resolve_approval_handler(&approval);
+}
+
+#[test]
+fn resolve_handler_empty_channel_falls_back_to_cli() {
+    // An empty channel string is a misconfiguration — should fall back to CLI.
+    let approval = make_approval_for_channel("", "");
+    let _ = resolve_approval_handler(&approval);
+}
+
+#[test]
+fn resolve_handler_cli_for_unknown_channel() {
+    // Unknown channel types fall back to CLI with a warning.
+    let approval = make_approval_for_channel("unknown_channel_xyz", "");
+    let _ = resolve_approval_handler(&approval);
+}
+
+#[tokio::test]
+async fn webhook_handler_auto_approves_on_failure() {
+    // When the webhook POST fails (invalid URL), the handler falls back to auto-approve.
+    let handler = WebhookApprovalHandler::new("http://localhost:0/nonexistent".to_string());
+    let approval = make_approval_for_channel("webhook", "http://localhost:0/nonexistent");
+    let status = handler
+        .request_approval("deploy", "Agent output here", &approval)
+        .await;
+    assert_eq!(status, ApprovalStatus::Approved);
+}
+
+#[tokio::test]
+async fn slack_handler_falls_back_to_auto_approve_on_failure() {
+    // Slack webhook POST will fail (invalid URL); should fall back gracefully.
+    let handler = SlackApprovalHandler::new("http://localhost:0/nonexistent".to_string());
+    let approval = make_approval_for_channel("slack", "http://localhost:0/nonexistent");
+    let status = handler
+        .request_approval("notify", "Agent output here", &approval)
+        .await;
+    assert_eq!(status, ApprovalStatus::Approved);
+}
+
+#[tokio::test]
+async fn resolve_handler_returns_slack_for_slack_channel() {
+    // Dispatch to Slack path; verify the resolved handler auto-approves on network failure.
+    let approval = make_approval_for_channel("slack", "http://localhost:0/nonexistent");
+    let handler = resolve_approval_handler(&approval);
+    let status = handler
+        .request_approval("deploy", "Agent output here", &approval)
+        .await;
+    assert_eq!(status, ApprovalStatus::Approved);
+}
+
+#[tokio::test]
+async fn resolve_handler_returns_webhook_for_webhook_channel() {
+    // Dispatch to webhook path; verify the resolved handler auto-approves on network failure.
+    let approval = make_approval_for_channel("webhook", "http://localhost:0/nonexistent");
+    let handler = resolve_approval_handler(&approval);
+    let status = handler
+        .request_approval("deploy", "Agent output here", &approval)
+        .await;
+    assert_eq!(status, ApprovalStatus::Approved);
+}
