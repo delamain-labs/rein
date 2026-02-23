@@ -412,6 +412,16 @@ fn event_to_span_data(event: &super::RunEvent) -> (String, Vec<OtelAttribute>) {
                 attr_str("rein.step.reason", reason),
             ],
         ),
+        RunEvent::StageTimeout { turn, timeout_secs } => (
+            "rein.stage.timeout".to_string(),
+            vec![
+                attr_int("rein.stage.turn", i64::try_from(*turn).unwrap_or(-1)),
+                attr_int(
+                    "rein.stage.timeout_secs",
+                    i64::try_from(*timeout_secs).unwrap_or(i64::MAX),
+                ),
+            ],
+        ),
     }
 }
 

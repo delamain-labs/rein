@@ -89,7 +89,7 @@ impl std::fmt::Display for WorkflowError {
         match self {
             Self::AgentNotFound(name) => write!(f, "agent not found: {name}"),
             Self::StageFailed { stage, error } => {
-                write!(f, "stage '{stage}' failed: {error:?}")
+                write!(f, "stage '{stage}' failed: {error}")
             }
             Self::StageNotFound(name) => write!(f, "route target stage not found: {name}"),
             Self::PersistenceFailure(msg) => write!(f, "state persistence failed: {msg}"),

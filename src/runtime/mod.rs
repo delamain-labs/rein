@@ -136,6 +136,11 @@ pub enum RunEvent {
         step: String,
         reason: String,
     },
+    /// Provider call exceeded the configured `stage_timeout_secs` on this turn.
+    StageTimeout {
+        turn: usize,
+        timeout_secs: u64,
+    },
 }
 
 /// An ordered log of all events that occurred during a run.
@@ -439,6 +444,9 @@ fn summarize_event(event: &RunEvent, lines: &mut Vec<String>, turn: &mut usize) 
         RunEvent::StepFailed { step, reason } => {
             lines.push(format!("  ✗ step '{step}' failed: {reason}"));
         }
+        RunEvent::StageTimeout { turn, timeout_secs } => {
+            lines.push(format!("  ✗ turn {turn} timed out after {timeout_secs}s"));
+        }
     }
 }
 
@@ -491,6 +499,27 @@ pub enum RunError {
     CircuitBreakerOpen,
     GuardrailBlocked,
     EvalFailed,
+    /// Provider call exceeded `stage_timeout_secs`. Contains events emitted
+    /// up to (and including) the `StageTimeout` event so callers can inspect
+    /// the partial trace (e.g. in tests or structured error reporting).
+    Timeout {
+        partial_trace: RunTrace,
+    },
+}
+
+impl std::fmt::Display for RunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BudgetExceeded => write!(f, "budget exceeded"),
+            Self::PermissionDenied => write!(f, "permission denied"),
+            Self::ProviderError => write!(f, "provider error"),
+            Self::ConfigError => write!(f, "configuration error"),
+            Self::CircuitBreakerOpen => write!(f, "circuit breaker open"),
+            Self::GuardrailBlocked => write!(f, "guardrail blocked"),
+            Self::EvalFailed => write!(f, "eval failed"),
+            Self::Timeout { .. } => write!(f, "provider timed out"),
+        }
+    }
 }
 
 #[cfg(test)]

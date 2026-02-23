@@ -11,6 +11,25 @@ use crate::runtime::otel_export::OtelMode;
 use crate::runtime::policy::PolicyEngine;
 use crate::runtime::provider::{ChatResponse, MockProvider, ToolCallRequest, ToolDef, Usage};
 
+/// A `Provider` that never resolves — used to test timeout behaviour.
+/// Tokio's mock clock (`start_paused = true`) advances automatically past any
+/// `tokio::time::timeout` wrapper so the test finishes instantly.
+struct HangingProvider;
+
+#[async_trait::async_trait]
+impl crate::runtime::provider::Provider for HangingProvider {
+    fn name(&self) -> &'static str {
+        "hanging"
+    }
+    async fn chat(
+        &self,
+        _messages: &[crate::runtime::provider::Message],
+        _tools: &[ToolDef],
+    ) -> Result<ChatResponse, crate::runtime::provider::ProviderError> {
+        std::future::pending().await
+    }
+}
+
 fn make_agent(
     can: Vec<Capability>,
     cannot: Vec<Capability>,
@@ -901,5 +920,181 @@ async fn capped_tool_allowed_within_cap() {
         denied_count, 0,
         "tool within cap should not be denied; trace: {:?}",
         result.trace.events
+    );
+}
+
+// #355: stage_timeout_secs must cause engine.run() to return RunError::Timeout
+// when the provider does not respond within the configured window.
+// The partial trace in the error must contain a StageTimeout event.
+#[tokio::test(start_paused = true)]
+async fn stage_timeout_fires_when_provider_hangs() {
+    let agent = make_agent(vec![], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+    let executor = MockExecutor::new();
+    let provider = HangingProvider;
+
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig {
+            stage_timeout_secs: Some(5),
+            ..RunConfig::default()
+        },
+    );
+
+    // start_paused = true: tokio auto-advances mock time when all tasks are
+    // waiting on timers. The 5-second timeout will fire automatically.
+    let result = engine.run("hello").await;
+
+    // Destructure directly — this verifies the correct variant and lets us
+    // inspect the partial trace in a single binding.
+    let Err(RunError::Timeout { partial_trace }) = result else {
+        panic!("expected RunError::Timeout, got a different result");
+    };
+    let has_timeout_event = partial_trace.events.iter().any(|e| {
+        matches!(
+            e,
+            RunEvent::StageTimeout {
+                turn: 0,
+                timeout_secs: 5
+            }
+        )
+    });
+    assert!(
+        has_timeout_event,
+        "partial_trace must contain a StageTimeout event; got: {:?}",
+        partial_trace.events
+    );
+    // The StageTimeout event must be last — the doc comment on RunError::Timeout
+    // establishes this ordering contract.
+    assert!(
+        matches!(
+            partial_trace.events.last(),
+            Some(RunEvent::StageTimeout { .. })
+        ),
+        "StageTimeout must be the last event in the partial trace; got: {:?}",
+        partial_trace.events
+    );
+}
+
+// #355: when stage_timeout_secs is None (the default), existing runs complete
+// normally — no timeout is applied and no regression is introduced.
+#[tokio::test]
+async fn no_timeout_when_stage_timeout_secs_is_none() {
+    let agent = make_agent(vec![], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+    let executor = MockExecutor::new();
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("done"));
+
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig {
+            stage_timeout_secs: None,
+            ..RunConfig::default()
+        },
+    );
+
+    let result = engine.run("hello").await;
+    assert!(
+        result.is_ok(),
+        "run without timeout should succeed: {:?}",
+        result
+    );
+}
+
+// #355: stage_timeout_secs = 0 is treated as no timeout (same as None).
+// A zero-second duration would fire immediately before any I/O, so it is
+// filtered out in call_provider_with_timeout to prevent a footgun.
+#[tokio::test]
+async fn zero_stage_timeout_treated_as_no_timeout() {
+    let agent = make_agent(vec![], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+    let executor = MockExecutor::new();
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("done"));
+
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig {
+            stage_timeout_secs: Some(0),
+            ..RunConfig::default()
+        },
+    );
+
+    let result = engine.run("hello").await;
+    assert!(
+        result.is_ok(),
+        "stage_timeout_secs=0 should not block the run: {:?}",
+        result
+    );
+}
+
+// #355: a timeout counts as a provider failure for circuit-breaker purposes.
+// The partial trace's last event must be StageTimeout, and the circuit breaker
+// must open after a single timeout when threshold = 1.
+#[tokio::test(start_paused = true)]
+async fn stage_timeout_records_circuit_breaker_failure() {
+    use crate::runtime::circuit_breaker::CircuitBreaker;
+
+    let agent = make_agent(vec![], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+    let executor = MockExecutor::new();
+    let provider = HangingProvider;
+
+    // Circuit breaker with threshold = 1: a single failure opens it.
+    let cb = CircuitBreaker::from_def(&crate::ast::CircuitBreakerDef {
+        name: "test-cb".to_string(),
+        failure_threshold: 1,
+        window_minutes: 1,
+        half_open_after_minutes: 1,
+        span: crate::ast::Span { start: 0, end: 0 },
+    });
+
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig {
+            stage_timeout_secs: Some(1),
+            ..RunConfig::default()
+        },
+    )
+    .with_circuit_breaker(cb);
+
+    // First run: timeout fires, circuit breaker records one failure.
+    let result = engine.run("hello").await;
+    assert!(
+        matches!(result, Err(RunError::Timeout { .. })),
+        "first run should time out"
+    );
+    // Partial trace must contain a StageTimeout event — same contract as the
+    // non-CB timeout path.
+    if let Err(RunError::Timeout { partial_trace }) = &result {
+        assert!(
+            partial_trace
+                .events
+                .iter()
+                .any(|e| matches!(e, RunEvent::StageTimeout { .. })),
+            "partial trace must contain StageTimeout; got: {:?}",
+            partial_trace.events
+        );
+    }
+
+    // Second run: circuit breaker is now open after the failure above.
+    let result2 = engine.run("hello").await;
+    assert!(
+        matches!(result2, Err(RunError::CircuitBreakerOpen)),
+        "second run should be blocked by open circuit breaker; got: {:?}",
+        result2
     );
 }

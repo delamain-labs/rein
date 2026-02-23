@@ -66,6 +66,7 @@ pub fn run_agent(
         system_prompt: None,
         max_turns: 10,
         budget_cents: agent.budget.as_ref().map_or(0, |b| b.amount),
+        stage_timeout_secs: None,
     };
 
     // Build engine with enforcement.
@@ -147,6 +148,7 @@ fn run_workflow_mode(
         system_prompt: None,
         max_turns: 10,
         budget_cents,
+        stage_timeout_secs: None,
     };
     let ctx = rein::runtime::workflow::WorkflowContext {
         file,
@@ -196,6 +198,14 @@ fn run_engine(engine: &rein::runtime::engine::AgentEngine<'_>, user_message: &st
             eprintln!("{}", run_result.trace.summary());
             eprintln!("Duration: {duration:.2?}");
             0
+        }
+        Err(rein::runtime::RunError::Timeout { partial_trace }) => {
+            eprintln!();
+            eprintln!(
+                "Run timed out: a provider call did not respond within the configured timeout."
+            );
+            eprintln!("{}", partial_trace.summary());
+            1
         }
         Err(e) => {
             eprintln!();

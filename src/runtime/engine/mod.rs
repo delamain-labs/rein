@@ -15,6 +15,18 @@ use super::{RunError, RunEvent, RunTrace, ToolCall};
 #[cfg(test)]
 mod tests;
 
+/// Error variants returned by `AgentEngine::call_provider_with_timeout`.
+///
+/// Kept module-private — callers inside `run()` translate these into the
+/// public `RunError` variants before returning to the outside world.
+enum CallError {
+    /// The provider call exceeded `stage_timeout_secs`. Carries the timeout
+    /// duration so the caller can emit an accurate `StageTimeout` event.
+    Timeout { secs: u64 },
+    /// The provider returned an error (non-timeout failure).
+    Provider,
+}
+
 /// Configuration for an agent run.
 #[derive(Debug, Clone)]
 pub struct RunConfig {
@@ -24,6 +36,8 @@ pub struct RunConfig {
     pub max_turns: usize,
     /// Budget limit in cents (0 = no budget).
     pub budget_cents: u64,
+    /// Per-LLM-call timeout in seconds. `None` means no timeout.
+    pub stage_timeout_secs: Option<u64>,
 }
 
 impl Default for RunConfig {
@@ -32,6 +46,7 @@ impl Default for RunConfig {
             system_prompt: None,
             max_turns: 10,
             budget_cents: 0,
+            stage_timeout_secs: None,
         }
     }
 }
@@ -235,7 +250,7 @@ impl<'a> AgentEngine<'a> {
         }
         state.messages.push(Message::user(user_message));
 
-        for _turn in 0..self.config.max_turns {
+        for turn in 0..self.config.max_turns {
             // Circuit breaker check before LLM call.
             if let Some(ref cb_mutex) = self.circuit_breaker {
                 let mut cb = cb_mutex.lock().expect("circuit breaker lock");
@@ -249,26 +264,27 @@ impl<'a> AgentEngine<'a> {
                 }
             }
 
-            let response = self
-                .provider
-                .chat(&state.messages, &self.tool_defs)
-                .await
-                .map_err(|_| {
-                    if let Some(ref cb_mutex) = self.circuit_breaker {
-                        cb_mutex
-                            .lock()
-                            .expect("circuit breaker lock")
-                            .record_failure();
-                    }
-                    RunError::ProviderError
-                })?;
-
-            if let Some(ref cb_mutex) = self.circuit_breaker {
-                cb_mutex
-                    .lock()
-                    .expect("circuit breaker lock")
-                    .record_success();
-            }
+            let response = match self.call_provider_with_timeout(&state.messages).await {
+                Ok(r) => r,
+                Err(CallError::Timeout { secs }) => {
+                    state.push(RunEvent::StageTimeout {
+                        turn,
+                        timeout_secs: secs,
+                    });
+                    let partial = RunTrace::from_events(std::mem::take(&mut state.events));
+                    self.export_partial(
+                        &partial,
+                        state.total_tokens,
+                        state.total_cost_cents,
+                        run_start.elapsed(),
+                    );
+                    return Err(RunError::Timeout {
+                        partial_trace: partial,
+                    });
+                }
+                Err(CallError::Provider) => return Err(RunError::ProviderError),
+            };
+            self.record_cb_success();
 
             let cost = calculate_cost(&response.model, &response.usage);
             state.total_tokens += response.usage.input_tokens + response.usage.output_tokens;
@@ -327,6 +343,54 @@ impl<'a> AgentEngine<'a> {
         let result = Self::finish(state, "Max turns reached".to_string());
         self.apply_otel_export(&result, run_start.elapsed());
         Ok(result)
+    }
+
+    /// Call the provider for one turn, applying the stage timeout if configured.
+    ///
+    /// Records a circuit-breaker failure on both timeout and provider error.
+    /// Returns the `ChatResponse` on success, or a `CallError` on failure.
+    async fn call_provider_with_timeout(
+        &self,
+        messages: &[Message],
+    ) -> Result<super::provider::ChatResponse, CallError> {
+        let chat_future = self.provider.chat(messages, &self.tool_defs);
+        let result = if let Some(secs) = self.config.stage_timeout_secs.filter(|&s| s > 0) {
+            match tokio::time::timeout(std::time::Duration::from_secs(secs), chat_future).await {
+                Ok(r) => r,
+                Err(_elapsed) => {
+                    // Unresponsive provider counts as a failure for the
+                    // circuit breaker, same as a provider error.
+                    self.record_cb_failure();
+                    return Err(CallError::Timeout { secs });
+                }
+            }
+        } else {
+            chat_future.await
+        };
+        result.map_err(|_| {
+            self.record_cb_failure();
+            CallError::Provider
+        })
+    }
+
+    /// Record a circuit-breaker failure (no-op if no circuit breaker is wired).
+    fn record_cb_failure(&self) {
+        if let Some(ref cb_mutex) = self.circuit_breaker {
+            cb_mutex
+                .lock()
+                .expect("circuit breaker lock")
+                .record_failure();
+        }
+    }
+
+    /// Record a circuit-breaker success (no-op if no circuit breaker is wired).
+    fn record_cb_success(&self) {
+        if let Some(ref cb_mutex) = self.circuit_breaker {
+            cb_mutex
+                .lock()
+                .expect("circuit breaker lock")
+                .record_success();
+        }
     }
 
     /// Check budget and record the cost. Returns `Err` if exceeded.
@@ -526,6 +590,26 @@ impl<'a> AgentEngine<'a> {
             total_tokens: state.total_tokens,
             total_cost_cents: state.total_cost_cents,
         }
+    }
+
+    /// Export a partial trace to the configured OTEL sink (e.g. on timeout).
+    ///
+    /// Constructs a synthetic `RunResult` from the partial trace so that the
+    /// `StageTimeout` span is reachable even when the run did not complete.
+    fn export_partial(
+        &self,
+        trace: &RunTrace,
+        total_tokens: u64,
+        total_cost_cents: u64,
+        duration: std::time::Duration,
+    ) {
+        let result = RunResult {
+            response: String::new(),
+            trace: trace.clone(),
+            total_tokens,
+            total_cost_cents,
+        };
+        self.apply_otel_export(&result, duration);
     }
 
     /// Apply OTEL export after a run completes (side-effect only, never fails loudly).
