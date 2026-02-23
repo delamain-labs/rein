@@ -202,7 +202,11 @@ fn run_workflow_mode(
                     "warning: {failed_count} step(s) failed, {skipped_count} skipped (see trace below)"
                 );
             }
-            eprintln!("Final output: {}", result.final_output);
+            if result.final_output.is_empty() && (failed_count > 0 || skipped_count > 0) {
+                eprintln!("Final output: (none — all steps failed or were skipped)");
+            } else {
+                eprintln!("Final output: {}", result.final_output);
+            }
             if !result.events.is_empty() {
                 eprintln!(
                     "{}",

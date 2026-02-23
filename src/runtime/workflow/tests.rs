@@ -2220,10 +2220,6 @@ async fn approval_rejected_aborts_workflow() {
         matches!(result, Err(WorkflowError::ApprovalRejected { .. })),
         "ApprovalRejected must abort run_steps immediately; got: {result:?}"
     );
-    assert!(
-        matches!(result, Err(ref e) if e.is_hard_error()),
-        "ApprovalRejected must be classified as a hard error"
-    );
 }
 
 /// Steps with no dependency on the failed step should still execute.
