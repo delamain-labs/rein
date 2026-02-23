@@ -489,26 +489,29 @@ pub async fn run_steps(
             input.clone()
         };
 
-        let step_result = if let Some(ref key) = step.for_each {
-            run_step_for_each(step, &for_each_input, key, ctx).await
-        } else {
-            run_step_with_fallback(step, &input, ctx).await.map(|(r, fallback_used)| {
-                let mut evts = Vec::new();
-                if fallback_used {
-                    let fallback_name = step
+        let step_result =
+            if let Some(ref key) = step.for_each {
+                run_step_for_each(step, &for_each_input, key, ctx).await
+            } else {
+                run_step_with_fallback(step, &input, ctx)
+                    .await
+                    .map(|(r, fallback_used)| {
+                        let mut evts = Vec::new();
+                        if fallback_used {
+                            let fallback_name = step
                         .fallback
                         .as_ref()
                         .expect("run_step: fallback_used is only true when step.fallback is Some")
                         .name
                         .clone();
-                    evts.push(super::RunEvent::StepFallback {
-                        step: step.name.clone(),
-                        fallback_step: fallback_name,
-                    });
-                }
-                (r, evts)
-            })
-        };
+                            evts.push(super::RunEvent::StepFallback {
+                                step: step.name.clone(),
+                                fallback_step: fallback_name,
+                            });
+                        }
+                        (r, evts)
+                    })
+            };
 
         let (result, step_events) = match step_result {
             Ok(v) => v,

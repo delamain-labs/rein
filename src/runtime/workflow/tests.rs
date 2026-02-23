@@ -1874,15 +1874,15 @@ async fn run_steps_emits_step_started_and_completed() {
     let (_, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
 
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, crate::runtime::RunEvent::StepStarted { step, .. } if step == "do_work")),
+        events.iter().any(
+            |e| matches!(e, crate::runtime::RunEvent::StepStarted { step, .. } if step == "do_work")
+        ),
         "expected StepStarted for do_work"
     );
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, crate::runtime::RunEvent::StepCompleted { step } if step == "do_work")),
+        events.iter().any(
+            |e| matches!(e, crate::runtime::RunEvent::StepCompleted { step } if step == "do_work")
+        ),
         "expected StepCompleted for do_work"
     );
 }
