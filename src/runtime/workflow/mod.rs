@@ -640,7 +640,7 @@ pub async fn run_steps(
         // `step.depends_on` succeeded (the skip-guard above ensures any step
         // with a failed/skipped dependency is `continue`d before here).
         // Therefore `outputs.get(dep)` will not return `Some("")` for any dep.
-        events.push(super::RunEvent::StepStarted {
+        state.events.push(super::RunEvent::StepStarted {
             step: step.name.clone(),
             index,
         });

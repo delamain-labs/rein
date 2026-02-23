@@ -127,15 +127,6 @@ pub enum RunEvent {
     StepCompleted {
         step: String,
     },
-    /// A workflow step failed (agent not found, provider error, etc.).
-    ///
-    /// NOTE: emission is deferred to #380; this variant is declared but no
-    /// callsite currently pushes it. Consumers should not rely on receiving
-    /// this event until #380 is resolved.
-    StepFailed {
-        step: String,
-        reason: String,
-    },
     /// Provider call exceeded the configured `stage_timeout_secs` on this turn.
     StageTimeout {
         turn: usize,
@@ -464,9 +455,6 @@ fn summarize_event(event: &RunEvent, lines: &mut Vec<String>, turn: &mut usize) 
         RunEvent::StepSkipped { step, reason } => {
             lines.push(format!("  ⏭ step '{step}' skipped: {reason}"));
         }
-        RunEvent::StepFailed { step, reason } => {
-            lines.push(format!("  ✗ step '{step}' failed: {reason}"));
-        }
     }
 }
 
@@ -538,20 +526,6 @@ impl std::fmt::Display for RunError {
             Self::GuardrailBlocked => write!(f, "guardrail blocked"),
             Self::EvalFailed => write!(f, "eval failed"),
             Self::Timeout { .. } => write!(f, "provider timed out"),
-        }
-    }
-}
-
-impl std::fmt::Display for RunError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::BudgetExceeded => write!(f, "budget exceeded"),
-            Self::PermissionDenied => write!(f, "permission denied"),
-            Self::ProviderError => write!(f, "provider error"),
-            Self::ConfigError => write!(f, "configuration error"),
-            Self::CircuitBreakerOpen => write!(f, "circuit breaker open"),
-            Self::GuardrailBlocked => write!(f, "guardrail blocked"),
-            Self::EvalFailed => write!(f, "eval failed"),
         }
     }
 }

@@ -405,13 +405,6 @@ fn event_to_span_data(event: &super::RunEvent) -> (String, Vec<OtelAttribute>) {
             "rein.step.completed".to_string(),
             vec![attr_str("rein.step.name", step)],
         ),
-        RunEvent::StepFailed { step, reason } => (
-            "rein.step.failed".to_string(),
-            vec![
-                attr_str("rein.step.name", step),
-                attr_str("rein.step.reason", reason),
-            ],
-        ),
         RunEvent::StageTimeout { turn, timeout_secs } => (
             "rein.stage.timeout".to_string(),
             vec![
