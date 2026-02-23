@@ -62,7 +62,7 @@ pub fn format_file(path: &Path) -> Result<String, std::io::Error> {
     if !errors.is_empty() {
         let msg = errors
             .iter()
-            .map(|e| e.message.as_str())
+            .map(std::string::ToString::to_string)
             .collect::<Vec<_>>()
             .join("; ");
         return Err(std::io::Error::new(
