@@ -2404,26 +2404,32 @@ fn parse_observe_notify_alias() {
 
 #[test]
 fn parse_step_depends_on_single() {
-    let f = parse(r#"
+    let f = parse(
+        r#"
         workflow test {
             trigger: start
             step a { agent: bot goal: "first" }
             step b { agent: bot goal: "second" depends_on: a }
         }
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
     assert_eq!(f.workflows[0].steps[1].depends_on, vec!["a"]);
 }
 
 #[test]
 fn parse_step_depends_on_list() {
-    let f = parse(r#"
+    let f = parse(
+        r#"
         workflow test {
             trigger: start
             step a { agent: bot goal: "first" }
             step b { agent: bot goal: "second" }
             step c { agent: bot goal: "third" depends_on: [a, b] }
         }
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
     assert_eq!(f.workflows[0].steps[2].depends_on, vec!["a", "b"]);
 }
 
@@ -2456,9 +2462,8 @@ fn parse_collecting_two_errors() {
 
 #[test]
 fn parse_collecting_no_errors() {
-    let (file, errors) = crate::parser::parse_collecting(
-        r#"agent good { model: openai can [a.b] }"#,
-    );
+    let (file, errors) =
+        crate::parser::parse_collecting(r#"agent good { model: openai can [a.b] }"#);
     assert!(errors.is_empty());
     assert_eq!(file.agents.len(), 1);
 }

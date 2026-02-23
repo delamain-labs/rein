@@ -1000,7 +1000,6 @@ async fn step_execution_runs_agent_with_goal() {
     assert_eq!(result.final_output, "Draft complete!");
 }
 
-
 // --- #301 Approval Handler Tests ---
 
 #[tokio::test]
@@ -1132,7 +1131,10 @@ async fn step_with_auto_reject_returns_error() {
     let result = run_workflow(&workflow, &ctx).await;
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
-    assert!(err.contains("rejected"), "error should mention rejection: {err}");
+    assert!(
+        err.contains("rejected"),
+        "error should mention rejection: {err}"
+    );
 }
 
 #[tokio::test]

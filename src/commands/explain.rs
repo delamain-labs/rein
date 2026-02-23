@@ -149,17 +149,11 @@ fn explain_circuit_breakers(file: &rein::ast::ReinFile) {
     if file.circuit_breakers.is_empty() {
         return;
     }
-    println!(
-        "Circuit Breakers ({}) ✅",
-        file.circuit_breakers.len()
-    );
+    println!("Circuit Breakers ({}) ✅", file.circuit_breakers.len());
     for cb in &file.circuit_breakers {
         println!(
             "  • {}: trips after {} failures in {} min, recovers after {} min",
-            cb.name,
-            cb.failure_threshold,
-            cb.window_minutes,
-            cb.half_open_after_minutes
+            cb.name, cb.failure_threshold, cb.window_minutes, cb.half_open_after_minutes
         );
     }
     println!();
@@ -184,10 +178,7 @@ fn explain_evals(file: &rein::ast::ReinFile) {
     }
     println!("Evals ({})", file.evals.len());
     for eval in &file.evals {
-        let name = eval
-            .name
-            .as_deref()
-            .unwrap_or("(unnamed)");
+        let name = eval.name.as_deref().unwrap_or("(unnamed)");
         println!("  • {name}: dataset {}", eval.dataset);
         for a in &eval.assertions {
             let op = match a.op {
@@ -213,17 +204,10 @@ fn explain_approvals(file: &rein::ast::ReinFile) {
                     println!("Approval Gates ✅");
                     found = true;
                 }
-                let timeout = approval
-                    .timeout
-                    .as_deref()
-                    .unwrap_or("none");
+                let timeout = approval.timeout.as_deref().unwrap_or("none");
                 println!(
                     "  • {}.{}: {:?} via {}({}), timeout {timeout}",
-                    wf.name,
-                    step.name,
-                    approval.kind,
-                    approval.channel,
-                    approval.destination
+                    wf.name, step.name, approval.kind, approval.channel, approval.destination
                 );
             }
         }

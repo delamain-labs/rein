@@ -444,10 +444,7 @@ impl Parser {
     }
 
     /// Attempt to parse one top-level block, pushing it into `file`.
-    fn try_parse_top_level(
-        &mut self,
-        file: &mut ReinFile,
-    ) -> Result<(), ParseError> {
+    fn try_parse_top_level(&mut self, file: &mut ReinFile) -> Result<(), ParseError> {
         match self.peek() {
             TokenKind::Import => {
                 file.imports.push(self.parse_import()?);
@@ -492,8 +489,7 @@ impl Parser {
                 file.channels.push(self.parse_channel()?);
             }
             TokenKind::CircuitBreaker => {
-                file.circuit_breakers
-                    .push(self.parse_circuit_breaker()?);
+                file.circuit_breakers.push(self.parse_circuit_breaker()?);
             }
             TokenKind::Eval => {
                 file.evals.push(self.parse_eval()?);
@@ -511,8 +507,7 @@ impl Parser {
                 file.secrets.push(self.parse_secrets()?);
             }
             TokenKind::Consensus => {
-                file.consensus_blocks
-                    .push(self.parse_consensus()?);
+                file.consensus_blocks.push(self.parse_consensus()?);
             }
             TokenKind::Scenario => {
                 file.scenarios.push(self.parse_scenario()?);
