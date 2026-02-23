@@ -35,9 +35,11 @@ impl Provider for DemoProvider {
 
         match n % 4 {
             0 => Ok(ChatResponse {
-                content: "Hello! I'm a demo agent running through Rein's \
-                          enforcement layer. Everything you see is validated \
-                          against the policy file in real time."
+                content: "Sure, here's the customer info you requested: \
+                          Name: John Smith, SSN: 123-45-6789, \
+                          Credit Card: 4111-1111-1111-1111, \
+                          Email: john.smith@example.com. \
+                          Let me know if you need anything else!"
                     .to_string(),
                 tool_calls: Vec::new(),
                 usage: Usage {
@@ -47,10 +49,9 @@ impl Provider for DemoProvider {
                 model: "demo-mock".to_string(),
             }),
             1 => Ok(ChatResponse {
-                content: "Sure, here's the customer info: \
-                          Name: John Smith, SSN: 123-45-6789, \
-                          Credit Card: 4111-1111-1111-1111, \
-                          Email: john.smith@example.com."
+                content: "Hello! I'm running through Rein's enforcement \
+                          layer. That last response was checked against \
+                          your policy's guardrails in real time."
                     .to_string(),
                 tool_calls: Vec::new(),
                 usage: Usage {
@@ -59,10 +60,13 @@ impl Provider for DemoProvider {
                 },
                 model: "demo-mock".to_string(),
             }),
-            2 => Ok(ChatResponse {
-                content: "I'll help you with that. But first, \
-                          [TOXIC_CONTENT_MARKER] this line should be \
-                          caught by the toxicity filter."
+            2 => Err(ProviderError::Network(
+                "simulated API timeout (demo mode)".to_string(),
+            )),
+            3 => Ok(ChatResponse {
+                content: "Recovery successful. The circuit breaker \
+                          transitioned back to half-open after that \
+                          simulated failure."
                     .to_string(),
                 tool_calls: Vec::new(),
                 usage: Usage {
@@ -71,9 +75,6 @@ impl Provider for DemoProvider {
                 },
                 model: "demo-mock".to_string(),
             }),
-            3 => Err(ProviderError::Network(
-                "simulated API timeout (demo mode)".to_string(),
-            )),
             _ => unreachable!(),
         }
     }
@@ -93,19 +94,24 @@ mod tests {
         let msgs = vec![Message::user("test")];
         let tools = vec![];
 
-        let r = provider.chat(&msgs, &tools).await.unwrap();
-        assert!(r.content.contains("demo agent"));
-
+        // First: PII response (triggers guardrails)
         let r = provider.chat(&msgs, &tools).await.unwrap();
         assert!(r.content.contains("SSN"));
 
+        // Second: clean response
         let r = provider.chat(&msgs, &tools).await.unwrap();
-        assert!(r.content.contains("TOXIC"));
+        assert!(r.content.contains("enforcement"));
 
+        // Third: error (triggers circuit breaker)
         let r = provider.chat(&msgs, &tools).await;
         assert!(r.is_err());
 
+        // Fourth: recovery
         let r = provider.chat(&msgs, &tools).await.unwrap();
-        assert!(r.content.contains("demo agent"));
+        assert!(r.content.contains("Recovery"));
+
+        // Cycles back to PII
+        let r = provider.chat(&msgs, &tools).await.unwrap();
+        assert!(r.content.contains("SSN"));
     }
 }

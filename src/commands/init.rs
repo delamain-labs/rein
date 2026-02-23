@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 
 const EXAMPLE_REIN: &str = r#"// My first Rein agent
+// Try: rein run agents/assistant.rein --demo
 
 provider openai {
     model: "gpt-4o"
@@ -18,9 +19,17 @@ agent assistant {
 
     cannot [
         files.delete
+        admin.anything
     ]
 
     budget: $0.10 per request
+
+    guardrails {
+        output_filter {
+            pii_detection: redact
+            toxicity: block
+        }
+    }
 }
 "#;
 
