@@ -43,6 +43,12 @@ impl Parser {
                     let (val, _) = self.expect_ident()?;
                     export = Some(val);
                 }
+                TokenKind::Ident(ref s) if s == "notify" => {
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    let (val, _) = self.expect_ident()?;
+                    export = Some(val);
+                }
                 TokenKind::Eof => {
                     return Err(ParseError::new(
                         "unexpected end of file in observe block",

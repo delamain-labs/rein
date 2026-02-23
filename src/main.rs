@@ -12,7 +12,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Parse and validate a .rein file
+    /// Parse and validate a .rein file.
+    ///
+    /// Exit codes: 0 = valid, 1 = errors, 2 = valid with --strict warnings
     Validate {
         /// Path to the .rein file
         file: std::path::PathBuf,

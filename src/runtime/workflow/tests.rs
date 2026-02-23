@@ -940,6 +940,7 @@ async fn step_execution_runs_agent_with_goal() {
             goal: Some("Write a first draft".to_string()),
             input: None,
             output_constraints: vec![],
+            depends_on: vec![],
             when: None,
             on_failure: None,
             send_to: None,

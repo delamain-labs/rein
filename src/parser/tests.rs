@@ -2374,3 +2374,55 @@ fn within_constraint_block() {
     assert_eq!(wb.steps.len(), 1);
     assert_eq!(wb.steps[0].name, "classify");
 }
+
+#[test]
+fn parse_provider_api_key_alias() {
+    let f = parse(r#"provider openai { model: "gpt-4o" api_key: env("OPENAI_KEY") }"#).unwrap();
+    assert_eq!(f.providers.len(), 1);
+    assert!(f.providers[0].key.is_some());
+}
+
+#[test]
+fn parse_secret_singular_alias() {
+    let f = parse(r#"secret { api_key: env("KEY") }"#).unwrap();
+    assert_eq!(f.secrets.len(), 1);
+}
+
+#[test]
+fn parse_observe_watch_alias() {
+    let f = parse(r#"observe health { watch: [cost, latency] }"#).unwrap();
+    assert_eq!(f.observes.len(), 1);
+    assert_eq!(f.observes[0].metrics.len(), 2);
+}
+
+#[test]
+fn parse_observe_notify_alias() {
+    let f = parse(r#"observe health { notify: slack }"#).unwrap();
+    assert_eq!(f.observes.len(), 1);
+    assert_eq!(f.observes[0].export.as_deref(), Some("slack"));
+}
+
+#[test]
+fn parse_step_depends_on_single() {
+    let f = parse(r#"
+        workflow test {
+            trigger: start
+            step a { agent: bot goal: "first" }
+            step b { agent: bot goal: "second" depends_on: a }
+        }
+    "#).unwrap();
+    assert_eq!(f.workflows[0].steps[1].depends_on, vec!["a"]);
+}
+
+#[test]
+fn parse_step_depends_on_list() {
+    let f = parse(r#"
+        workflow test {
+            trigger: start
+            step a { agent: bot goal: "first" }
+            step b { agent: bot goal: "second" }
+            step c { agent: bot goal: "third" depends_on: [a, b] }
+        }
+    "#).unwrap();
+    assert_eq!(f.workflows[0].steps[2].depends_on, vec!["a", "b"]);
+}
