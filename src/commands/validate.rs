@@ -139,7 +139,7 @@ pub fn run_validate(path: &std::path::Path, dump_ast: bool, format: &str, strict
         JsonReport::from_diagnostics(&filename, &diags).print();
     } else {
         for diag in &diags {
-            if diag.code == "W_UNENFORCED" {
+            if matches!(diag.code, "W_UNENFORCED" | "W_EXPORT_UNSUPPORTED") {
                 eprintln!("⚠ [{}] {}", diag.code, diag.message);
             } else {
                 rein::error::report_diagnostic(&filename, &source, diag);

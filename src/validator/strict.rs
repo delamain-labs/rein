@@ -208,6 +208,19 @@ mod tests {
     }
 
     #[test]
+    fn no_unimplemented_export_warning_for_stdout() {
+        let file = parse(r#"observe metrics { export: stdout }"#).unwrap();
+        let diags = check_unenforced(&file);
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.message.contains("not supported") && d.message.contains("export")),
+            "stdout export should not produce a 'not supported' diagnostic, got: {:?}",
+            diags
+        );
+    }
+
+    #[test]
     fn no_warning_on_enforced_features() {
         let file = parse(
             r#"
