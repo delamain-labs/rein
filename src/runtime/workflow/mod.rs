@@ -342,13 +342,20 @@ pub async fn run_step(
     input: &str,
     ctx: &WorkflowContext<'_>,
 ) -> Result<StageResult, WorkflowError> {
-    // Check approval gate before execution
-    if let Some(approval_def) = &step.approval
-        && let Some(handler) = &ctx.approval_handler
-    {
-        let status = handler
-            .request_approval(&step.name, input, approval_def)
-            .await;
+    // Check approval gate before execution.
+    // Use the injected handler (tests/CLI override) if present; otherwise
+    // resolve a channel-appropriate handler from the approval definition.
+    if let Some(approval_def) = &step.approval {
+        let status = if let Some(handler) = &ctx.approval_handler {
+            handler
+                .request_approval(&step.name, input, approval_def)
+                .await
+        } else {
+            let handler = crate::runtime::approval::resolve_approval_handler(approval_def);
+            handler
+                .request_approval(&step.name, input, approval_def)
+                .await
+        };
         match status {
             ApprovalStatus::Approved => {}
             ApprovalStatus::Rejected { reason } => {
