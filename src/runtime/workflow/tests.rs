@@ -1873,12 +1873,11 @@ async fn run_steps_emits_step_started_and_completed() {
 
     let (_, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
 
-    assert!(
-        events.iter().any(
-            |e| matches!(e, crate::runtime::RunEvent::StepStarted { step, .. } if step == "do_work")
-        ),
-        "expected StepStarted for do_work"
-    );
+    let started = events.iter().find(|e| {
+        matches!(e, crate::runtime::RunEvent::StepStarted { step, index: 0 } if step == "do_work")
+    });
+    assert!(started.is_some(), "expected StepStarted {{ step: do_work, index: 0 }}");
+
     assert!(
         events.iter().any(
             |e| matches!(e, crate::runtime::RunEvent::StepCompleted { step } if step == "do_work")
@@ -1887,8 +1886,14 @@ async fn run_steps_emits_step_started_and_completed() {
     );
 }
 
+/// Tests that `run_steps` returns an appropriate error when a step's agent is
+/// not found. Note: the `StepFailed` event is emitted inside `run_steps` but
+/// is NOT observable from the outside on this code path because the current
+/// `run_steps` return type (`Result<..., WorkflowError>`) discards the
+/// accumulated event log on failure. This is a known limitation tracked as a
+/// follow-up; the test is intentionally named to describe what IS observable.
 #[tokio::test]
-async fn run_steps_emits_step_failed_on_missing_agent() {
+async fn run_steps_returns_error_on_missing_agent() {
     let file = parse_file("agent other { model: openai }");
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
@@ -1917,8 +1922,6 @@ async fn run_steps_emits_step_failed_on_missing_agent() {
     };
 
     let err = run_steps(&workflow, &ctx).await.unwrap_err();
-    // The error should be a StageFailed or AgentNotFound — and we just want to
-    // confirm the test correctly exercises the failure path.
     assert!(matches!(
         err,
         WorkflowError::StageFailed { .. } | WorkflowError::AgentNotFound(_)
