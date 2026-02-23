@@ -69,15 +69,31 @@ Rein supports a rich policy language with 20+ block types:
 // Providers and models
 provider anthropic {
     model: "claude-sonnet-4-20250514"
-    key: env("ANTHROPIC_KEY")
+    key: env("ANTHROPIC_API_KEY")
 }
 
 // Agent permissions and budgets
 agent reviewer from senior_template {
     model: anthropic
-    can [ github.read_pr, github.comment ]
-    cannot [ github.merge, github.delete_branch ]
+
+    can [
+        github.read_pr
+        github.comment
+    ]
+
+    cannot [
+        github.merge
+        github.delete_branch
+    ]
+
     budget: $10 per day
+
+    guardrails {
+        output_filter {
+            pii: redact
+            toxicity: block
+        }
+    }
 }
 
 // Reusable templates
@@ -91,30 +107,20 @@ type TicketCategory {
     confidence: percentage
 }
 
-// Multi-step workflows
+// Multi-step workflows with approval gates
 workflow triage {
-    stage classify {
-        agent: classifier
-    }
-    stage handle {
-        agent: reviewer
-        when: confidence > 80%
-    }
-    route on classify.category {
-        billing -> stage handle_billing { agent: billing_bot }
-        _ -> stage escalate { agent: human_handoff }
-    }
-}
+    trigger: new_ticket
 
-// Guardrails
-guardrails {
-    spending {
-        soft_limit: $100 per day
-        hard_limit: $500 per day
+    step classify {
+        agent: reviewer
+        goal: "Classify the incoming ticket"
     }
-    output_filter {
-        pii: redact
-        toxicity: block
+
+    step handle {
+        agent: reviewer
+        goal: "Handle the classified ticket"
+        when: confidence > 80%
+        approve: human via slack("#reviews") timeout "1h"
     }
 }
 
@@ -124,8 +130,15 @@ policy {
         promote when accuracy > 95%
     }
     tier autonomous {
-        demote when error_rate > 5%
+        promote when accuracy > 99%
     }
+    tier fully_autonomous {}
+}
+
+// Circuit breaker
+circuit_breaker api_safety {
+    open after: 5 failures in 10 min
+    half_open after: 2 min
 }
 ```
 
@@ -133,23 +146,30 @@ policy {
 
 | Command | Description |
 |---------|-------------|
-| `rein init <dir>` | Scaffold a new project |
+| `rein init [dir]` | Scaffold a new project |
 | `rein validate <files>` | Parse and validate `.rein` files |
+| `rein validate --strict <file>` | Warn on unenforced features |
 | `rein validate --ast <file>` | Dump the AST as JSON |
 | `rein fmt <files>` | Auto-format to canonical style |
-| `rein fmt --check <files>` | Check formatting without modifying |
+| `rein fmt --check <files>` | Check formatting (CI mode) |
+| `rein explain <file>` | Human-readable policy summary |
+| `rein run <file> [-m "msg"]` | Execute an agent (requires API keys) |
+| `rein run --dry-run <file>` | Show execution plan without calling APIs |
 | `rein cost <traces>` | Aggregate costs from trace files |
-| `rein run <file>` | Execute an agent (requires API keys) |
+| `rein serve <file>` | Start the REST API server |
+| `rein lsp` | Start the language server |
 
 ## Project Status
 
 Rein is in active development. Here's what works today:
 
-- ✅ **Parser and validator** — full DSL with 20+ block types, 513 tests, zero clippy warnings
-- ✅ **CLI tooling** — init, validate, fmt, cost commands
+- ✅ **Parser and validator** — full DSL with 20+ block types, 649 tests, zero clippy warnings
+- ✅ **CLI tooling** — init, validate, fmt, cost, explain, run, serve
+- ✅ **Runtime enforcement** — guardrails, circuit breakers, approval gates, policy engine, budget limits
+- ✅ **Agent execution** — `rein run` talks to OpenAI/Anthropic with OTLP trace export
 - ✅ **Error messages** — precise diagnostics with source spans (powered by ariadne)
 - ✅ **Tree-sitter grammar** — syntax highlighting for editors
-- 🔧 **Runtime** — basic agent execution and workflow engine functional, advanced features in progress
+- ✅ **LSP server** — editor integration via `rein lsp`
 - 📋 **[Language Reference](docs/language-reference.md)** — every block type and feature
 - 🚀 **[Getting Started](docs/getting-started.md)** — zero to validated policy in 5 minutes
 
