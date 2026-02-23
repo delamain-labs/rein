@@ -199,6 +199,12 @@ fn run_engine(engine: &rein::runtime::engine::AgentEngine<'_>, user_message: &st
             eprintln!("Duration: {duration:.2?}");
             0
         }
+        Err(rein::runtime::RunError::Timeout { partial_trace }) => {
+            eprintln!();
+            eprintln!("Run timed out (stage_timeout_secs exceeded).");
+            eprintln!("{}", partial_trace.summary());
+            1
+        }
         Err(e) => {
             eprintln!();
             eprintln!("Run failed: {e:?}");
