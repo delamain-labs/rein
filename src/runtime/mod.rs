@@ -151,7 +151,12 @@ impl RunTrace {
     /// export time, not during deserialization.
     #[must_use]
     pub(crate) fn from_events_timed(events: Vec<RunEvent>, timestamps_ms: Vec<u64>) -> Self {
-        debug_assert_eq!(
+        // Hard assert: this is called exclusively from `AgentEngine::finish`
+        // where `RunState::push()` keeps the two vecs in sync. A length
+        // mismatch is always a bug in the call site, not a runtime condition —
+        // fail fast in all build profiles rather than silently degrading to the
+        // fake counter.
+        assert_eq!(
             events.len(),
             timestamps_ms.len(),
             "from_events_timed: events and timestamps_ms must have the same length"
@@ -166,6 +171,12 @@ impl RunTrace {
     ///
     /// # Errors
     /// Returns a serialization error if the trace cannot be serialized.
+    ///
+    /// # Note
+    /// `timestamps_ms` is not serialized (`#[serde(skip)]`). A trace deserialized
+    /// from JSON and then passed to `to_structured` will use fallback `(i * 100)`
+    /// offsets rather than real wall-clock values. OTEL export should be done
+    /// at run-time from the in-memory trace, not from a serialized round-trip.
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
     }
@@ -246,6 +257,13 @@ impl RunTrace {
     /// `chrono::Utc::now().to_rfc3339()`). `duration_ms` is the wall-clock
     /// run duration in milliseconds. All three values are recorded in the
     /// trace and used by OTLP exporters to produce accurate span timestamps.
+    ///
+    /// # Note
+    /// Real per-event timestamps (`timestamps_ms`) are not written to the JSON
+    /// file (`#[serde(skip)]`). If the file is later deserialized and passed to
+    /// an OTEL exporter, fallback `(i * 100)` offsets are used instead of real
+    /// wall-clock values. OTEL export should be performed from the in-memory
+    /// trace at run-time, not from a deserialized JSON round-trip.
     ///
     /// # Errors
     /// Returns IO or serialization errors.
