@@ -150,6 +150,11 @@ pub fn to_otlp(trace: &StructuredTrace) -> OtelResourceSpans {
     // Uses try_ variant to correctly distinguish parse failure from a legitimately
     // epoch-zero completed_at (avoiding silent fallback for valid epoch timestamps).
     let end_ns = try_rfc3339_to_unix_nanos(&trace.completed_at).unwrap_or_else(|| {
+        eprintln!(
+            "rein[otel]: warning: could not parse completed_at '{}' as RFC 3339; \
+             falling back to start + duration — end timestamp may be approximate",
+            trace.completed_at
+        );
         start_ns.saturating_add(trace.stats.duration_ms.saturating_mul(1_000_000))
     });
 
