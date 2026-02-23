@@ -1,0 +1,22 @@
+// Example for rein eval — scenario blocks for testing agent behavior.
+
+agent support_agent {
+    model: openai
+    can [ zendesk.read_ticket ]
+}
+
+scenario handles_refund_request {
+    given {
+        input: "I need a refund for my order"
+    }
+    expect {
+        response: "refund"
+    }
+}
+
+scenario empty_scenario {
+    given {
+        input: "Hello"
+    }
+    expect {}
+}

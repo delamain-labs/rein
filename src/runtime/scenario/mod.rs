@@ -82,3 +82,11 @@ impl ScenarioRunner {
         }
     }
 }
+
+/// Check if an expected value is present in an agent's response text.
+#[must_use]
+pub fn check_expectation(response: &str, expected_value: &str) -> bool {
+    response
+        .to_lowercase()
+        .contains(&expected_value.to_lowercase())
+}

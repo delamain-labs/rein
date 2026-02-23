@@ -135,3 +135,66 @@ fn missing_file_exits_one() {
         .expect("failed to spawn rein");
     assert_eq!(status.code(), Some(1), "expected exit 1 for missing file");
 }
+
+// ── eval command ──────────────────────────────────────────────────────────────
+
+#[test]
+fn eval_no_scenarios_exits_zero() {
+    // basic.rein has no scenario blocks — should exit 0 cleanly
+    let out = Command::new(rein_bin())
+        .args(["eval", "--demo", example("basic.rein").to_str().unwrap()])
+        .output()
+        .expect("failed to spawn rein");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "expected exit 0 when no scenarios"
+    );
+}
+
+#[test]
+fn eval_demo_mode_runs_without_crash() {
+    let out = Command::new(rein_bin())
+        .args([
+            "eval",
+            "--demo",
+            example("eval_scenarios.rein").to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to spawn rein");
+    // Exit code is 0 (all pass) or 1 (some fail), never a crash (101+)
+    let code = out.status.code().unwrap_or(101);
+    assert!(
+        code == 0 || code == 1,
+        "expected exit 0 or 1, got {code} (stderr: {})",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn eval_missing_file_exits_one() {
+    let status = Command::new(rein_bin())
+        .args(["eval", "--demo", "no_such_scenarios.rein"])
+        .status()
+        .expect("failed to spawn rein");
+    assert_eq!(status.code(), Some(1), "expected exit 1 for missing file");
+}
+
+#[test]
+fn eval_scenario_filter_unknown_exits_zero() {
+    let out = Command::new(rein_bin())
+        .args([
+            "eval",
+            "--demo",
+            "--scenario",
+            "nonexistent_scenario",
+            example("eval_scenarios.rein").to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to spawn rein");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "expected exit 0 when named scenario not found"
+    );
+}
