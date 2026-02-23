@@ -1715,3 +1715,67 @@ async fn auto_resolve_empty_conditions_does_not_short_circuit() {
         "empty conditions must not emit AutoResolved"
     );
 }
+
+// ---------------------------------------------------------------------------
+// #336: run_sequential / run_parallel must propagate RunEvents
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn run_sequential_populates_events() {
+    // #336: run_sequential must surface RunEvents from agent runs in WorkflowResult.events
+    let file = parse_file("agent a { model: openai }");
+    let workflow = make_workflow("pipe", "hello", &["a"]);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+    };
+    provider.push_response(simple_response("done"));
+
+    let result = run_sequential(&workflow, &ctx)
+        .await
+        .expect("should succeed");
+
+    assert!(
+        !result.events.is_empty(),
+        "run_sequential must populate WorkflowResult.events from agent run traces"
+    );
+}
+
+#[tokio::test]
+async fn run_parallel_populates_events() {
+    // #336: run_parallel must surface RunEvents from agent runs in WorkflowResult.events
+    let file = parse_file(
+        r"
+        agent a { model: openai }
+        agent b { model: openai }
+    ",
+    );
+    let mut workflow = make_workflow("pipe", "hello", &["a", "b"]);
+    workflow.mode = ExecutionMode::Parallel;
+
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+    };
+    provider.push_response(simple_response("from_a"));
+    provider.push_response(simple_response("from_b"));
+
+    let result = run_parallel(&workflow, &ctx).await.expect("should succeed");
+
+    assert!(
+        !result.events.is_empty(),
+        "run_parallel must populate WorkflowResult.events from agent run traces"
+    );
+}
