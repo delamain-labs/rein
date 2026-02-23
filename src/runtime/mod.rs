@@ -217,9 +217,15 @@ impl RunTrace {
     /// Produce a compact human-readable summary.
     #[must_use]
     pub fn summary(&self) -> String {
+        Self::summarize_events(&self.events)
+    }
+
+    /// Format a slice of events into a human-readable summary string.
+    /// Use this when you have a `Vec<RunEvent>` but do not need a full `RunTrace`.
+    pub fn summarize_events(events: &[RunEvent]) -> String {
         let mut lines = Vec::new();
         let mut turn = 0_usize;
-        for event in &self.events {
+        for event in events {
             summarize_event(event, &mut lines, &mut turn);
         }
         lines.join("\n")

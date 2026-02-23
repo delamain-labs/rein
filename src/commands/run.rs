@@ -169,10 +169,10 @@ fn run_workflow_mode(
             );
             eprintln!("Final output: {}", result.final_output);
             if !result.events.is_empty() {
-                let trace = rein::runtime::RunTrace {
-                    events: result.events,
-                };
-                eprintln!("{}", trace.summary());
+                eprintln!(
+                    "{}",
+                    rein::runtime::RunTrace::summarize_events(&result.events)
+                );
             }
             eprintln!("Duration: {duration:.2?}");
             0

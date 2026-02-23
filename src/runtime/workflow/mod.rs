@@ -466,7 +466,7 @@ pub async fn run_steps(
                 let fallback_name = step
                     .fallback
                     .as_ref()
-                    .expect("fallback_used is only true when step.fallback is Some")
+                    .expect("run_step: fallback_used is only true when step.fallback is Some")
                     .name
                     .clone();
                 evts.push(super::RunEvent::StepFallback {
@@ -547,7 +547,7 @@ async fn run_step_for_each(
             let fallback_name = step
                 .fallback
                 .as_ref()
-                .expect("fallback_used is only true when step.fallback is Some")
+                .expect("run_step_for_each: fallback_used is only true when step.fallback is Some (empty items path)")
                 .name
                 .clone();
             evts.push(super::RunEvent::StepFallback {
@@ -580,7 +580,7 @@ async fn run_step_for_each(
             let fallback_name = step
                 .fallback
                 .as_ref()
-                .expect("fallback_used is only true when step.fallback is Some")
+                .expect("run_step_for_each: fallback_used is only true when step.fallback is Some (iteration path)")
                 .name
                 .clone();
             events.push(super::RunEvent::StepFallback {
