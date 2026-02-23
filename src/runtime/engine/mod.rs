@@ -92,6 +92,9 @@ struct RunState {
     total_tokens: u64,
     total_cost_cents: u64,
     budget: Option<BudgetTracker>,
+    /// Accumulated LLM cost (in cents) attributed to each capped tool.
+    /// Key is `"namespace.action"`. Only populated for `CappedAt` tools.
+    per_tool_spent: HashMap<String, u64>,
 }
 
 /// The agent execution engine. Orchestrates the LLM, tool call, result loop
@@ -205,6 +208,7 @@ impl<'a> AgentEngine<'a> {
             } else {
                 None
             },
+            per_tool_spent: HashMap::new(),
         };
 
         if let Some(ref prompt) = self.config.system_prompt {
@@ -297,7 +301,7 @@ impl<'a> AgentEngine<'a> {
             for tc in &response.tool_calls {
                 self.stream.on_tool_call(&tc.name, &tc.name);
             }
-            self.process_tool_calls(&mut state, &response.tool_calls)
+            self.process_tool_calls(&mut state, &response.tool_calls, cost)
                 .await;
         }
 
@@ -344,20 +348,78 @@ impl<'a> AgentEngine<'a> {
     }
 
     /// Process all tool calls from an LLM response.
-    async fn process_tool_calls(&self, state: &mut RunState, tool_calls: &[ToolCallRequest]) {
-        for tc_req in tool_calls {
-            let tool_call = ToolCall {
-                namespace: Self::extract_namespace(&tc_req.name),
-                action: Self::extract_action(&tc_req.name),
-                arguments: tc_req.arguments.clone(),
-            };
+    ///
+    /// `turn_cost` is the LLM cost (cents) for this turn. Each capped tool that
+    /// is **allowed to execute** (i.e., has not yet reached its cap) gets an equal
+    /// share of `turn_cost` attributed to it. Intercept results are computed once
+    /// per tool call and reused for both cap-checking and dispatch.
+    async fn process_tool_calls(
+        &self,
+        state: &mut RunState,
+        tool_calls: &[ToolCallRequest],
+        turn_cost: u64,
+    ) {
+        // Single pass: resolve every tool call and its intercept result.
+        let resolved: Vec<(&ToolCallRequest, ToolCall, InterceptResult)> = tool_calls
+            .iter()
+            .map(|tc_req| {
+                let tool_call = ToolCall {
+                    namespace: Self::extract_namespace(&tc_req.name),
+                    action: Self::extract_action(&tc_req.name),
+                    arguments: tc_req.arguments.clone(),
+                };
+                let intercept = self.interceptor.intercept(&tool_call);
+                (tc_req, tool_call, intercept)
+            })
+            .collect();
 
-            let intercept = self.interceptor.intercept(&tool_call);
+        // Count capped tools that are within their cap and will actually execute.
+        // Denied-by-cap tools are excluded so cost is not under-attributed to
+        // the tools that do execute.
+        let executing_capped_count = resolved
+            .iter()
+            .filter(|(_, tool_call, intercept)| {
+                if let InterceptResult::CappedAt { max_cents, .. } = intercept {
+                    let key = format!("{}.{}", tool_call.namespace, tool_call.action);
+                    let spent = state.per_tool_spent.get(&key).copied().unwrap_or(0);
+                    spent < *max_cents
+                } else {
+                    false
+                }
+            })
+            .count()
+            .max(1) as u64;
 
+        for (tc_req, tool_call, intercept) in resolved {
             match intercept {
-                InterceptResult::Allowed | InterceptResult::CappedAt { .. } => {
+                InterceptResult::Allowed => {
                     self.execute_allowed_tool(state, &tc_req.id, tool_call)
                         .await;
+                }
+                InterceptResult::CappedAt { max_cents, .. } => {
+                    let key = format!("{}.{}", tool_call.namespace, tool_call.action);
+                    let spent = state.per_tool_spent.get(&key).copied().unwrap_or(0);
+                    if spent >= max_cents {
+                        let reason = format!(
+                            "monetary cap of {max_cents}¢ exceeded \
+                             ({spent}¢ attributed to `{key}`)"
+                        );
+                        state.events.push(RunEvent::ToolCallAttempt {
+                            tool: tool_call,
+                            allowed: false,
+                            reason: Some(reason.clone()),
+                        });
+                        state
+                            .messages
+                            .push(Message::tool(&tc_req.id, format!("Permission denied: {reason}")));
+                    } else {
+                        // Attribute this turn's LLM cost evenly across capped tools
+                        // that are actually executing (not already over-cap).
+                        *state.per_tool_spent.entry(key).or_insert(0) +=
+                            turn_cost / executing_capped_count;
+                        self.execute_allowed_tool(state, &tc_req.id, tool_call)
+                            .await;
+                    }
                 }
                 InterceptResult::Denied { reason } => {
                     state.events.push(RunEvent::ToolCallAttempt {
