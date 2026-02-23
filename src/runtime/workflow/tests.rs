@@ -261,6 +261,48 @@ async fn parallel_unknown_agent_errors() {
     assert!(err.to_string().contains("missing"), "err: {err}");
 }
 
+// #351: run_parallel must produce results in stage-declaration order even when
+// stages complete concurrently. This verifies the ordering guarantee of the
+// concurrent implementation.
+#[tokio::test]
+async fn parallel_workflow_preserves_stage_order() {
+    let file = parse_file(
+        r"
+        agent a { model: openai }
+        agent b { model: openai }
+        agent c { model: openai }
+    ",
+    );
+    let mut workflow = make_workflow("pipe", "event", &["a", "b", "c"]);
+    workflow.mode = ExecutionMode::Parallel;
+
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+    };
+
+    provider.push_response(simple_response("first"));
+    provider.push_response(simple_response("second"));
+    provider.push_response(simple_response("third"));
+
+    let result = run_parallel(&workflow, &ctx).await.expect("should succeed");
+
+    assert_eq!(result.stage_results.len(), 3);
+    // Results must be in stage-declaration order, not completion order.
+    assert_eq!(result.stage_results[0].stage_name, "a");
+    assert_eq!(result.stage_results[1].stage_name, "b");
+    assert_eq!(result.stage_results[2].stage_name, "c");
+    assert!(result.final_output.contains("first"));
+    assert!(result.final_output.contains("second"));
+    assert!(result.final_output.contains("third"));
+}
+
 #[tokio::test]
 async fn run_workflow_dispatches_by_mode() {
     let file = parse_file("agent a { model: openai }");
