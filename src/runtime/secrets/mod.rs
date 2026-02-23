@@ -113,7 +113,16 @@ fn resolve_source(name: &str, source: &SecretSource) -> Result<ResolvedSecret, S
         SecretSource::Vault { path } => {
             // Vault integration is a placeholder. In production, this would
             // call the Vault HTTP API. For now, check for a VAULT_* env var fallback.
-            let env_key = format!("VAULT_{}", path.replace(['/', '-'], "_").to_uppercase());
+            let env_key = format!(
+                "VAULT_{}",
+                path.chars()
+                    .map(|c| if c.is_alphanumeric() {
+                        c.to_ascii_uppercase()
+                    } else {
+                        '_'
+                    })
+                    .collect::<String>()
+            );
             match std::env::var(&env_key) {
                 Ok(value) => Ok(ResolvedSecret {
                     name: name.to_string(),

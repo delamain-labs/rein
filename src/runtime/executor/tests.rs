@@ -12,11 +12,45 @@ fn tool_call(ns: &str, action: &str) -> ToolCall {
     }
 }
 
-fn ctx<'a>(call: &'a ToolCall, secrets: &'a HashMap<String, String>) -> ToolCallContext<'a> {
+fn ctx<'a>(call: &'a ToolCall, secrets: &'a Secrets) -> ToolCallContext<'a> {
     ToolCallContext {
         tool_call: call,
         secrets,
     }
+}
+
+#[test]
+fn secrets_debug_redacts_values() {
+    let mut map = HashMap::new();
+    map.insert("TOKEN".to_string(), "super-secret".to_string());
+    map.insert("KEY".to_string(), "another-secret".to_string());
+    let secrets = Secrets::from(map);
+    let debug_output = format!("{secrets:?}");
+    assert!(
+        debug_output.contains("redacted"),
+        "debug output must contain 'redacted', got: {debug_output}"
+    );
+    assert!(
+        !debug_output.contains("super-secret"),
+        "debug output must not reveal secret values, got: {debug_output}"
+    );
+    assert!(
+        !debug_output.contains("another-secret"),
+        "debug output must not reveal secret values, got: {debug_output}"
+    );
+    assert!(
+        debug_output.contains('2'),
+        "debug output must show key count, got: {debug_output}"
+    );
+}
+
+#[test]
+fn secrets_get_returns_value() {
+    let mut map = HashMap::new();
+    map.insert("TOKEN".to_string(), "value".to_string());
+    let secrets = Secrets::from(map);
+    assert_eq!(secrets.get("TOKEN"), Some(&"value".to_string()));
+    assert_eq!(secrets.get("MISSING"), None);
 }
 
 #[tokio::test]
@@ -29,7 +63,7 @@ async fn mock_returns_registered_response() {
     );
 
     let call = tool_call("zendesk", "read_ticket");
-    let secrets = HashMap::new();
+    let secrets = Secrets::from(HashMap::new());
     let result = executor
         .execute(&ctx(&call, &secrets))
         .await
@@ -44,7 +78,7 @@ async fn mock_returns_failure() {
     executor.on_call_fail("zendesk", "refund", "insufficient funds");
 
     let call = tool_call("zendesk", "refund");
-    let secrets = HashMap::new();
+    let secrets = Secrets::from(HashMap::new());
     let err = executor.execute(&ctx(&call, &secrets)).await.unwrap_err();
     assert!(err.to_string().contains("insufficient funds"));
 }
@@ -53,7 +87,7 @@ async fn mock_returns_failure() {
 async fn mock_unknown_tool_returns_not_found() {
     let executor = MockExecutor::new();
     let call = tool_call("stripe", "charge");
-    let secrets = HashMap::new();
+    let secrets = Secrets::from(HashMap::new());
     let err = executor.execute(&ctx(&call, &secrets)).await.unwrap_err();
     assert!(err.to_string().contains("not found"));
 }
@@ -66,7 +100,7 @@ async fn mock_multiple_tools() {
 
     let call1 = tool_call("zendesk", "read_ticket");
     let call2 = tool_call("zendesk", "reply_ticket");
-    let secrets = HashMap::new();
+    let secrets = Secrets::from(HashMap::new());
     let r1 = executor.execute(&ctx(&call1, &secrets)).await.expect("ok");
     let r2 = executor.execute(&ctx(&call2, &secrets)).await.expect("ok");
     assert!(r1.output.contains("ticket"));
@@ -83,8 +117,9 @@ async fn execute_accepts_context_with_secrets() {
     executor.on_call("api", "call", "ok");
 
     let call = tool_call("api", "call");
-    let mut secrets = HashMap::new();
-    secrets.insert("TOKEN".to_string(), "secret-value".to_string());
+    let mut map = HashMap::new();
+    map.insert("TOKEN".to_string(), "secret-value".to_string());
+    let secrets = Secrets::from(map);
     let result = executor
         .execute(&ctx(&call, &secrets))
         .await

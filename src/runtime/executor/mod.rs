@@ -2,6 +2,44 @@ use std::collections::HashMap;
 
 use super::ToolCall;
 
+/// A map of resolved secrets keyed by binding name.
+///
+/// Implements `Debug` with redacted output so that secrets are never
+/// accidentally written to logs or OTEL spans.
+pub struct Secrets(HashMap<String, String>);
+
+impl std::fmt::Debug for Secrets {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Secrets([redacted, {} keys])", self.0.len())
+    }
+}
+
+impl From<HashMap<String, String>> for Secrets {
+    fn from(map: HashMap<String, String>) -> Self {
+        Self(map)
+    }
+}
+
+impl Secrets {
+    /// Look up a secret by binding name.
+    #[must_use]
+    pub fn get(&self, key: &str) -> Option<&String> {
+        self.0.get(key)
+    }
+
+    /// Returns `true` if there are no secrets.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Number of secrets.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
 #[cfg(test)]
 mod tests;
 
@@ -11,8 +49,8 @@ mod tests;
 pub struct ToolCallContext<'a> {
     /// The tool call to execute.
     pub tool_call: &'a ToolCall,
-    /// Resolved secrets keyed by binding name.
-    pub secrets: &'a HashMap<String, String>,
+    /// Resolved secrets keyed by binding name. Debug output is redacted.
+    pub secrets: &'a Secrets,
 }
 
 /// The result of executing a tool.
