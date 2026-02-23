@@ -32,6 +32,9 @@ fn check_consensus(blocks: &[crate::ast::ConsensusDef], diags: &mut Vec<Diagnost
     }
 }
 
+/// Export targets supported at runtime (via `rein run --otel`).
+const SUPPORTED_EXPORTS: &[&str] = &["otlp", "stdout"];
+
 fn check_observe(blocks: &[crate::ast::ObserveDef], diags: &mut Vec<Diagnostic>) {
     if let Some(first) = blocks.first() {
         diags.push(Diagnostic::warning(
@@ -39,6 +42,17 @@ fn check_observe(blocks: &[crate::ast::ObserveDef], diags: &mut Vec<Diagnostic>)
             "observe blocks are parsed but not enforced at runtime. Use `rein run --otel` for trace export.",
             first.span.clone(),
         ));
+    }
+    for block in blocks {
+        if let Some(export) = &block.export
+            && !SUPPORTED_EXPORTS.contains(&export.as_str())
+        {
+            diags.push(Diagnostic::warning(
+                "W_EXPORT_UNSUPPORTED",
+                format!("observe export target '{export}' is not supported at runtime. Supported targets: otlp, stdout."),
+                block.span.clone(),
+            ));
+        }
     }
 }
 
@@ -151,6 +165,46 @@ mod tests {
         let file = parse(r#"scenario test { given { q: "hi" } expect { a: "hello" } }"#).unwrap();
         let diags = check_unenforced(&file);
         assert!(diags.iter().any(|d| d.message.contains("scenario")));
+    }
+
+    #[test]
+    fn warns_on_unimplemented_export_prometheus() {
+        let file = parse(r#"observe metrics { export: prometheus }"#).unwrap();
+        let diags = check_unenforced(&file);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("prometheus") && d.message.contains("not supported")),
+            "expected diagnostic mentioning 'prometheus' and 'not supported', got: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn warns_on_unimplemented_export_datadog() {
+        let file = parse(r#"observe metrics { export: datadog }"#).unwrap();
+        let diags = check_unenforced(&file);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("datadog") && d.message.contains("not supported")),
+            "expected diagnostic mentioning 'datadog' and 'not supported', got: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn no_unimplemented_export_warning_for_otlp() {
+        let file = parse(r#"observe metrics { export: otlp }"#).unwrap();
+        let diags = check_unenforced(&file);
+        // The general observe warning is fine; but there must be no "not supported" warning.
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.message.contains("not supported") && d.message.contains("export")),
+            "otlp export should not produce an 'not supported' diagnostic, got: {:?}",
+            diags
+        );
     }
 
     #[test]
