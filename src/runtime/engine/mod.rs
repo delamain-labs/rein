@@ -527,7 +527,7 @@ impl<'a> AgentEngine<'a> {
 /// Returns `true` if the event contributes to any of the requested metric categories.
 ///
 /// Metric names:
-/// - `"cost"` → `LlmCall`, `BudgetUpdate`
+/// - `"cost"` → `LlmCall`, `BudgetUpdate`, `RunComplete`
 /// - `"tool_calls"` → `ToolCallAttempt`, `ToolCallResult`
 /// - `"latency"` → `LlmCall`
 /// - `"guardrails"` → `GuardrailTriggered`
@@ -536,7 +536,7 @@ fn event_matches_metrics(event: &RunEvent, metrics: &[String]) -> bool {
     metrics.iter().any(|m| match m.as_str() {
         "cost" => matches!(
             event,
-            RunEvent::LlmCall { .. } | RunEvent::BudgetUpdate { .. }
+            RunEvent::LlmCall { .. } | RunEvent::BudgetUpdate { .. } | RunEvent::RunComplete { .. }
         ),
         "tool_calls" => matches!(
             event,

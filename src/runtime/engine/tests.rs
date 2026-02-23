@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use serde_json::json;
 
@@ -699,21 +700,13 @@ fn event_matches_unknown_metric_returns_false() {
 }
 
 #[test]
-fn event_matches_unmapped_variants_always_return_false() {
-    // Variants not mapped to any metric must return false for all known metric names
-    // to avoid leaking internal events into filtered OTEL exports.
-    let run_complete = RunEvent::RunComplete {
-        total_cost_cents: 10,
-        total_tokens: 100,
-    };
+// Covers variants that are intentionally NOT mapped to any metric category.
+// These events must return false for every known metric name to prevent
+// internal runtime events from leaking into filtered OTEL exports.
+// Note: RunComplete IS mapped to "cost" and is excluded from this test —
+// it is covered by `run_complete_matches_cost_metric` below.
+fn unmapped_variants_return_false_for_all_known_metrics() {
     let all_metrics = ["cost", "tool_calls", "latency", "guardrails"];
-    for metric in &all_metrics {
-        assert!(
-            !event_matches_metrics(&run_complete, &[metric.to_string()]),
-            "RunComplete should not match metric '{metric}'"
-        );
-    }
-
     let cb = RunEvent::CircuitBreakerTripped {
         name: "cb".to_string(),
         failures: 3,
@@ -725,4 +718,86 @@ fn event_matches_unmapped_variants_always_return_false() {
             "CircuitBreakerTripped should not match metric '{metric}'"
         );
     }
+}
+
+// #330: RunComplete carries total_cost_cents + total_tokens and must match "cost".
+#[test]
+fn run_complete_matches_cost_metric() {
+    let ev = RunEvent::RunComplete {
+        total_cost_cents: 42,
+        total_tokens: 1000,
+    };
+    assert!(event_matches_metrics(&ev, &["cost".to_string()]));
+    // Does NOT match non-cost metrics.
+    assert!(!event_matches_metrics(&ev, &["tool_calls".to_string()]));
+    assert!(!event_matches_metrics(&ev, &["latency".to_string()]));
+    assert!(!event_matches_metrics(&ev, &["guardrails".to_string()]));
+}
+
+// #335: Verify secrets injected via with_secrets() reach executor.execute() ctx.
+// Uses a SecretCapturingExecutor that records the last secrets map seen.
+struct SecretCapturingExecutor {
+    captured: Mutex<Option<HashMap<String, String>>>,
+    response: String,
+}
+
+impl SecretCapturingExecutor {
+    fn new(response: impl Into<String>) -> Self {
+        Self {
+            captured: Mutex::new(None),
+            response: response.into(),
+        }
+    }
+
+    fn captured_secrets(&self) -> Option<HashMap<String, String>> {
+        self.captured.lock().expect("lock").clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::runtime::executor::ToolExecutor for SecretCapturingExecutor {
+    async fn execute(
+        &self,
+        ctx: &crate::runtime::executor::ToolCallContext<'_>,
+    ) -> Result<crate::runtime::executor::ToolOutput, crate::runtime::executor::ExecutorError> {
+        *self.captured.lock().expect("lock") = Some(ctx.secrets.clone());
+        Ok(crate::runtime::executor::ToolOutput {
+            success: true,
+            output: self.response.clone(),
+        })
+    }
+}
+
+#[tokio::test]
+async fn engine_with_secrets_forwards_them_to_executor_context() {
+    let provider = MockProvider::new();
+    // First response triggers a tool call; second response finishes the run.
+    provider.push_response(tool_call_response("zendesk.read_ticket", json!({"id": 1})));
+    provider.push_response(simple_response("done"));
+
+    let agent = make_agent(vec![cap("zendesk", "read_ticket")], vec![], None);
+    let registry = crate::runtime::permissions::ToolRegistry::from_agent(&agent);
+
+    let executor = SecretCapturingExecutor::new("ticket data");
+    let mut secrets = HashMap::new();
+    secrets.insert("API_TOKEN".to_string(), "s3cr3t".to_string());
+
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig::default(),
+    )
+    .with_secrets(secrets.clone());
+
+    engine.run("hello").await.expect("run should succeed");
+
+    let captured = executor
+        .captured_secrets()
+        .expect("executor should have been called");
+    assert_eq!(
+        captured.get("API_TOKEN").map(String::as_str),
+        Some("s3cr3t")
+    );
 }
