@@ -132,9 +132,14 @@ pub fn run_agent(
         );
     }
 
-    // `--audit-log` only applies to workflow runs. TODO(#377): tracing::warn!
+    // `--audit-log` only applies to workflow runs. Single-agent runs do not
+    // have a workflow context, so the audit log would record nothing useful.
+    // Silently ignoring the flag would be a footgun for compliance users who
+    // expect audit records but receive none — fail-hard instead.
     if audit_log.is_some() {
-        eprintln!("warn: --audit-log has no effect for single-agent runs (workflows only)");
+        eprintln!("error: --audit-log requires a workflow run (use 'workflow:' in your .rein file)");
+        eprintln!("hint: remove --audit-log or add a workflow definition to your .rein file");
+        return 1;
     }
 
     run_engine(&engine, user_message)
