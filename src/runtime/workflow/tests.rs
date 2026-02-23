@@ -1508,7 +1508,10 @@ async fn step_without_fallback_propagates_error() {
         .await
         .expect("soft errors return Ok");
     assert_eq!(results.len(), 1);
-    assert!(results[0].output.is_empty(), "failed step output must be empty");
+    assert!(
+        results[0].output.is_empty(),
+        "failed step output must be empty"
+    );
 }
 
 #[tokio::test]
@@ -2037,9 +2040,9 @@ async fn failed_dependency_skips_dependent_step() {
     assert_eq!(results.len(), 2, "both steps should produce a result entry");
 
     // StepSkipped event must be emitted for step_b
-    let skipped_event = events.iter().find(|e| {
-        matches!(e, crate::runtime::RunEvent::StepSkipped { step, .. } if step == "step_b")
-    });
+    let skipped_event = events.iter().find(
+        |e| matches!(e, crate::runtime::RunEvent::StepSkipped { step, .. } if step == "step_b"),
+    );
     assert!(
         skipped_event.is_some(),
         "expected StepSkipped for step_b, got events: {events:?}"
