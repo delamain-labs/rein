@@ -268,15 +268,22 @@ fn resolve_secrets(
                         );
                     }
                     SecretError::VaultUnavailable(path) => {
-                        let env_key =
-                            format!("VAULT_{}", path.replace(['/', '-'], "_").to_uppercase());
+                        let env_key = format!(
+                            "VAULT_{}",
+                            path.chars()
+                                .map(|c| if c.is_ascii_alphanumeric() {
+                                    c.to_ascii_uppercase()
+                                } else {
+                                    '_'
+                                })
+                                .collect::<String>()
+                        );
                         eprintln!(
                             "error: Vault path '{path}' not reachable and fallback env var '{env_key}' not set."
                         );
                         eprintln!("  → vault path: {path}");
                         eprintln!(
-                            "hint: Set VAULT_{} as a fallback env var, or rewrite the binding to use env: source",
-                            path.replace(['/', '-'], "_").to_uppercase()
+                            "hint: Set {env_key} as a fallback env var, or rewrite the binding to use env: source"
                         );
                     }
                 }

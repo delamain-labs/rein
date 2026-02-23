@@ -3,7 +3,7 @@ use std::sync::Mutex;
 
 use super::budget::{BudgetTracker, calculate_cost};
 use super::circuit_breaker::CircuitBreaker;
-use super::executor::ToolExecutor;
+use super::executor::{Secrets, ToolExecutor};
 use super::guardrails::GuardrailEngine;
 use super::interceptor::{InterceptResult, ToolInterceptor};
 use super::otel_export::OtelMode;
@@ -110,7 +110,7 @@ pub struct AgentEngine<'a> {
     /// Agent name embedded in OTEL spans (e.g. `rein.run.<agent>`).
     agent_name: Option<String>,
     /// Resolved secrets injected from `secrets { }` blocks. Never emitted to trace.
-    secrets: HashMap<String, String>,
+    secrets: Secrets,
 }
 
 impl<'a> AgentEngine<'a> {
@@ -135,7 +135,7 @@ impl<'a> AgentEngine<'a> {
             policy_engine: None,
             otel_mode: OtelMode::None,
             agent_name: None,
-            secrets: HashMap::new(),
+            secrets: Secrets::from(HashMap::new()),
         }
     }
 
@@ -185,7 +185,7 @@ impl<'a> AgentEngine<'a> {
     /// Values are never emitted to the trace or OTEL spans.
     #[must_use]
     pub fn with_secrets(mut self, secrets: HashMap<String, String>) -> Self {
-        self.secrets = secrets;
+        self.secrets = Secrets::from(secrets);
         self
     }
 
