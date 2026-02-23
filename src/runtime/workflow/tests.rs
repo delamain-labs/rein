@@ -1890,11 +1890,8 @@ async fn run_steps_emits_step_started_and_completed() {
 }
 
 /// Tests that `run_steps` returns an appropriate error when a step's agent is
-/// not found. Note: the `StepFailed` event is emitted inside `run_steps` but
-/// is NOT observable from the outside on this code path because the current
-/// `run_steps` return type (`Result<..., WorkflowError>`) discards the
-/// accumulated event log on failure. This is a known limitation tracked as a
-/// follow-up; the test is intentionally named to describe what IS observable.
+/// not found. `StepFailed` emission is deferred to issue #380, which will
+/// change the `run_steps` signature to surface partial events alongside errors.
 #[tokio::test]
 async fn run_steps_returns_error_on_missing_agent() {
     let file = parse_file("agent other { model: openai }");

@@ -516,13 +516,11 @@ pub async fn run_steps(
         let (result, step_events) = match step_result {
             Ok(v) => v,
             Err(e) => {
-                events.push(super::RunEvent::StepFailed {
-                    step: step.name.clone(),
-                    error: e.to_string(),
-                });
-                // TODO(#380): `events` (including the StepFailed entry above)
-                // is dropped here on early return. Surface partial events to
-                // the caller so failed runs produce an inspectable trace.
+                // TODO(#380): emit `StepFailed` here once the return type is
+                // changed to surface partial events. Currently `events` is
+                // dropped on early return, so pushing `StepFailed` would be
+                // unobservable dead code. Deferring emission until #380 fixes
+                // the signature.
                 return Err(e);
             }
         };
