@@ -1876,7 +1876,10 @@ async fn run_steps_emits_step_started_and_completed() {
     let started = events.iter().find(|e| {
         matches!(e, crate::runtime::RunEvent::StepStarted { step, index: 0 } if step == "do_work")
     });
-    assert!(started.is_some(), "expected StepStarted {{ step: do_work, index: 0 }}");
+    assert!(
+        started.is_some(),
+        "expected StepStarted {{ step: do_work, index: 0 }}"
+    );
 
     assert!(
         events.iter().any(
