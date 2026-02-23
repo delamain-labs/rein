@@ -274,21 +274,6 @@ impl ApprovalHandler for SlackApprovalHandler {
     }
 }
 
-/// Blanket impl so `AuditingApprovalHandler<Box<dyn ApprovalHandler>>` works.
-#[async_trait::async_trait]
-impl ApprovalHandler for Box<dyn ApprovalHandler> {
-    async fn request_approval(
-        &self,
-        step_name: &str,
-        agent_output: &str,
-        approval: &ApprovalDef,
-    ) -> ApprovalStatus {
-        (**self)
-            .request_approval(step_name, agent_output, approval)
-            .await
-    }
-}
-
 /// Blanket impl so `AuditingApprovalHandler<Arc<dyn ApprovalHandler>>` works.
 /// This allows a single resolved `Arc<dyn ApprovalHandler>` (whether injected
 /// via `WorkflowContext` or freshly resolved) to be wrapped by the auditor.
@@ -406,12 +391,17 @@ impl<H: ApprovalHandler> ApprovalHandler for AuditingApprovalHandler<H> {
         resolved.step = Some(step_name.to_string());
         resolved.workflow.clone_from(&self.workflow_name);
         resolved.agent.clone_from(&self.agent_name);
-        resolved.metadata = serde_json::json!({
+        let mut meta = serde_json::json!({
             "channel": approval.channel,
             "decision": decision,
             "elapsed_ms": elapsed_ms,
-            "reason": rejection_reason,
         });
+        // Only include "reason" for rejected decisions; omitting the key for
+        // approved/timed-out outcomes avoids a noisy `null` in audit records.
+        if let Some(r) = rejection_reason {
+            meta["reason"] = serde_json::Value::String(r.to_string());
+        }
+        resolved.metadata = meta;
         if let Err(e) = self.log.append(&resolved) {
             // TODO(#377): replace with tracing::warn! once the `tracing` crate
             // is added to Cargo.toml.
