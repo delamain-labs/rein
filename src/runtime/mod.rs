@@ -130,7 +130,7 @@ pub enum RunEvent {
     /// A workflow step failed (agent not found, provider error, etc.).
     StepFailed {
         step: String,
-        error: String,
+        reason: String,
     },
 }
 
@@ -373,8 +373,8 @@ fn summarize_event(event: &RunEvent, lines: &mut Vec<String>, turn: &mut usize) 
         RunEvent::StepCompleted { step } => {
             lines.push(format!("  ✓ step '{step}' completed"));
         }
-        RunEvent::StepFailed { step, error } => {
-            lines.push(format!("  ✗ step '{step}' failed: {error}"));
+        RunEvent::StepFailed { step, reason } => {
+            lines.push(format!("  ✗ step '{step}' failed: {reason}"));
         }
     }
 }
