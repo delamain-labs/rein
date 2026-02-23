@@ -536,7 +536,7 @@ fn event_matches_metrics(event: &RunEvent, metrics: &[String]) -> bool {
     metrics.iter().any(|m| match m.as_str() {
         "cost" => matches!(
             event,
-            RunEvent::LlmCall { .. } | RunEvent::BudgetUpdate { .. }
+            RunEvent::LlmCall { .. } | RunEvent::BudgetUpdate { .. } | RunEvent::RunComplete { .. }
         ),
         "tool_calls" => matches!(
             event,
