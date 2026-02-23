@@ -109,7 +109,31 @@ fn pseudo_id(seed: u64, len: usize) -> String {
     out
 }
 
-/// Convert a structured trace to OTLP-compatible JSON.
+/// Parse an RFC 3339 timestamp string and return nanoseconds since Unix epoch,
+/// or `None` if the string cannot be parsed or represents a pre-epoch time.
+fn try_rfc3339_to_unix_nanos(ts: &str) -> Option<u64> {
+    use chrono::DateTime;
+    DateTime::parse_from_rfc3339(ts)
+        .ok()
+        .and_then(|dt| dt.timestamp_nanos_opt())
+        .and_then(|n| u64::try_from(n).ok())
+}
+
+/// Parse an RFC 3339 timestamp string and return nanoseconds since Unix epoch.
+///
+/// Emits a warning to stderr and falls back to `0` if the string cannot be
+/// parsed or represents a pre-epoch time. A fallback value of `0` (Unix epoch)
+/// will appear clearly wrong in any OTLP viewer and is therefore detectable.
+fn rfc3339_to_unix_nanos(ts: &str) -> u64 {
+    try_rfc3339_to_unix_nanos(ts).unwrap_or_else(|| {
+        eprintln!(
+            "rein[otel]: warning: could not parse timestamp '{ts}' as RFC 3339; \
+             falling back to Unix epoch 0 — spans will have incorrect timestamps"
+        );
+        0
+    })
+}
+
 pub fn to_otlp(trace: &StructuredTrace) -> OtelResourceSpans {
     let trace_id = pseudo_id(
         trace
@@ -120,6 +144,15 @@ pub fn to_otlp(trace: &StructuredTrace) -> OtelResourceSpans {
     );
     let root_span_id = pseudo_id(trace.stats.total_cost_cents.wrapping_add(1), 8);
 
+    let start_ns = rfc3339_to_unix_nanos(&trace.started_at);
+    // Use completed_at for end_ns so the root span reflects the actual wall-clock
+    // end time. Falls back to start_ns + duration_ms if completed_at is unparseable.
+    // Uses try_ variant to correctly distinguish parse failure from a legitimately
+    // epoch-zero completed_at (avoiding silent fallback for valid epoch timestamps).
+    let end_ns = try_rfc3339_to_unix_nanos(&trace.completed_at).unwrap_or_else(|| {
+        start_ns.saturating_add(trace.stats.duration_ms.saturating_mul(1_000_000))
+    });
+
     let mut spans = Vec::new();
 
     // Root span for the entire run
@@ -128,9 +161,9 @@ pub fn to_otlp(trace: &StructuredTrace) -> OtelResourceSpans {
         span_id: root_span_id.clone(),
         parent_span_id: None,
         name: format!("rein.run.{}", trace.agent),
-        kind: 1,                 // INTERNAL
-        start_time_unix_nano: 0, // Would use real timestamps in production
-        end_time_unix_nano: trace.stats.duration_ms * 1_000_000,
+        kind: 1, // INTERNAL
+        start_time_unix_nano: start_ns,
+        end_time_unix_nano: end_ns,
         attributes: vec![
             attr_str("rein.agent.name", &trace.agent),
             attr_int("rein.tokens.total", trace.stats.total_tokens.cast_signed()),
@@ -163,8 +196,14 @@ pub fn to_otlp(trace: &StructuredTrace) -> OtelResourceSpans {
             parent_span_id: Some(root_span_id.clone()),
             name,
             kind: 1,
-            start_time_unix_nano: te.offset_ms * 1_000_000,
-            end_time_unix_nano: te.offset_ms * 1_000_000,
+            // Child event spans are point-in-time records (start == end).
+            // RunEvents have no intrinsic duration — they mark when the event
+            // occurred, not how long it took. OTLP collectors render these as
+            // instant markers rather than duration bars.
+            start_time_unix_nano: start_ns
+                .saturating_add(te.offset_ms.saturating_mul(1_000_000)),
+            end_time_unix_nano: start_ns
+                .saturating_add(te.offset_ms.saturating_mul(1_000_000)),
             attributes: attrs,
             status: OtelStatus {
                 code: 1,

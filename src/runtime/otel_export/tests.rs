@@ -102,6 +102,28 @@ fn otlp_resource_has_service_info() {
     assert_eq!(service_name.value.string_value.as_deref(), Some("rein"));
 }
 
+// #329: root span must have real timestamps derived from started_at/completed_at,
+// not hardcoded zeros.
+// sample_trace: started_at = "2026-01-01T00:00:00Z", completed_at = "2026-01-01T00:00:01Z"
+#[test]
+fn otlp_root_span_has_real_timestamps() {
+    let trace = sample_trace();
+    let root = &to_otlp(&trace).scope_spans[0].spans[0];
+
+    // 2026-01-01T00:00:00Z = 1767225600 seconds since Unix epoch
+    let expected_start_ns: u64 = 1_767_225_600 * 1_000_000_000;
+    assert_eq!(
+        root.start_time_unix_nano, expected_start_ns,
+        "root span start must equal started_at converted to nanoseconds"
+    );
+    // 2026-01-01T00:00:01Z = 1767225601 seconds since Unix epoch (completed_at)
+    let expected_end_ns: u64 = 1_767_225_601 * 1_000_000_000;
+    assert_eq!(
+        root.end_time_unix_nano, expected_end_ns,
+        "root span end must equal completed_at converted to nanoseconds"
+    );
+}
+
 #[test]
 fn otlp_root_span_has_stats() {
     let trace = sample_trace();
