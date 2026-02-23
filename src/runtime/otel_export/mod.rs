@@ -110,6 +110,19 @@ fn pseudo_id(seed: u64, len: usize) -> String {
 }
 
 /// Convert a structured trace to OTLP-compatible JSON.
+/// Parse an RFC 3339 timestamp string and return nanoseconds since Unix epoch.
+/// Falls back to 0 if the string cannot be parsed rather than panicking.
+fn rfc3339_to_unix_nanos(ts: &str) -> u64 {
+    use chrono::DateTime;
+    DateTime::parse_from_rfc3339(ts)
+        .ok()
+        .and_then(|dt| {
+            dt.timestamp_nanos_opt()
+                .map(|n| u64::try_from(n).unwrap_or(0))
+        })
+        .unwrap_or(0)
+}
+
 pub fn to_otlp(trace: &StructuredTrace) -> OtelResourceSpans {
     let trace_id = pseudo_id(
         trace
@@ -120,6 +133,9 @@ pub fn to_otlp(trace: &StructuredTrace) -> OtelResourceSpans {
     );
     let root_span_id = pseudo_id(trace.stats.total_cost_cents.wrapping_add(1), 8);
 
+    let start_ns = rfc3339_to_unix_nanos(&trace.started_at);
+    let end_ns = start_ns + trace.stats.duration_ms * 1_000_000;
+
     let mut spans = Vec::new();
 
     // Root span for the entire run
@@ -128,9 +144,9 @@ pub fn to_otlp(trace: &StructuredTrace) -> OtelResourceSpans {
         span_id: root_span_id.clone(),
         parent_span_id: None,
         name: format!("rein.run.{}", trace.agent),
-        kind: 1,                 // INTERNAL
-        start_time_unix_nano: 0, // Would use real timestamps in production
-        end_time_unix_nano: trace.stats.duration_ms * 1_000_000,
+        kind: 1, // INTERNAL
+        start_time_unix_nano: start_ns,
+        end_time_unix_nano: end_ns,
         attributes: vec![
             attr_str("rein.agent.name", &trace.agent),
             attr_int("rein.tokens.total", trace.stats.total_tokens.cast_signed()),
@@ -163,8 +179,8 @@ pub fn to_otlp(trace: &StructuredTrace) -> OtelResourceSpans {
             parent_span_id: Some(root_span_id.clone()),
             name,
             kind: 1,
-            start_time_unix_nano: te.offset_ms * 1_000_000,
-            end_time_unix_nano: te.offset_ms * 1_000_000,
+            start_time_unix_nano: start_ns + te.offset_ms * 1_000_000,
+            end_time_unix_nano: start_ns + te.offset_ms * 1_000_000,
             attributes: attrs,
             status: OtelStatus {
                 code: 1,
