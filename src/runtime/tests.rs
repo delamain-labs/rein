@@ -503,7 +503,7 @@ fn run_error_serializes_as_tagged_snake_case() {
 #[test]
 fn run_error_timeout_roundtrips() {
     let err = RunError::Timeout {
-        partial_trace: RunTrace { events: vec![] },
+        partial_trace: RunTrace::from_events(vec![]),
     };
     let json = serde_json::to_string(&err).expect("serialize");
     // Must include the type discriminant and the partial_trace field.

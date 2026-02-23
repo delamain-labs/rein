@@ -271,9 +271,7 @@ impl<'a> AgentEngine<'a> {
                         turn,
                         timeout_secs: secs,
                     });
-                    let partial = RunTrace {
-                        events: std::mem::take(&mut state.events),
-                    };
+                    let partial = RunTrace::from_events(std::mem::take(&mut state.events));
                     return Err(RunError::Timeout {
                         partial_trace: partial,
                     });
