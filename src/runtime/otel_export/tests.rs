@@ -39,7 +39,7 @@ fn sample_trace() -> StructuredTrace {
         },
     ];
 
-    let trace = RunTrace { events };
+    let trace = RunTrace::from_events(events);
     trace.to_structured(
         "test_agent",
         "2026-01-01T00:00:00Z",
@@ -127,7 +127,7 @@ fn otlp_root_span_has_real_timestamps() {
 // #343: unparseable started_at falls back to epoch 0 (detectable sentinel in OTLP viewers).
 #[test]
 fn invalid_started_at_falls_back_to_epoch_zero() {
-    let trace = RunTrace { events: vec![] }.to_structured("agent", "not-a-date", "not-a-date", 500);
+    let trace = RunTrace::from_events(vec![]).to_structured("agent", "not-a-date", "not-a-date", 500);
     let root = &to_otlp(&trace).scope_spans[0].spans[0];
     assert_eq!(
         root.start_time_unix_nano, 0,
@@ -138,7 +138,7 @@ fn invalid_started_at_falls_back_to_epoch_zero() {
 // #343: pre-epoch started_at (negative i64) falls back to epoch 0.
 #[test]
 fn pre_epoch_started_at_falls_back_to_epoch_zero() {
-    let trace = RunTrace { events: vec![] }.to_structured("agent", "1960-06-15T12:00:00Z", "", 0);
+    let trace = RunTrace::from_events(vec![]).to_structured("agent", "1960-06-15T12:00:00Z", "", 0);
     let root = &to_otlp(&trace).scope_spans[0].spans[0];
     assert_eq!(
         root.start_time_unix_nano, 0,
@@ -156,7 +156,7 @@ fn invalid_completed_at_falls_back_to_start_plus_duration() {
         try_rfc3339_to_unix_nanos(started_at).expect("test timestamp must be valid RFC 3339");
     let duration_ms: u64 = 2_000;
     let trace =
-        RunTrace { events: vec![] }.to_structured("agent", started_at, "not-a-date", duration_ms);
+        RunTrace::from_events(vec![]).to_structured("agent", started_at, "not-a-date", duration_ms);
     let root = &to_otlp(&trace).scope_spans[0].spans[0];
     assert_eq!(
         root.end_time_unix_nano,

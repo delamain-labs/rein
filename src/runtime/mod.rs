@@ -124,9 +124,31 @@ pub enum RunEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunTrace {
     pub events: Vec<RunEvent>,
+    /// Real wall-clock offsets (ms from run start) captured at event-push time.
+    /// Empty for deserialized or test-constructed traces; `to_structured` falls
+    /// back to a fake counter when this is empty.
+    #[serde(skip)]
+    timestamps_ms: Vec<u64>,
 }
 
 impl RunTrace {
+    /// Construct a trace from events with no timing information.
+    /// `to_structured` will fall back to a monotonic counter for offsets.
+    #[must_use]
+    pub fn from_events(events: Vec<RunEvent>) -> Self {
+        Self {
+            timestamps_ms: Vec::new(),
+            events,
+        }
+    }
+
+    /// Construct a trace from events paired with real wall-clock offsets (ms
+    /// from run start). `timestamps_ms` must be the same length as `events`.
+    #[must_use]
+    pub fn from_events_timed(events: Vec<RunEvent>, timestamps_ms: Vec<u64>) -> Self {
+        Self { events, timestamps_ms }
+    }
+
     /// Serialize to pretty-printed JSON.
     ///
     /// # Errors
@@ -149,6 +171,7 @@ impl RunTrace {
         let mut llm_calls = 0u64;
         let mut tool_calls = 0u64;
         let mut tool_denied = 0u64;
+        let has_real_timestamps = self.timestamps_ms.len() == self.events.len();
 
         let events: Vec<TimestampedEvent> = self
             .events
@@ -175,8 +198,13 @@ impl RunTrace {
                     }
                     _ => {}
                 }
+                let offset_ms = if has_real_timestamps {
+                    self.timestamps_ms[i]
+                } else {
+                    (i as u64) * 100
+                };
                 TimestampedEvent {
-                    offset_ms: (i as u64) * 100,
+                    offset_ms,
                     event: e.clone(),
                 }
             })
