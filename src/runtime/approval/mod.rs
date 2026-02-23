@@ -342,16 +342,17 @@ impl ApprovalHandler for AuditingApprovalHandler {
             req_meta["timeout"] = serde_json::Value::String(t.clone());
         }
         requested.metadata = req_meta;
-        // Start the clock before writing ApprovalRequested so elapsed_ms
-        // captures the total gate-open time: the moment the audit record
-        // makes the approval visible until the handler returns its decision.
-        // This is the semantically meaningful window for compliance purposes.
-        let start = std::time::Instant::now();
         if let Err(e) = self.log.append(&requested) {
             // TODO(#377): replace with tracing::warn! once the `tracing` crate
             // is added to Cargo.toml.
             eprintln!("rein[audit]: warning: could not write ApprovalRequested entry: {e}");
         }
+        // Start the clock after writing ApprovalRequested so elapsed_ms
+        // captures only the gate-open time: from the moment the approval is
+        // visible to the handler until it returns its decision. Including the
+        // I/O write time would misrepresent the approval latency for compliance
+        // consumers that compare elapsed_ms against SLA thresholds.
+        let start = std::time::Instant::now();
         let status = self
             .inner
             .request_approval(step_name, agent_output, approval)

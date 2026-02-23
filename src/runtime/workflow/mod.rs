@@ -390,14 +390,20 @@ pub async fn run_step(
             ))
         };
         let status = if let Some(log) = &ctx.audit_log {
-            crate::runtime::approval::AuditingApprovalHandler::new(
+            let mut auditing = crate::runtime::approval::AuditingApprovalHandler::new(
                 Arc::clone(&base),
                 Arc::clone(log),
             )
-            .with_agent(step.agent.clone())
-            .with_workflow(ctx.workflow_name.as_deref().unwrap_or(""))
-            .request_approval(&step.name, input, approval_def)
-            .await
+            .with_agent(step.agent.clone());
+            // Only set workflow when the name is known. An empty string would
+            // incorrectly populate AuditEntry.workflow as Some("") rather than None,
+            // causing compliance queries against workflow names to return false positives.
+            if let Some(name) = &ctx.workflow_name {
+                auditing = auditing.with_workflow(name.clone());
+            }
+            auditing
+                .request_approval(&step.name, input, approval_def)
+                .await
         } else {
             base.request_approval(&step.name, input, approval_def).await
         };

@@ -119,6 +119,18 @@ pub fn run_agent(
         .with_otel_mode(otel_mode)
         .with_agent_name(agent.name.clone());
 
+    // `--audit-log` is only meaningful for workflow runs. Guard here — before
+    // the workflow dispatch branch — so the error fires whether or not a
+    // workflow is defined. Silently ignoring the flag would be a footgun for
+    // compliance users who expect audit records but receive none.
+    if audit_log.is_some() && file.workflows.is_empty() {
+        eprintln!(
+            "error: --audit-log requires a workflow run (use 'workflow:' in your .rein file)"
+        );
+        eprintln!("hint: remove --audit-log or add a workflow definition to your .rein file");
+        return 1;
+    }
+
     // If the file has workflows, run the first workflow instead of single-agent execution.
     if let Some(workflow) = file.workflows.first() {
         let budget_cents = agent.budget.as_ref().map_or(0, |b| b.amount);
@@ -130,18 +142,6 @@ pub fn run_agent(
             budget_cents,
             audit_log,
         );
-    }
-
-    // `--audit-log` only applies to workflow runs. Single-agent runs do not
-    // have a workflow context, so the audit log would record nothing useful.
-    // Silently ignoring the flag would be a footgun for compliance users who
-    // expect audit records but receive none — fail-hard instead.
-    if audit_log.is_some() {
-        eprintln!(
-            "error: --audit-log requires a workflow run (use 'workflow:' in your .rein file)"
-        );
-        eprintln!("hint: remove --audit-log or add a workflow definition to your .rein file");
-        return 1;
     }
 
     run_engine(&engine, user_message)
@@ -498,11 +498,19 @@ mod tests {
     // this unit test verifies that AuditLog::new itself correctly fails rather
     // than silently succeeding, so the CLI logic has a reliable signal to act on.
     #[test]
+    #[cfg(unix)]
     fn audit_log_new_fails_for_unwritable_path() {
-        // A path under a non-existent root cannot be created.
-        let result = rein::runtime::audit::AuditLog::new(std::path::Path::new(
-            "/nonexistent_root_that_cannot_exist/audit.jsonl",
-        ));
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+        // Create a tempdir, revoke all permissions, then try to create a file
+        // inside it. This is hermetic and deterministic (no dependency on
+        // filesystem layout or root privileges) unlike a hard-coded
+        // /nonexistent-root path.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o000)).expect("chmod 000");
+        let result = rein::runtime::audit::AuditLog::new(dir.path().join("audit.jsonl"));
+        // Restore permissions so TempDir::drop can clean up.
+        let _ = fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700));
         assert!(
             result.is_err(),
             "AuditLog::new should return Err for unwritable paths so CLI can fail-hard"
