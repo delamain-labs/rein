@@ -1513,8 +1513,8 @@ async fn step_without_fallback_propagates_error() {
         "failed step output must be empty"
     );
     assert_eq!(
-        results[0].agent_name, "<failed>",
-        "failed StageResult must use '<failed>' sentinel so consumers can distinguish it"
+        results[0].agent_name, SENTINEL_FAILED,
+        "failed StageResult must use SENTINEL_FAILED so consumers can distinguish it"
     );
     // A StepFailed event must be emitted so the trace is observable.
     assert!(
@@ -2250,7 +2250,7 @@ async fn independent_step_runs_even_if_sibling_fails() {
     );
 }
 
-/// #363 — Skipped StageResult uses "<skipped>" sentinel so consumers can
+/// #363 — Skipped StageResult uses `SENTINEL_SKIPPED` so consumers can
 /// distinguish it from a successfully-run step that returned no output.
 #[tokio::test]
 async fn skipped_step_result_uses_sentinel_agent_name() {
@@ -2277,7 +2277,7 @@ async fn skipped_step_result_uses_sentinel_agent_name() {
 
     let step_b_result = results.iter().find(|r| r.stage_name == "step_b").unwrap();
     assert_eq!(
-        step_b_result.agent_name, "<skipped>",
+        step_b_result.agent_name, SENTINEL_SKIPPED,
         "skipped StageResult must use '<skipped>' sentinel"
     );
 }
@@ -2326,9 +2326,9 @@ async fn failed_step_output_inserted_into_outputs_map() {
 
     // Failed and skipped results carry sentinels
     let step_a_r = results.iter().find(|r| r.stage_name == "step_a").unwrap();
-    assert_eq!(step_a_r.agent_name, "<failed>");
+    assert_eq!(step_a_r.agent_name, SENTINEL_FAILED);
     let step_b_r = results.iter().find(|r| r.stage_name == "step_b").unwrap();
-    assert_eq!(step_b_r.agent_name, "<skipped>");
+    assert_eq!(step_b_r.agent_name, SENTINEL_SKIPPED);
 }
 
 /// `CyclicDependency` is a hard error — `run_steps` must return `Err` and

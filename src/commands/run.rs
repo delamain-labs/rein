@@ -1,6 +1,8 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use rein::runtime::workflow::{SENTINEL_FAILED, SENTINEL_SKIPPED};
+
 pub fn run_agent(
     path: &std::path::Path,
     message: Option<&str>,
@@ -184,10 +186,12 @@ fn run_workflow_mode(
                 .count();
 
             eprintln!();
-            eprintln!(
-                "--- Workflow complete ({} stages) ---",
-                result.stage_results.len()
-            );
+            let completed_stages = result
+                .stage_results
+                .iter()
+                .filter(|r| r.agent_name != SENTINEL_FAILED && r.agent_name != SENTINEL_SKIPPED)
+                .count();
+            eprintln!("--- Workflow complete ({completed_stages} stages) ---");
             if failed_count > 0 {
                 eprintln!("warning: {failed_count} step(s) failed (see trace below)");
             }

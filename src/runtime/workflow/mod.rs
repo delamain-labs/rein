@@ -1,6 +1,15 @@
 use std::sync::Arc;
 
 use crate::ast::{ExecutionMode, ReinFile, RouteRule, Stage, WorkflowDef};
+
+/// Sentinel agent name used in `StageResult` for steps that failed softly.
+/// Consumers of `WorkflowResult.stage_results` can use this to distinguish
+/// failed steps from steps that actually ran.
+pub const SENTINEL_FAILED: &str = "<failed>";
+/// Sentinel agent name used in `StageResult` for steps skipped due to a
+/// failed dependency. Consumers of `WorkflowResult.stage_results` can use
+/// this to distinguish skipped steps from steps that actually ran.
+pub const SENTINEL_SKIPPED: &str = "<skipped>";
 use crate::runtime::approval::{ApprovalHandler, ApprovalStatus};
 
 use super::engine::{AgentEngine, RunConfig};
@@ -554,7 +563,7 @@ fn apply_step_result(
             });
             state.results.push(StageResult {
                 stage_name: step.name.clone(),
-                agent_name: "<failed>".to_string(),
+                agent_name: SENTINEL_FAILED.to_string(),
                 output: String::new(),
                 cost_cents: 0,
                 tokens: 0,
@@ -617,7 +626,7 @@ pub async fn run_steps(
             state.outputs.insert(step.name.clone(), String::new());
             state.results.push(StageResult {
                 stage_name: step.name.clone(),
-                agent_name: "<skipped>".to_string(),
+                agent_name: SENTINEL_SKIPPED.to_string(),
                 output: String::new(),
                 cost_cents: 0,
                 tokens: 0,
