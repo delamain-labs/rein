@@ -490,7 +490,7 @@ pub struct TraceStats {
 
 /// Errors that can occur during an agent run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum RunError {
     BudgetExceeded,
     PermissionDenied,

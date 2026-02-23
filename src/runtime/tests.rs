@@ -483,18 +483,34 @@ fn run_error_config_error_roundtrips() {
 }
 
 #[test]
-fn run_error_serializes_as_snake_case() {
+fn run_error_serializes_as_tagged_snake_case() {
+    // All variants use #[serde(tag = "type", rename_all = "snake_case")], so
+    // they serialize as {"type": "<variant>"} — a consistent object shape
+    // across both unit and struct variants.
     let v: serde_json::Value = serde_json::to_value(RunError::BudgetExceeded).expect("serialize");
-    assert_eq!(v, "budget_exceeded");
+    assert_eq!(v["type"], "budget_exceeded");
 
     let v: serde_json::Value = serde_json::to_value(RunError::PermissionDenied).expect("serialize");
-    assert_eq!(v, "permission_denied");
+    assert_eq!(v["type"], "permission_denied");
 
     let v: serde_json::Value = serde_json::to_value(RunError::ProviderError).expect("serialize");
-    assert_eq!(v, "provider_error");
+    assert_eq!(v["type"], "provider_error");
 
     let v: serde_json::Value = serde_json::to_value(RunError::ConfigError).expect("serialize");
-    assert_eq!(v, "config_error");
+    assert_eq!(v["type"], "config_error");
+}
+
+#[test]
+fn run_error_timeout_roundtrips() {
+    let err = RunError::Timeout {
+        partial_trace: RunTrace { events: vec![] },
+    };
+    let json = serde_json::to_string(&err).expect("serialize");
+    // Must include the type discriminant and the partial_trace field.
+    let v: serde_json::Value = serde_json::from_str(&json).expect("parse");
+    assert_eq!(v["type"], "timeout");
+    let back: RunError = serde_json::from_str(&json).expect("deserialize");
+    assert!(matches!(back, RunError::Timeout { .. }));
 }
 
 // ── RunTrace output ────────────────────────────────────────────────────────

@@ -946,15 +946,11 @@ async fn stage_timeout_fires_when_provider_hangs() {
     // start_paused = true: tokio auto-advances mock time when all tasks are
     // waiting on timers. The 5-second timeout will fire automatically.
     let result = engine.run("hello").await;
-    assert!(
-        matches!(result, Err(RunError::Timeout { .. })),
-        "expected RunError::Timeout, got: {:?}",
-        result
-    );
 
-    // Verify that the partial trace contains the StageTimeout event.
+    // Destructure directly — this verifies the correct variant and lets us
+    // inspect the partial trace in a single binding.
     let Err(RunError::Timeout { partial_trace }) = result else {
-        unreachable!()
+        panic!("expected RunError::Timeout, got a different result");
     };
     let has_timeout_event = partial_trace.events.iter().any(|e| {
         matches!(
@@ -969,5 +965,70 @@ async fn stage_timeout_fires_when_provider_hangs() {
         has_timeout_event,
         "partial_trace must contain a StageTimeout event; got: {:?}",
         partial_trace.events
+    );
+}
+
+// #355: a timeout counts as a provider failure for circuit-breaker purposes.
+// The partial trace's last event must be StageTimeout, and the circuit breaker
+// must open after a single timeout when threshold = 1.
+#[tokio::test(start_paused = true)]
+async fn stage_timeout_records_circuit_breaker_failure() {
+    use crate::runtime::circuit_breaker::CircuitBreaker;
+    use crate::runtime::provider::{ChatResponse, Message, ProviderError, ToolDef};
+
+    struct HangingProvider;
+    #[async_trait::async_trait]
+    impl crate::runtime::provider::Provider for HangingProvider {
+        fn name(&self) -> &'static str {
+            "hanging"
+        }
+        async fn chat(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolDef],
+        ) -> Result<ChatResponse, ProviderError> {
+            std::future::pending().await
+        }
+    }
+
+    let agent = make_agent(vec![], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+    let executor = MockExecutor::new();
+    let provider = HangingProvider;
+
+    // Circuit breaker with threshold = 1: a single failure opens it.
+    let cb = CircuitBreaker::from_def(&crate::ast::CircuitBreakerDef {
+        name: "test-cb".to_string(),
+        failure_threshold: 1,
+        window_minutes: 1,
+        half_open_after_minutes: 1,
+        span: crate::ast::Span { start: 0, end: 0 },
+    });
+
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig {
+            stage_timeout_secs: Some(1),
+            ..RunConfig::default()
+        },
+    )
+    .with_circuit_breaker(cb);
+
+    // First run: timeout fires, circuit breaker records one failure.
+    let result = engine.run("hello").await;
+    assert!(
+        matches!(result, Err(RunError::Timeout { .. })),
+        "first run should time out"
+    );
+
+    // Second run: circuit breaker is now open after the failure above.
+    let result2 = engine.run("hello").await;
+    assert!(
+        matches!(result2, Err(RunError::CircuitBreakerOpen)),
+        "second run should be blocked by open circuit breaker; got: {:?}",
+        result2
     );
 }
