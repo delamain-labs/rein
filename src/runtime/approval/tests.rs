@@ -124,11 +124,57 @@ fn resolve_handler_cli_for_unknown_channel() {
     let _ = resolve_approval_handler(&approval);
 }
 
+// #350: webhook must fail-closed — network errors must NOT auto-approve.
 #[tokio::test]
-async fn webhook_handler_auto_approves_on_failure() {
-    // When the webhook POST fails (invalid URL), the handler falls back to auto-approve.
+async fn webhook_handler_rejects_on_network_failure() {
     let handler = WebhookApprovalHandler::new("http://localhost:0/nonexistent".to_string());
     let approval = make_approval_for_channel("webhook", "http://localhost:0/nonexistent");
+    let status = handler
+        .request_approval("deploy", "Agent output here", &approval)
+        .await;
+    assert!(
+        matches!(status, ApprovalStatus::Rejected { .. }),
+        "webhook network failure must reject, not approve; got {status:?}"
+    );
+}
+
+// #350: non-2xx response must reject, not approve.
+#[tokio::test]
+async fn webhook_handler_rejects_on_non_2xx() {
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    let url = format!("{}/approval", server.uri());
+    let handler = WebhookApprovalHandler::new(url.clone());
+    let approval = make_approval_for_channel("webhook", &url);
+    let status = handler
+        .request_approval("deploy", "Agent output here", &approval)
+        .await;
+    assert!(
+        matches!(status, ApprovalStatus::Rejected { .. }),
+        "webhook non-2xx must reject; got {status:?}"
+    );
+}
+
+// #350: 2xx response must still approve.
+#[tokio::test]
+async fn webhook_handler_approves_on_2xx() {
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    let url = format!("{}/approval", server.uri());
+    let handler = WebhookApprovalHandler::new(url.clone());
+    let approval = make_approval_for_channel("webhook", &url);
     let status = handler
         .request_approval("deploy", "Agent output here", &approval)
         .await;
@@ -159,11 +205,14 @@ async fn resolve_handler_returns_slack_for_slack_channel() {
 
 #[tokio::test]
 async fn resolve_handler_returns_webhook_for_webhook_channel() {
-    // Dispatch to webhook path; verify the resolved handler auto-approves on network failure.
+    // Dispatch to webhook path; verify the resolved handler rejects on network failure (#350).
     let approval = make_approval_for_channel("webhook", "http://localhost:0/nonexistent");
     let handler = resolve_approval_handler(&approval);
     let status = handler
         .request_approval("deploy", "Agent output here", &approval)
         .await;
-    assert_eq!(status, ApprovalStatus::Approved);
+    assert!(
+        matches!(status, ApprovalStatus::Rejected { .. }),
+        "resolved webhook handler must reject on network failure; got {status:?}"
+    );
 }

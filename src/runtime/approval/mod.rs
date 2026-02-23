@@ -149,9 +149,9 @@ pub fn parse_timeout(s: &str) -> Option<u64> {
 /// A webhook-based approval handler.
 ///
 /// POSTs a JSON payload (including the agent's output) to the configured URL.
-/// On success (2xx) the step is auto-approved — real asynchronous approval
-/// callbacks are a v2 feature. On any network error the step is auto-approved
-/// so the workflow is not blocked by a misconfigured notification endpoint.
+/// On 2xx the step is approved. On non-2xx or network error the step is
+/// rejected (fail-closed) — an unreachable or erroring approval endpoint must
+/// never silently grant access.
 pub struct WebhookApprovalHandler {
     url: String,
     client: reqwest::Client,
@@ -187,18 +187,21 @@ impl ApprovalHandler for WebhookApprovalHandler {
                 ApprovalStatus::Approved
             }
             Ok(resp) => {
+                let status = resp.status();
                 eprintln!(
-                    "[webhook] Approval endpoint returned {}: auto-approving step '{step_name}'",
-                    resp.status()
+                    "[webhook] Approval endpoint returned {status} for step '{step_name}': rejecting"
                 );
-                ApprovalStatus::Approved
+                ApprovalStatus::Rejected {
+                    reason: format!("webhook returned {status}"),
+                }
             }
             Err(e) => {
                 eprintln!(
-                    "[webhook] Failed to notify approval endpoint for step '{step_name}': {e}"
+                    "[webhook] Failed to reach approval endpoint for step '{step_name}': {e}"
                 );
-                eprintln!("[webhook] Auto-approving to avoid blocking workflow");
-                ApprovalStatus::Approved
+                ApprovalStatus::Rejected {
+                    reason: format!("webhook unreachable: {e}"),
+                }
             }
         }
     }
