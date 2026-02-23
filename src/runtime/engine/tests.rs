@@ -697,3 +697,32 @@ fn event_matches_unknown_metric_returns_false() {
     ));
     assert!(!event_matches_metrics(&llm, &[]));
 }
+
+#[test]
+fn event_matches_unmapped_variants_always_return_false() {
+    // Variants not mapped to any metric must return false for all known metric names
+    // to avoid leaking internal events into filtered OTEL exports.
+    let run_complete = RunEvent::RunComplete {
+        total_cost_cents: 10,
+        total_tokens: 100,
+    };
+    let all_metrics = ["cost", "tool_calls", "latency", "guardrails"];
+    for metric in &all_metrics {
+        assert!(
+            !event_matches_metrics(&run_complete, &[metric.to_string()]),
+            "RunComplete should not match metric '{metric}'"
+        );
+    }
+
+    let cb = RunEvent::CircuitBreakerTripped {
+        name: "cb".to_string(),
+        failures: 3,
+        threshold: 3,
+    };
+    for metric in &all_metrics {
+        assert!(
+            !event_matches_metrics(&cb, &[metric.to_string()]),
+            "CircuitBreakerTripped should not match metric '{metric}'"
+        );
+    }
+}
