@@ -102,9 +102,18 @@ pub fn run_agent(
         engine = engine.with_policy(policy);
     }
 
-    // Resolve OTEL mode from observe block or --otel flag.
-    let otel_mode = resolve_otel_mode(file.observes.first(), otel);
-    engine = engine.with_otel_mode(otel_mode);
+    // Resolve OTEL mode from an observe block (matched by agent name, falling back to first)
+    // or the --otel flag. `observe` blocks are file-level so we prefer the one whose name
+    // matches the running agent; if none match, we take the first block as a file-wide default.
+    let obs = file
+        .observes
+        .iter()
+        .find(|o| o.name == agent.name)
+        .or_else(|| file.observes.first());
+    let otel_mode = resolve_otel_mode(obs, otel);
+    engine = engine
+        .with_otel_mode(otel_mode)
+        .with_agent_name(agent.name.clone());
 
     // If the file has workflows, run the first workflow instead of single-agent execution.
     if let Some(workflow) = file.workflows.first() {

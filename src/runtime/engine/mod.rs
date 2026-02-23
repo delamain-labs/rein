@@ -106,6 +106,8 @@ pub struct AgentEngine<'a> {
     circuit_breaker: Option<Mutex<CircuitBreaker>>,
     policy_engine: Option<Mutex<PolicyEngine>>,
     otel_mode: OtelMode,
+    /// Agent name embedded in OTEL spans (e.g. `rein.run.<agent>`).
+    agent_name: Option<String>,
 }
 
 impl<'a> AgentEngine<'a> {
@@ -129,6 +131,7 @@ impl<'a> AgentEngine<'a> {
             circuit_breaker: None,
             policy_engine: None,
             otel_mode: OtelMode::None,
+            agent_name: None,
         }
     }
 
@@ -164,6 +167,13 @@ impl<'a> AgentEngine<'a> {
     #[must_use]
     pub fn with_otel_mode(mut self, mode: OtelMode) -> Self {
         self.otel_mode = mode;
+        self
+    }
+
+    /// Set the agent name used in OTEL span names (e.g. `rein.run.<name>`).
+    #[must_use]
+    pub fn with_agent_name(mut self, name: String) -> Self {
+        self.agent_name = Some(name);
         self
     }
 
@@ -402,13 +412,14 @@ impl<'a> AgentEngine<'a> {
 
     /// Apply OTEL export after a run completes (side-effect only, never fails loudly).
     fn apply_otel_export(&self, result: &RunResult, duration: std::time::Duration) {
+        let name = self.agent_name.as_deref().unwrap_or("agent");
         match &self.otel_mode {
             OtelMode::None => {}
             OtelMode::FileOnComplete => {
-                Self::export_otel_to_file(result, duration);
+                Self::export_otel_to_file(result, duration, name);
             }
             OtelMode::StdoutOnComplete { metrics } => {
-                Self::export_otel_to_stdout(result, duration, metrics);
+                Self::export_otel_to_stdout(result, duration, metrics, name);
             }
         }
     }
@@ -417,12 +428,13 @@ impl<'a> AgentEngine<'a> {
     fn build_structured_trace(
         result: &RunResult,
         duration: std::time::Duration,
+        agent_name: &str,
     ) -> super::StructuredTrace {
         let now = chrono::Utc::now();
         let started =
             now - chrono::Duration::from_std(duration).unwrap_or(chrono::Duration::zero());
         result.trace.to_structured(
-            "agent",
+            agent_name,
             &started.to_rfc3339(),
             &now.to_rfc3339(),
             duration.as_millis().try_into().unwrap_or(u64::MAX),
@@ -430,8 +442,8 @@ impl<'a> AgentEngine<'a> {
     }
 
     /// Write OTLP JSON to a timestamped file.
-    fn export_otel_to_file(result: &RunResult, duration: std::time::Duration) {
-        let structured = Self::build_structured_trace(result, duration);
+    fn export_otel_to_file(result: &RunResult, duration: std::time::Duration, agent_name: &str) {
+        let structured = Self::build_structured_trace(result, duration, agent_name);
         match super::otel_export::to_otlp_json(&structured) {
             Ok(json) => {
                 let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S");
@@ -450,9 +462,10 @@ impl<'a> AgentEngine<'a> {
         result: &RunResult,
         duration: std::time::Duration,
         metrics: &[String],
+        agent_name: &str,
     ) {
         use super::otel_export::to_otlp;
-        let mut structured = Self::build_structured_trace(result, duration);
+        let mut structured = Self::build_structured_trace(result, duration, agent_name);
         if !metrics.is_empty() {
             structured
                 .events
