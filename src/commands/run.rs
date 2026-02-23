@@ -221,7 +221,12 @@ fn print_execution_plan(file: &rein::ast::ReinFile, message: Option<&str>) -> i3
                         "JPY" => "¥",
                         _ => "$",
                     };
-                    format!("{sym}{}.{:02} per {}", b.amount / 100, b.amount % 100, b.unit)
+                    format!(
+                        "{sym}{}.{:02} per {}",
+                        b.amount / 100,
+                        b.amount % 100,
+                        b.unit
+                    )
                 },
             );
             let model = a
