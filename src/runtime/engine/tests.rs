@@ -4,6 +4,7 @@ use super::*;
 use crate::ast::ValueExpr;
 use crate::ast::{AgentDef, Capability, Span};
 use crate::runtime::executor::MockExecutor;
+use crate::runtime::otel_export::OtelMode;
 use crate::runtime::policy::PolicyEngine;
 use crate::runtime::provider::{ChatResponse, MockProvider, ToolCallRequest, ToolDef, Usage};
 
@@ -442,4 +443,66 @@ async fn engine_without_policy_has_no_promotion_events() {
             .iter()
             .any(|e| matches!(e, RunEvent::PolicyPromotion { .. }))
     );
+}
+
+// --- #304 OtelMode Tests ---
+
+#[tokio::test]
+async fn engine_default_otel_mode_is_none() {
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("done"));
+    let executor = MockExecutor::new();
+    let agent = make_agent(vec![], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+
+    // Without with_otel_mode(), the engine should not panic or error
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig::default(),
+    );
+    let result = engine.run("hi").await.unwrap();
+    assert_eq!(result.response, "done");
+}
+
+#[tokio::test]
+async fn engine_with_otel_mode_stdout_runs_successfully() {
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("done"));
+    let executor = MockExecutor::new();
+    let agent = make_agent(vec![], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig::default(),
+    )
+    .with_otel_mode(OtelMode::StdoutOnComplete { metrics: vec![] });
+    let result = engine.run("hi").await.unwrap();
+    assert_eq!(result.response, "done");
+}
+
+#[tokio::test]
+async fn engine_with_otel_mode_none_runs_successfully() {
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("done"));
+    let executor = MockExecutor::new();
+    let agent = make_agent(vec![], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig::default(),
+    )
+    .with_otel_mode(OtelMode::None);
+    let result = engine.run("hi").await.unwrap();
+    assert_eq!(result.response, "done");
 }

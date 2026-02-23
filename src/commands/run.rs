@@ -102,13 +102,26 @@ pub fn run_agent(
         engine = engine.with_policy(policy);
     }
 
+    // Resolve OTEL mode from an observe block (matched by agent name, falling back to first)
+    // or the --otel flag. `observe` blocks are file-level so we prefer the one whose name
+    // matches the running agent; if none match, we take the first block as a file-wide default.
+    let obs = file
+        .observes
+        .iter()
+        .find(|o| o.name == agent.name)
+        .or_else(|| file.observes.first());
+    let otel_mode = resolve_otel_mode(obs, otel);
+    engine = engine
+        .with_otel_mode(otel_mode)
+        .with_agent_name(agent.name.clone());
+
     // If the file has workflows, run the first workflow instead of single-agent execution.
     if let Some(workflow) = file.workflows.first() {
         let budget_cents = agent.budget.as_ref().map_or(0, |b| b.amount);
         return run_workflow_mode(workflow, &file, provider.as_ref(), &executor, budget_cents);
     }
 
-    run_engine(&engine, user_message, otel, &agent.name)
+    run_engine(&engine, user_message)
 }
 
 fn run_workflow_mode(
@@ -154,12 +167,7 @@ fn run_workflow_mode(
     }
 }
 
-fn run_engine(
-    engine: &rein::runtime::engine::AgentEngine<'_>,
-    user_message: &str,
-    otel: bool,
-    agent_name: &str,
-) -> i32 {
+fn run_engine(engine: &rein::runtime::engine::AgentEngine<'_>, user_message: &str) -> i32 {
     let start = Instant::now();
     let result = super::provider::block_on(engine.run(user_message));
 
@@ -170,9 +178,6 @@ fn run_engine(
             eprintln!("--- Run complete ---");
             eprintln!("{}", run_result.trace.summary());
             eprintln!("Duration: {duration:.2?}");
-            if otel {
-                write_otel_trace(&run_result.trace, agent_name, duration);
-            }
             0
         }
         Err(e) => {
@@ -180,6 +185,30 @@ fn run_engine(
             eprintln!("Run failed: {e:?}");
             1
         }
+    }
+}
+
+/// Resolve the OTEL export mode from an optional `observe` block and the `--otel` flag.
+fn resolve_otel_mode(
+    observe: Option<&rein::ast::ObserveDef>,
+    otel_flag: bool,
+) -> rein::runtime::otel_export::OtelMode {
+    use rein::runtime::otel_export::OtelMode;
+    if let Some(obs) = observe {
+        match obs.export.as_deref() {
+            Some("stdout") => {
+                return OtelMode::StdoutOnComplete {
+                    metrics: obs.metrics.clone(),
+                };
+            }
+            Some(_) => return OtelMode::FileOnComplete,
+            None => {}
+        }
+    }
+    if otel_flag {
+        OtelMode::FileOnComplete
+    } else {
+        OtelMode::None
     }
 }
 
@@ -192,32 +221,6 @@ fn resolve_approval_handler() -> Arc<dyn rein::runtime::approval::ApprovalHandle
         ))
     } else {
         Arc::new(rein::runtime::approval::CliApprovalHandler)
-    }
-}
-
-fn write_otel_trace(
-    trace: &rein::runtime::RunTrace,
-    agent_name: &str,
-    duration: std::time::Duration,
-) {
-    let now = chrono::Utc::now();
-    let started = now - duration;
-    let structured = trace.to_structured(
-        agent_name,
-        &started.to_rfc3339(),
-        &now.to_rfc3339(),
-        duration.as_millis().try_into().unwrap_or(u64::MAX),
-    );
-
-    match rein::runtime::otel_export::to_otlp_json(&structured) {
-        Ok(json) => {
-            let path = format!("rein-trace-{}.json", now.format("%Y%m%d-%H%M%S"));
-            match std::fs::write(&path, &json) {
-                Ok(()) => eprintln!("OTLP trace written to {path}"),
-                Err(e) => eprintln!("Failed to write OTLP trace: {e}"),
-            }
-        }
-        Err(e) => eprintln!("Failed to serialize OTLP trace: {e}"),
     }
 }
 
