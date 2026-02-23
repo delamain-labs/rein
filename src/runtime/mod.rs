@@ -141,6 +141,13 @@ pub enum RunEvent {
         turn: usize,
         timeout_secs: u64,
     },
+    /// A step was skipped because one or more of its declared dependencies failed.
+    StepSkipped {
+        /// Name of the step that was skipped.
+        step: String,
+        /// Human-readable reason (e.g. "dependency '`step_a`' failed").
+        reason: String,
+    },
 }
 
 /// An ordered log of all events that occurred during a run.
@@ -446,6 +453,9 @@ fn summarize_event(event: &RunEvent, lines: &mut Vec<String>, turn: &mut usize) 
         }
         RunEvent::StageTimeout { turn, timeout_secs } => {
             lines.push(format!("  ✗ turn {turn} timed out after {timeout_secs}s"));
+        }
+        RunEvent::StepSkipped { step, reason } => {
+            lines.push(format!("  ⏭ step '{step}' skipped: {reason}"));
         }
     }
 }

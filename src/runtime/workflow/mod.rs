@@ -450,20 +450,46 @@ pub(crate) async fn run_step_with_fallback(
 ///
 /// # Errors
 /// Returns `WorkflowError` if any step fails or a dependency cycle is detected.
+#[allow(clippy::too_many_lines)]
 pub async fn run_steps(
     workflow: &WorkflowDef,
     ctx: &WorkflowContext<'_>,
 ) -> Result<(Vec<StageResult>, Vec<super::RunEvent>), WorkflowError> {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     let ordered = resolve_dag(&workflow.steps)?;
     let trigger_input = format!("Trigger: {}", workflow.trigger);
 
     let mut outputs: HashMap<String, String> = HashMap::new();
+    // Track steps that failed so their dependents can be skipped.
+    let mut failed_steps: HashSet<String> = HashSet::new();
     let mut results = Vec::new();
     let mut events: Vec<super::RunEvent> = Vec::new();
 
     for (index, step) in ordered.into_iter().enumerate() {
+        // Skip this step if any declared dependency failed.
+        if let Some(failed_dep) = step
+            .depends_on
+            .iter()
+            .find(|dep| failed_steps.contains(*dep))
+        {
+            let reason = format!("dependency '{failed_dep}' failed");
+            events.push(super::RunEvent::StepSkipped {
+                step: step.name.clone(),
+                reason,
+            });
+            results.push(StageResult {
+                stage_name: step.name.clone(),
+                agent_name: step.agent.clone(),
+                output: String::new(),
+                cost_cents: 0,
+                tokens: 0,
+            });
+            // Also mark this step as failed so its own dependents are skipped.
+            failed_steps.insert(step.name.clone());
+            continue;
+        }
+
         events.push(super::RunEvent::StepStarted {
             step: step.name.clone(),
             index,
@@ -514,42 +540,57 @@ pub async fn run_steps(
                 })
         };
 
-        let (result, step_events) = match step_result {
-            Ok(v) => v,
-            Err(e) => {
-                // TODO(#380): emit `StepFailed` here once the return type is
-                // changed to surface partial events. Currently `events` is
-                // dropped on early return, so pushing `StepFailed` would be
-                // unobservable dead code. Deferring emission until #380 fixes
-                // the signature.
-                return Err(e);
+        match step_result {
+            Ok((result, step_events)) => {
+                events.extend(step_events);
+                events.push(super::RunEvent::StepCompleted {
+                    step: step.name.clone(),
+                });
+
+                // Check workflow-level auto_resolve conditions after each step.
+                let resolved = if let Some(ref ar) = workflow.auto_resolve {
+                    auto_resolve_matches(&result.output, ar)
+                } else {
+                    None
+                };
+
+                outputs.insert(step.name.clone(), result.output.clone());
+
+                if let Some(ref condition) = resolved {
+                    events.push(super::RunEvent::AutoResolved {
+                        step: step.name.clone(),
+                        condition: condition.clone(),
+                    });
+                    results.push(result);
+                    break;
+                }
+
+                results.push(result);
             }
-        };
-
-        events.extend(step_events);
-        events.push(super::RunEvent::StepCompleted {
-            step: step.name.clone(),
-        });
-
-        // Check workflow-level auto_resolve conditions after each step.
-        let resolved = if let Some(ref ar) = workflow.auto_resolve {
-            auto_resolve_matches(&result.output, ar)
-        } else {
-            None
-        };
-
-        outputs.insert(step.name.clone(), result.output.clone());
-
-        if let Some(ref condition) = resolved {
-            events.push(super::RunEvent::AutoResolved {
-                step: step.name.clone(),
-                condition: condition.clone(),
-            });
-            results.push(result);
-            break;
+            Err(e) => {
+                // Hard errors (approval rejection, cycle) abort immediately.
+                // Soft errors (agent not found, LLM failure) record the failure
+                // and continue so that dependent steps can be skipped gracefully.
+                if matches!(
+                    e,
+                    WorkflowError::ApprovalRejected { .. } | WorkflowError::CyclicDependency(_)
+                ) {
+                    return Err(e);
+                }
+                failed_steps.insert(step.name.clone());
+                results.push(StageResult {
+                    stage_name: step.name.clone(),
+                    agent_name: step.agent.clone(),
+                    output: String::new(),
+                    cost_cents: 0,
+                    tokens: 0,
+                });
+                eprintln!(
+                    "rein[workflow]: step '{}' failed: {e} — skipping dependent steps",
+                    step.name
+                );
+            }
         }
-
-        results.push(result);
     }
 
     Ok((results, events))

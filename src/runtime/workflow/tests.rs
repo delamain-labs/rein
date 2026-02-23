@@ -1501,11 +1501,14 @@ async fn step_without_fallback_propagates_error() {
         approval_handler: None,
     };
 
-    let err = run_steps(&workflow, &ctx).await.unwrap_err();
-    assert!(matches!(
-        err,
-        WorkflowError::StageFailed { .. } | WorkflowError::AgentNotFound(_)
-    ));
+    // Since #363: soft errors (AgentNotFound/StageFailed) no longer abort the
+    // whole run — run_steps returns Ok so dependent steps can be skipped.
+    // The failed step's result has empty output.
+    let (results, _events) = run_steps(&workflow, &ctx)
+        .await
+        .expect("soft errors return Ok");
+    assert_eq!(results.len(), 1);
+    assert!(results[0].output.is_empty(), "failed step output must be empty");
 }
 
 #[tokio::test]
@@ -1983,5 +1986,99 @@ async fn run_steps_emits_step_started_and_completed_for_for_each() {
             if step == "each_step"
         )),
         "expected StepCompleted for each_step"
+    );
+}
+
+// --- #363 Step Failure Skips Dependent Steps ---
+
+fn make_workflow_steps(name: &str, trigger: &str, steps: Vec<StepDef>) -> WorkflowDef {
+    WorkflowDef {
+        name: name.to_string(),
+        trigger: trigger.to_string(),
+        stages: vec![],
+        steps,
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    }
+}
+
+/// Step A uses agent "nonexistent" (not in file) so AgentNotFound is returned.
+/// Step B depends on step A and should be skipped with a StepSkipped event.
+#[tokio::test]
+async fn failed_dependency_skips_dependent_step() {
+    let file = parse_file(r#"agent bot { model: openai }"#);
+
+    let step_a = make_step("step_a", "nonexistent", vec![]);
+    let step_b = make_step("step_b", "bot", vec!["step_a"]);
+
+    let workflow = make_workflow_steps("dag_skip", "start", vec![step_a, step_b]);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+    };
+
+    // Only step_a will run (and fail); step_b must be skipped without needing a response.
+    let (results, events) = run_steps(&workflow, &ctx)
+        .await
+        .expect("run_steps returns Ok even when steps fail/skip");
+
+    // step_b should appear in results as a skipped entry (empty output)
+    assert_eq!(results.len(), 2, "both steps should produce a result entry");
+
+    // StepSkipped event must be emitted for step_b
+    let skipped_event = events.iter().find(|e| {
+        matches!(e, crate::runtime::RunEvent::StepSkipped { step, .. } if step == "step_b")
+    });
+    assert!(
+        skipped_event.is_some(),
+        "expected StepSkipped for step_b, got events: {events:?}"
+    );
+}
+
+/// Steps with no dependency on the failed step should still execute.
+#[tokio::test]
+async fn independent_step_runs_even_if_sibling_fails() {
+    let file = parse_file(r#"agent bot { model: openai }"#);
+
+    // step_a: fails (nonexistent agent)
+    // step_b: independent (no depends_on) — should still run
+    let step_a = make_step("step_a", "nonexistent", vec![]);
+    let step_b = make_step("step_b", "bot", vec![]);
+
+    let workflow = make_workflow_steps("dag_sibling", "start", vec![step_a, step_b]);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+    };
+
+    // step_b (bot) runs successfully
+    provider.push_response(simple_response("step_b_output"));
+
+    let (results, _events) = run_steps(&workflow, &ctx)
+        .await
+        .expect("run_steps must not abort when only independent step fails");
+
+    // step_b should have produced output
+    let step_b_result = results.iter().find(|r| r.output == "step_b_output");
+    assert!(
+        step_b_result.is_some(),
+        "step_b should have run and produced output; results: {results:?}"
     );
 }
