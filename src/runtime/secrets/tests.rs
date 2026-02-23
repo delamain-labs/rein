@@ -45,7 +45,10 @@ fn env_not_found_returns_error() {
     assert!(result.is_err());
     assert_eq!(
         result.unwrap_err(),
-        SecretError::EnvNotFound("NONEXISTENT_VAR_REIN_TEST".to_string())
+        SecretError::EnvNotFound {
+            binding: "missing".to_string(),
+            var: "NONEXISTENT_VAR_REIN_TEST".to_string(),
+        }
     );
 }
 
@@ -127,4 +130,21 @@ fn count_reports_bindings() {
     };
     let resolver = SecretResolver::from_def(&def);
     assert_eq!(resolver.count(), 2);
+}
+
+#[test]
+fn resolve_unregistered_binding_returns_binding_not_found() {
+    let def = SecretsDef {
+        bindings: vec![SecretBinding {
+            name: "token".to_string(),
+            source: SecretSource::Env {
+                var: "SOME_VAR".to_string(),
+            },
+            span: span(),
+        }],
+        span: span(),
+    };
+    let resolver = SecretResolver::from_def(&def);
+    let err = resolver.resolve("nonexistent").unwrap_err();
+    assert_eq!(err, SecretError::BindingNotFound("nonexistent".to_string()));
 }

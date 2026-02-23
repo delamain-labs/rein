@@ -15,8 +15,11 @@ pub struct ResolvedSecret {
 /// Errors from secret resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SecretError {
-    /// Environment variable not found.
-    EnvNotFound(String),
+    /// Environment variable not found. Carries both the binding name and the env var name
+    /// so error messages can distinguish between them (they are often different).
+    EnvNotFound { binding: String, var: String },
+    /// Binding name not registered in this resolver's configuration.
+    BindingNotFound(String),
     /// Vault path not accessible (placeholder for real vault integration).
     VaultUnavailable(String),
 }
@@ -24,7 +27,15 @@ pub enum SecretError {
 impl std::fmt::Display for SecretError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::EnvNotFound(var) => write!(f, "environment variable '{var}' not set"),
+            Self::EnvNotFound { binding, var } => {
+                write!(f, "binding '{binding}' requires env var '{var}' (not set)")
+            }
+            Self::BindingNotFound(name) => {
+                write!(
+                    f,
+                    "secret binding '{name}' is not configured in this resolver"
+                )
+            }
             Self::VaultUnavailable(path) => {
                 write!(
                     f,
@@ -75,7 +86,7 @@ impl SecretResolver {
             .bindings
             .iter()
             .find(|(n, _)| n == name)
-            .ok_or_else(|| SecretError::EnvNotFound(name.to_string()))?;
+            .ok_or_else(|| SecretError::BindingNotFound(name.to_string()))?;
         resolve_source(name, source)
     }
 
@@ -89,7 +100,10 @@ impl SecretResolver {
 fn resolve_source(name: &str, source: &SecretSource) -> Result<ResolvedSecret, SecretError> {
     match source {
         SecretSource::Env { var } => {
-            let value = std::env::var(var).map_err(|_| SecretError::EnvNotFound(var.clone()))?;
+            let value = std::env::var(var).map_err(|_| SecretError::EnvNotFound {
+                binding: name.to_string(),
+                var: var.clone(),
+            })?;
             Ok(ResolvedSecret {
                 name: name.to_string(),
                 value,

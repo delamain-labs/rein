@@ -1,7 +1,19 @@
+use std::collections::HashMap;
+
 use super::ToolCall;
 
 #[cfg(test)]
 mod tests;
+
+/// Context passed to every tool execution, carrying both the call parameters
+/// and the resolved secrets injected by the enclosing `secrets { }` block.
+/// Secrets are never emitted to traces or OTEL spans.
+pub struct ToolCallContext<'a> {
+    /// The tool call to execute.
+    pub tool_call: &'a ToolCall,
+    /// Resolved secrets keyed by binding name.
+    pub secrets: &'a HashMap<String, String>,
+}
 
 /// The result of executing a tool.
 #[derive(Debug, Clone)]
@@ -35,7 +47,7 @@ impl std::error::Error for ExecutorError {}
 #[async_trait::async_trait]
 pub trait ToolExecutor: Send + Sync {
     /// Execute a tool call and return its output.
-    async fn execute(&self, tool_call: &ToolCall) -> Result<ToolOutput, ExecutorError>;
+    async fn execute(&self, ctx: &ToolCallContext<'_>) -> Result<ToolOutput, ExecutorError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -47,10 +59,10 @@ pub struct NoopExecutor;
 
 #[async_trait::async_trait]
 impl ToolExecutor for NoopExecutor {
-    async fn execute(&self, tool_call: &ToolCall) -> Result<ToolOutput, ExecutorError> {
+    async fn execute(&self, ctx: &ToolCallContext<'_>) -> Result<ToolOutput, ExecutorError> {
         Err(ExecutorError::NotFound(format!(
             "{}.{}",
-            tool_call.namespace, tool_call.action
+            ctx.tool_call.namespace, ctx.tool_call.action
         )))
     }
 }
@@ -108,7 +120,8 @@ impl MockExecutor {
 
 #[async_trait::async_trait]
 impl ToolExecutor for MockExecutor {
-    async fn execute(&self, tool_call: &ToolCall) -> Result<ToolOutput, ExecutorError> {
+    async fn execute(&self, ctx: &ToolCallContext<'_>) -> Result<ToolOutput, ExecutorError> {
+        let tool_call = ctx.tool_call;
         let handlers = self.handlers.lock().expect("lock poisoned");
         for handler in handlers.iter() {
             if handler.namespace == tool_call.namespace && handler.action == tool_call.action {

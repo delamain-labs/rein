@@ -256,15 +256,28 @@ fn resolve_secrets(
             }
             Err(e) => {
                 match &e {
-                    SecretError::EnvNotFound(var) => {
+                    SecretError::EnvNotFound { binding, var } => {
                         eprintln!("error: Secret binding failed.");
-                        eprintln!("  → env var '{var}' is not set");
+                        eprintln!("  → {binding} requires env var '{var}' (not set)");
                         eprintln!("hint: Add {var} to your environment or .env file");
                     }
+                    SecretError::BindingNotFound(name) => {
+                        eprintln!("error: Secret binding '{name}' is not configured.");
+                        eprintln!(
+                            "hint: Check the secrets {{ }} block for a binding named '{name}'"
+                        );
+                    }
                     SecretError::VaultUnavailable(path) => {
-                        eprintln!("error: Vault source not supported yet.");
+                        let env_key =
+                            format!("VAULT_{}", path.replace(['/', '-'], "_").to_uppercase());
+                        eprintln!(
+                            "error: Vault path '{path}' not reachable and fallback env var '{env_key}' not set."
+                        );
                         eprintln!("  → vault path: {path}");
-                        eprintln!("hint: Use env: sources instead of vault: sources");
+                        eprintln!(
+                            "hint: Set VAULT_{} as a fallback env var, or rewrite the binding to use env: source",
+                            path.replace(['/', '-'], "_").to_uppercase()
+                        );
                     }
                 }
                 return Err(1);
