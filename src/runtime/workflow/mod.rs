@@ -247,10 +247,6 @@ pub async fn run_sequential(
     Ok(build_result(stage_results, final_output, all_events))
 }
 
-/// Build initial execution state from a prior checkpoint, or return a fresh
-/// state if none exists (or the checkpoint is for a different workflow).
-///
-/// Returns `(stage_results, current_input, skip_stages)`.
 /// Execute all workflow stages with the trigger as input (fan-out pattern).
 ///
 /// Stages run **concurrently** — each receives the same trigger input
