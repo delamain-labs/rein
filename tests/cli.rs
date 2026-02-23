@@ -182,6 +182,30 @@ fn eval_missing_file_exits_one() {
     assert_eq!(status.code(), Some(1), "expected exit 1 for missing file");
 }
 
+// #354: "Valid (with warnings)" must appear on stderr, not stdout.
+#[test]
+fn valid_with_warnings_on_stderr_not_stdout() {
+    let out = Command::new(rein_bin())
+        .args([
+            "validate",
+            "--strict",
+            example("eval_scenarios.rein").to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to spawn rein");
+    assert!(out.status.success(), "expected exit 0");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stdout.contains("with warnings"),
+        "'Valid (with warnings)' must not appear on stdout; stdout: {stdout}"
+    );
+    assert!(
+        stderr.contains("with warnings"),
+        "'Valid (with warnings)' must appear on stderr; stderr: {stderr}"
+    );
+}
+
 #[test]
 fn eval_scenario_filter_unknown_exits_zero() {
     let out = Command::new(rein_bin())

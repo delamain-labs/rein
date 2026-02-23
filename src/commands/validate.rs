@@ -149,7 +149,9 @@ pub fn run_validate(path: &std::path::Path, dump_ast: bool, format: &str, strict
             if diags.is_empty() {
                 println!("✓ Valid");
             } else {
-                println!("✓ Valid (with warnings)");
+                // Warnings are diagnostic output — emit to stderr so stdout stays
+                // clean for piping and scripting.
+                eprintln!("✓ Valid (with warnings)");
             }
         }
     }
