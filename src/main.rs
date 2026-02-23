@@ -84,6 +84,22 @@ enum Command {
         #[arg(long)]
         otel: bool,
     },
+    /// Run scenario and eval blocks in a .rein file
+    ///
+    /// Exit codes: 0 = all pass, 1 = any failure
+    Eval {
+        /// Path to the .rein file
+        file: std::path::PathBuf,
+        /// Run only the named scenario
+        #[arg(long)]
+        scenario: Option<String>,
+        /// Print full agent response per scenario
+        #[arg(long)]
+        verbose: bool,
+        /// Run with a mock provider (no API keys needed)
+        #[arg(long)]
+        demo: bool,
+    },
 }
 
 #[tokio::main]
@@ -132,6 +148,16 @@ async fn main() {
         } => {
             let exit_code =
                 commands::run::run_agent(&file, message.as_deref(), dry_run, demo, otel);
+            process::exit(exit_code);
+        }
+        Command::Eval {
+            file,
+            scenario,
+            verbose,
+            demo,
+        } => {
+            let exit_code =
+                commands::eval::run_eval_command(&file, scenario.as_deref(), verbose, demo);
             process::exit(exit_code);
         }
     }

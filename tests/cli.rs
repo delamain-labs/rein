@@ -135,3 +135,68 @@ fn missing_file_exits_one() {
         .expect("failed to spawn rein");
     assert_eq!(status.code(), Some(1), "expected exit 1 for missing file");
 }
+
+// ── eval command ──────────────────────────────────────────────────────────────
+
+#[test]
+fn eval_no_scenarios_exits_zero() {
+    // basic.rein has no scenario blocks — should exit 0 cleanly
+    let out = Command::new(rein_bin())
+        .args(["eval", "--demo", example("basic.rein").to_str().unwrap()])
+        .output()
+        .expect("failed to spawn rein");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "expected exit 0 when no scenarios"
+    );
+}
+
+#[test]
+fn eval_demo_mode_all_scenarios_pass() {
+    // The demo provider returns a canned response containing "customer info",
+    // which satisfies the expectation in eval_scenarios.rein. Exit must be 0.
+    let out = Command::new(rein_bin())
+        .args([
+            "eval",
+            "--demo",
+            example("eval_scenarios.rein").to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to spawn rein");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "expected all demo scenarios to pass (exit 0), got {} (stderr: {})",
+        out.status.code().unwrap_or(101),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn eval_missing_file_exits_one() {
+    let status = Command::new(rein_bin())
+        .args(["eval", "--demo", "no_such_scenarios.rein"])
+        .status()
+        .expect("failed to spawn rein");
+    assert_eq!(status.code(), Some(1), "expected exit 1 for missing file");
+}
+
+#[test]
+fn eval_scenario_filter_unknown_exits_zero() {
+    let out = Command::new(rein_bin())
+        .args([
+            "eval",
+            "--demo",
+            "--scenario",
+            "nonexistent_scenario",
+            example("eval_scenarios.rein").to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to spawn rein");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "expected exit 0 when named scenario not found"
+    );
+}
