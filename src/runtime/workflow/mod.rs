@@ -127,16 +127,18 @@ impl WorkflowError {
     pub fn is_hard_error(&self) -> bool {
         match self {
             // Policy enforcement — workflow must not continue after a rejected
-            // or timed-out human approval gate. Topology bugs (cyclic deps,
-            // circular routes) mean the graph itself is malformed. State
-            // persistence failure risks data corruption if execution continues.
+            // or timed-out human approval gate. Topology/config bugs (cyclic
+            // deps, circular routes, missing route targets) mean the graph
+            // itself is malformed — silently absorbing them hides operator
+            // misconfiguration. State persistence failure risks data corruption.
             Self::ApprovalRejected { .. }
             | Self::ApprovalTimedOut { .. }
             | Self::CyclicDependency(_)
             | Self::CircularRoute(_)
-            | Self::PersistenceFailure(_) => true,
+            | Self::PersistenceFailure(_)
+            | Self::StageNotFound(_) => true,
             // Soft — step is recorded as failed; dependents are skipped.
-            Self::AgentNotFound(_) | Self::StageFailed { .. } | Self::StageNotFound(_) => false,
+            Self::AgentNotFound(_) | Self::StageFailed { .. } => false,
         }
     }
 }
@@ -539,8 +541,12 @@ fn apply_step_result(
             }
             let reason = e.to_string();
             state.failed_steps.insert(step.name.clone());
-            // Insert an empty output so downstream steps that `filter_map`
-            // over `outputs` can observe the gap explicitly.
+            // Insert an empty output so the step appears in `outputs` for
+            // downstream input-building. Note: `outputs.get(dep)` will return
+            // `Some("")` for failed entries — not `None` — so `filter_map`
+            // in the input-building block will include these as empty strings.
+            // The skip-guard above ensures dependent steps never run with
+            // this empty output.
             state.outputs.insert(step.name.clone(), String::new());
             state.events.push(super::RunEvent::StepFailed {
                 step: step.name.clone(),
@@ -604,8 +610,10 @@ pub async fn run_steps(
                 step: step.name.clone(),
                 reason,
             });
-            // Insert empty output so downstream steps that `filter_map` over
-            // `outputs` can observe the skipped entry explicitly.
+            // Insert an empty output so the step appears in `outputs` for
+            // downstream input-building. `outputs.get(dep)` returns `Some("")`
+            // for skipped entries, not `None`. Dependent steps are prevented
+            // from running by the skip-guard (via failed_steps below).
             state.outputs.insert(step.name.clone(), String::new());
             state.results.push(StageResult {
                 stage_name: step.name.clone(),
@@ -619,10 +627,15 @@ pub async fn run_steps(
             continue;
         }
 
+        // Safety invariant: this block is only reached when every entry in
+        // `step.depends_on` succeeded (the skip-guard above ensures any step
+        // with a failed/skipped dependency is `continue`d before here).
+        // Therefore `outputs.get(dep)` will not return `Some("")` for any dep.
         events.push(super::RunEvent::StepStarted {
             step: step.name.clone(),
             index,
         });
+
 
         let input = if step.depends_on.is_empty() {
             trigger_input.clone()
@@ -684,6 +697,12 @@ pub async fn run_steps(
 /// Parses `input` as JSON, extracts the array at `collection_key`, then runs
 /// the step for each element. Iteration outputs are aggregated as a JSON array
 /// string (to avoid ambiguity with newlines in LLM output).
+///
+/// **All-or-nothing semantics**: a soft error on *any* iteration (agent not
+/// found, provider failure) aborts the remaining iterations and propagates the
+/// error to `run_steps`, which records the whole step as failed. Partial
+/// results from completed iterations are discarded. Per-iteration partial
+/// success is not supported; track that as a future improvement if needed.
 ///
 /// If the JSON key is missing or the input is not valid JSON, the step is
 /// executed once with the full input. This is intentional: callers with a

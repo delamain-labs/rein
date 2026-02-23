@@ -167,8 +167,16 @@ fn run_workflow_mode(
             // Count soft failures. Workflows use a partial-success model: a
             // step that fails softly (agent not found, LLM error) records a
             // StepFailed event and allows independent steps to continue rather
-            // than aborting the whole run. We surface this to shell callers by
-            // returning exit code 1 when any step failed.
+            // than aborting the whole run.
+            //
+            // Exit code convention:
+            //   0 — all steps succeeded
+            //   1 — one or more steps failed softly (partial success) OR a
+            //       hard error aborted the run (see Err arm below)
+            //
+            // Both partial-success (Ok with failures) and hard-abort (Err) map
+            // to exit 1. Shell consumers that need to distinguish the two cases
+            // can inspect the trace JSON for StepFailed events.
             let failed_count = result
                 .events
                 .iter()
