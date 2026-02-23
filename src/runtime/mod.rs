@@ -228,6 +228,7 @@ impl RunTrace {
 
 /// Format a single `RunEvent` into a human-readable line and push it to `lines`.
 /// `turn` tracks the current LLM call count for display.
+#[allow(clippy::too_many_lines)]
 fn summarize_event(event: &RunEvent, lines: &mut Vec<String>, turn: &mut usize) {
     match event {
         RunEvent::LlmCall {
@@ -247,15 +248,19 @@ fn summarize_event(event: &RunEvent, lines: &mut Vec<String>, turn: &mut usize) 
             reason,
         } => {
             let status = if *allowed { "✓" } else { "✗" };
-            let tool_name = format!("{}.{}", tool.namespace, tool.action);
             let suffix = reason.as_ref().map_or(String::new(), |r| format!(" ({r})"));
-            lines.push(format!("  {status} tool: {tool_name}{suffix}"));
+            lines.push(format!(
+                "  {status} tool: {}.{}{suffix}",
+                tool.namespace, tool.action
+            ));
         }
         RunEvent::ToolCallResult { tool, result } => {
             let status = if result.success { "ok" } else { "err" };
-            let tool_name = format!("{}.{}", tool.namespace, tool.action);
             let preview: String = result.output.chars().take(80).collect();
-            lines.push(format!("  → {tool_name} [{status}]: {preview}"));
+            lines.push(format!(
+                "  → {}.{} [{status}]: {preview}",
+                tool.namespace, tool.action
+            ));
         }
         RunEvent::BudgetUpdate {
             spent_cents,

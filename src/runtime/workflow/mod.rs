@@ -504,6 +504,12 @@ pub async fn run_steps(
 /// executed once with the full input. This is intentional: callers with a
 /// JSON trigger will get iteration; callers with plain text get a single pass.
 ///
+/// **Approval per iteration**: if `step.approval` is set, the approval gate is
+/// evaluated once per iteration (not once before the loop). Each item must
+/// independently receive approval before its LLM call proceeds. If approval is
+/// rejected for any iteration, that iteration returns a `WorkflowError` and the
+/// loop is aborted — subsequent items are not processed.
+///
 /// Returns `(StageResult, Vec<RunEvent>)`. The caller is responsible for
 /// inserting the returned events into the workflow trace.
 async fn run_step_for_each(
@@ -572,7 +578,8 @@ async fn run_step_for_each(
     }
 
     // Aggregate outputs as a JSON array to avoid newline ambiguity.
-    let aggregated = serde_json::to_string(&serde_json::Value::Array(outputs)).unwrap_or_default();
+    let aggregated = serde_json::to_string(&serde_json::Value::Array(outputs))
+        .expect("Value::Array of Value::String is always serializable");
 
     Ok((
         StageResult {
@@ -634,7 +641,39 @@ fn auto_resolve_matches(output: &str, ar: &crate::ast::AutoResolveBlock) -> Opti
         }
     }
 
-    Some("auto_resolve conditions met".to_string())
+    // All conditions passed — build a human-readable description for the trace event.
+    let desc = ar
+        .conditions
+        .iter()
+        .map(|c| match c {
+            AutoResolveCondition::Comparison(cmp) => {
+                let op_str = match cmp.op {
+                    CompareOp::Gt => ">",
+                    CompareOp::Lt => "<",
+                    CompareOp::GtEq => ">=",
+                    CompareOp::LtEq => "<=",
+                    CompareOp::Eq => "==",
+                    CompareOp::NotEq => "!=",
+                };
+                let val_str = match &cmp.value {
+                    crate::ast::WhenValue::Number(s)
+                    | crate::ast::WhenValue::Percent(s)
+                    | crate::ast::WhenValue::String(s)
+                    | crate::ast::WhenValue::Ident(s) => s.clone(),
+                    crate::ast::WhenValue::Currency { symbol, amount } => {
+                        format!("{symbol}{amount}")
+                    }
+                };
+                format!("{} {op_str} {val_str}", cmp.field)
+            }
+            AutoResolveCondition::IsOneOf { field, variants } => {
+                format!("{field} in [{}]", variants.join(", "))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" AND ");
+
+    Some(desc)
 }
 
 /// Execute a workflow using its declared execution mode.
