@@ -65,6 +65,7 @@ async fn single_stage_workflow() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_response(simple_response("Triaged: low priority"));
@@ -97,6 +98,7 @@ async fn two_stage_pipeline_passes_output() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     // Stage 1: triage
@@ -145,6 +147,7 @@ async fn three_stage_pipeline() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_response(simple_response("output_a"));
@@ -173,6 +176,7 @@ async fn unknown_agent_returns_error() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_response(simple_response("ok"));
@@ -196,6 +200,7 @@ async fn stage_failure_returns_error() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_error("provider down");
@@ -228,6 +233,7 @@ async fn parallel_workflow_runs_all_stages() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_response(simple_response("output_a"));
@@ -258,6 +264,7 @@ async fn parallel_unknown_agent_errors() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     // Queue response for agent "a" so it doesn't fail first
@@ -293,6 +300,7 @@ async fn parallel_workflow_preserves_stage_order() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_response(simple_response("first"));
@@ -324,6 +332,7 @@ async fn run_workflow_dispatches_by_mode() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     // Sequential
@@ -406,6 +415,7 @@ async fn conditional_routes_to_then_stage() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     // triage → escalate (conditional match) → respond (Next from escalate)
@@ -435,6 +445,7 @@ async fn conditional_routes_to_else_stage() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_response(simple_response("Priority: low. Simple question."));
@@ -499,6 +510,7 @@ async fn conditional_no_else_ends_workflow() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_response(simple_response("needs_action: no. All clear."));
@@ -530,6 +542,7 @@ async fn resumable_fresh_run_no_checkpoint() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_response(simple_response("output_a"));
@@ -570,6 +583,7 @@ async fn resumable_resumes_after_first_stage() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     // Only stage b gets a response — if stage a runs it would consume this
@@ -632,6 +646,7 @@ async fn resumable_resumes_mid_pipeline() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     // Only c and d get responses — a and b are replayed from the checkpoint.
@@ -698,6 +713,7 @@ async fn resumable_different_workflow_name_restarts_fresh() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     // Both stages must run — the checkpoint is for a different workflow.
@@ -745,6 +761,7 @@ async fn resumable_conditional_routing_on_resume() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     // Triage is in the checkpoint; only escalate and respond need responses.
@@ -798,6 +815,7 @@ async fn resumable_corrupt_checkpoint_returns_persistence_error() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     let tmp = NamedTempFile::new().unwrap();
@@ -925,6 +943,7 @@ async fn conditional_route_to_nonexistent_stage_errors() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
     provider.push_response(simple_response("priority: high"));
 
@@ -993,6 +1012,7 @@ async fn circular_route_returns_error() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
     provider.push_response(simple_response("go: yes"));
     provider.push_response(simple_response("go: yes"));
@@ -1055,6 +1075,7 @@ async fn step_execution_runs_agent_with_goal() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_response(simple_response("Draft complete!"));
@@ -1127,6 +1148,7 @@ async fn step_with_auto_approve_proceeds() {
         config: &RunConfig::default(),
         approval_handler: Some(Arc::new(AutoApproveHandler)),
         audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_response(simple_response("Draft approved and complete"));
@@ -1194,6 +1216,7 @@ async fn step_with_auto_reject_returns_error() {
         config: &RunConfig::default(),
         approval_handler: Some(Arc::new(AutoRejectHandler::new("test rejection"))),
         audit_log: None,
+        workflow_name: None,
     };
 
     let result = run_workflow(&workflow, &ctx).await;
@@ -1254,6 +1277,7 @@ async fn step_without_approval_def_skips_handler() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_response(simple_response("Done without approval"));
@@ -1324,6 +1348,7 @@ async fn step_with_audit_log_records_approval_events() {
         config: &RunConfig::default(),
         approval_handler: Some(Arc::new(AutoApproveHandler)),
         audit_log: Some(Arc::clone(&log)),
+        workflow_name: Some("audit_test_workflow".to_string()),
     };
 
     let result = run_workflow(&workflow, &ctx)
@@ -1435,6 +1460,7 @@ async fn step_without_audit_log_calls_handler_exactly_once() {
         config: &RunConfig::default(),
         approval_handler: Some(handler),
         audit_log: None, // no audit log — no AuditingApprovalHandler wrapping
+        workflow_name: None,
     };
 
     run_workflow(&workflow, &ctx)
@@ -1565,6 +1591,7 @@ async fn workflow_steps_respect_depends_on_order() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     // a runs first, b runs second
@@ -1671,6 +1698,7 @@ async fn step_fallback_runs_on_primary_failure() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     let (results, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
@@ -1714,6 +1742,7 @@ async fn step_without_fallback_propagates_error() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     let err = run_steps(&workflow, &ctx).await.unwrap_err();
@@ -1756,6 +1785,7 @@ async fn step_for_each_iterates_over_array() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     // Input with a JSON array keyed by "items".
@@ -1831,6 +1861,7 @@ async fn workflow_auto_resolve_short_circuits_on_condition_met() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     let (results, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
@@ -1893,6 +1924,7 @@ async fn workflow_auto_resolve_does_not_short_circuit_when_condition_unmet() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     let (results, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
@@ -1957,6 +1989,7 @@ async fn auto_resolve_empty_conditions_does_not_short_circuit() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
 
     let (results, events) = run_steps(&workflow, &ctx)
@@ -1998,6 +2031,7 @@ async fn run_sequential_populates_events() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
     provider.push_response(simple_response("done"));
 
@@ -2038,6 +2072,7 @@ async fn run_parallel_populates_events() {
         config: &RunConfig::default(),
         approval_handler: None,
         audit_log: None,
+        workflow_name: None,
     };
     provider.push_response(simple_response("from_a"));
     provider.push_response(simple_response("from_b"));

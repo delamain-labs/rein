@@ -32,6 +32,9 @@ pub struct WorkflowContext<'a> {
     /// When set, approval decisions are wrapped with `AuditingApprovalHandler`
     /// so every `ApprovalRequested` / `ApprovalResolved` event is persisted.
     pub audit_log: Option<Arc<crate::runtime::audit::AuditLog>>,
+    /// Name of the workflow being executed. Passed to `AuditingApprovalHandler`
+    /// so audit entries record the originating workflow for compliance queries.
+    pub workflow_name: Option<String>,
 }
 
 /// The result of a completed workflow run.
@@ -364,7 +367,7 @@ pub fn resolve_dag(
 /// Execute a single step definition, running its referenced agent with the
 /// step's goal as additional context.
 ///
-/// `workflow_name` is passed to `AuditingApprovalHandler::with_workflow` so
+/// `ctx.workflow_name` is passed to `AuditingApprovalHandler::with_workflow` so
 /// audit entries record the workflow they belong to for compliance queries.
 ///
 /// # Errors
@@ -373,7 +376,6 @@ pub async fn run_step(
     step: &crate::ast::StepDef,
     input: &str,
     ctx: &WorkflowContext<'_>,
-    workflow_name: &str,
 ) -> Result<StageResult, WorkflowError> {
     // Check approval gate before execution.
     // Resolve both the injected handler (tests/CI env-var overrides) and the
@@ -393,7 +395,7 @@ pub async fn run_step(
                 Arc::clone(log),
             )
             .with_agent(step.agent.clone())
-            .with_workflow(workflow_name)
+            .with_workflow(ctx.workflow_name.as_deref().unwrap_or(""))
             .request_approval(&step.name, input, approval_def)
             .await
         } else {
@@ -441,13 +443,12 @@ pub(crate) async fn run_step_with_fallback(
     step: &crate::ast::StepDef,
     input: &str,
     ctx: &WorkflowContext<'_>,
-    workflow_name: &str,
 ) -> Result<(StageResult, bool), WorkflowError> {
-    match run_step(step, input, ctx, workflow_name).await {
+    match run_step(step, input, ctx).await {
         Ok(result) => Ok((result, false)),
         Err(e) => {
             if let Some(ref fallback) = step.fallback {
-                let fallback_result = run_step(fallback, input, ctx, workflow_name).await?;
+                let fallback_result = run_step(fallback, input, ctx).await?;
                 Ok((fallback_result, true))
             } else {
                 Err(e)
@@ -503,10 +504,9 @@ pub async fn run_steps(
         };
 
         let (result, step_events) = if let Some(ref key) = step.for_each {
-            run_step_for_each(step, &for_each_input, key, ctx, &workflow.name).await?
+            run_step_for_each(step, &for_each_input, key, ctx).await?
         } else {
-            let (r, fallback_used) =
-                run_step_with_fallback(step, &input, ctx, &workflow.name).await?;
+            let (r, fallback_used) = run_step_with_fallback(step, &input, ctx).await?;
             let mut evts = Vec::new();
             if fallback_used {
                 let fallback_name = step
@@ -572,7 +572,6 @@ async fn run_step_for_each(
     input: &str,
     collection_key: &str,
     ctx: &WorkflowContext<'_>,
-    workflow_name: &str,
 ) -> Result<(StageResult, Vec<super::RunEvent>), WorkflowError> {
     // Try to parse the trigger as JSON and extract the array.
     let items: Vec<String> = serde_json::from_str::<serde_json::Value>(input)
@@ -588,8 +587,7 @@ async fn run_step_for_each(
 
     // If the key wasn't found or empty, fall back to running the step once.
     if items.is_empty() {
-        let (result, fallback_used) =
-            run_step_with_fallback(step, input, ctx, workflow_name).await?;
+        let (result, fallback_used) = run_step_with_fallback(step, input, ctx).await?;
         let mut evts = Vec::new();
         if fallback_used {
             let fallback_name = step
@@ -613,8 +611,7 @@ async fn run_step_for_each(
     let mut events: Vec<super::RunEvent> = Vec::new();
 
     for (index, item) in items.iter().enumerate() {
-        let (result, fallback_used) =
-            run_step_with_fallback(step, item, ctx, workflow_name).await?;
+        let (result, fallback_used) = run_step_with_fallback(step, item, ctx).await?;
         total_cost += result.cost_cents;
         total_tokens += result.tokens;
         outputs.push(serde_json::Value::String(result.output));

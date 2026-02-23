@@ -100,7 +100,7 @@ fn approval_requested_kind_serializes_correctly() {
     );
     let json = serde_json::to_string(&e).unwrap();
     assert!(
-        json.contains("approval_requested"),
+        json.contains("\"approval_requested\""),
         "kind must serialize to snake_case"
     );
 }
@@ -113,7 +113,7 @@ fn approval_resolved_kind_serializes_correctly() {
     );
     let json = serde_json::to_string(&e).unwrap();
     assert!(
-        json.contains("approval_resolved"),
+        json.contains("\"approval_resolved\""),
         "kind must serialize to snake_case"
     );
 }

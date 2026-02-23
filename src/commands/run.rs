@@ -137,7 +137,9 @@ pub fn run_agent(
     // Silently ignoring the flag would be a footgun for compliance users who
     // expect audit records but receive none — fail-hard instead.
     if audit_log.is_some() {
-        eprintln!("error: --audit-log requires a workflow run (use 'workflow:' in your .rein file)");
+        eprintln!(
+            "error: --audit-log requires a workflow run (use 'workflow:' in your .rein file)"
+        );
         eprintln!("hint: remove --audit-log or add a workflow definition to your .rein file");
         return 1;
     }
@@ -189,6 +191,7 @@ fn run_workflow_mode(
         config: &wf_config,
         approval_handler,
         audit_log,
+        workflow_name: Some(workflow.name.clone()),
     };
     let start = Instant::now();
     let wf_result =
