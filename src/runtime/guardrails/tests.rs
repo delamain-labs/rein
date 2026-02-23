@@ -160,3 +160,23 @@ fn is_empty_reflects_rules() {
     let def = make_def(vec![("toxicity", "block")]);
     assert!(!GuardrailEngine::from_def(&def).is_empty());
 }
+
+#[test]
+fn pii_detection_catches_credit_card() {
+    let text = "Card: 4111-1111-1111-1111";
+    assert!(super::detect_pii(text));
+}
+
+#[test]
+fn pii_redaction_replaces_credit_card() {
+    let text = "Card: 4111-1111-1111-1111 thanks";
+    let redacted = super::redact_pii(text);
+    assert!(
+        redacted.contains("[REDACTED_CC]"),
+        "Expected credit card redaction, got: {redacted}"
+    );
+    assert!(
+        !redacted.contains("4111"),
+        "Credit card number should be redacted"
+    );
+}

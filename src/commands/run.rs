@@ -214,7 +214,15 @@ fn print_execution_plan(file: &rein::ast::ReinFile, message: Option<&str>) -> i3
             let cannot_count = a.cannot.len();
             let budget_str = a.budget.as_ref().map_or_else(
                 || "none".to_string(),
-                |b| format!("{}{} per {}", b.currency, b.amount, b.unit),
+                |b| {
+                    let sym = match b.currency.as_str() {
+                        "EUR" => "€",
+                        "GBP" => "£",
+                        "JPY" => "¥",
+                        _ => "$",
+                    };
+                    format!("{sym}{}.{:02} per {}", b.amount / 100, b.amount % 100, b.unit)
+                },
             );
             let model = a
                 .model
