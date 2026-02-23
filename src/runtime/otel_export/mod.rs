@@ -109,9 +109,12 @@ fn pseudo_id(seed: u64, len: usize) -> String {
     out
 }
 
-/// Convert a structured trace to OTLP-compatible JSON.
 /// Parse an RFC 3339 timestamp string and return nanoseconds since Unix epoch.
-/// Falls back to 0 if the string cannot be parsed rather than panicking.
+///
+/// Emits a warning to stderr and falls back to `0` if the string cannot be
+/// parsed, so callers always get a `u64` rather than propagating a parse
+/// error through the telemetry path. A fallback value of `0` (Unix epoch)
+/// will appear clearly wrong in any OTLP viewer and is therefore detectable.
 fn rfc3339_to_unix_nanos(ts: &str) -> u64 {
     use chrono::DateTime;
     DateTime::parse_from_rfc3339(ts)
@@ -120,7 +123,13 @@ fn rfc3339_to_unix_nanos(ts: &str) -> u64 {
             dt.timestamp_nanos_opt()
                 .map(|n| u64::try_from(n).unwrap_or(0))
         })
-        .unwrap_or(0)
+        .unwrap_or_else(|| {
+            eprintln!(
+                "rein[otel]: warning: could not parse timestamp '{ts}' as RFC 3339; \
+                 falling back to Unix epoch 0 — spans will have incorrect timestamps"
+            );
+            0
+        })
 }
 
 pub fn to_otlp(trace: &StructuredTrace) -> OtelResourceSpans {
@@ -134,7 +143,16 @@ pub fn to_otlp(trace: &StructuredTrace) -> OtelResourceSpans {
     let root_span_id = pseudo_id(trace.stats.total_cost_cents.wrapping_add(1), 8);
 
     let start_ns = rfc3339_to_unix_nanos(&trace.started_at);
-    let end_ns = start_ns + trace.stats.duration_ms * 1_000_000;
+    // Use completed_at for end_ns so the root span reflects the actual wall-clock
+    // end time. Falls back to start_ns + duration_ms if completed_at is unparseable.
+    let end_ns = {
+        let completed = rfc3339_to_unix_nanos(&trace.completed_at);
+        if completed > 0 {
+            completed
+        } else {
+            start_ns + trace.stats.duration_ms * 1_000_000
+        }
+    };
 
     let mut spans = Vec::new();
 
@@ -179,6 +197,10 @@ pub fn to_otlp(trace: &StructuredTrace) -> OtelResourceSpans {
             parent_span_id: Some(root_span_id.clone()),
             name,
             kind: 1,
+            // Child event spans are point-in-time records (start == end).
+            // RunEvents have no intrinsic duration — they mark when the event
+            // occurred, not how long it took. OTLP collectors render these as
+            // instant markers rather than duration bars.
             start_time_unix_nano: start_ns + te.offset_ms * 1_000_000,
             end_time_unix_nano: start_ns + te.offset_ms * 1_000_000,
             attributes: attrs,
