@@ -183,6 +183,8 @@ impl ApprovalHandler for WebhookApprovalHandler {
 
         match self.client.post(&self.url).json(&payload).send().await {
             Ok(resp) if resp.status().is_success() => {
+                // 2xx: webhook accepted the notification; step is synchronously approved (v1).
+                // Interactive async callbacks (e.g. Block Kit) are deferred to v2.
                 eprintln!("[webhook] Approval notification sent for step '{step_name}'");
                 ApprovalStatus::Approved
             }
@@ -197,7 +199,7 @@ impl ApprovalHandler for WebhookApprovalHandler {
             }
             Err(e) => {
                 eprintln!(
-                    "[webhook] Failed to reach approval endpoint for step '{step_name}': {e}"
+                    "[webhook] Failed to reach approval endpoint for step '{step_name}': {e} — rejecting"
                 );
                 ApprovalStatus::Rejected {
                     reason: format!("webhook unreachable: {e}"),

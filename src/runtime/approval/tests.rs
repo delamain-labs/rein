@@ -138,9 +138,9 @@ async fn webhook_handler_rejects_on_network_failure() {
     );
 }
 
-// #350: non-2xx response must reject, not approve.
+// #350: non-2xx server error must reject, not approve.
 #[tokio::test]
-async fn webhook_handler_rejects_on_non_2xx() {
+async fn webhook_handler_rejects_on_server_error() {
     use wiremock::matchers::method;
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -157,7 +157,30 @@ async fn webhook_handler_rejects_on_non_2xx() {
         .await;
     assert!(
         matches!(status, ApprovalStatus::Rejected { .. }),
-        "webhook non-2xx must reject; got {status:?}"
+        "webhook 500 must reject; got {status:?}"
+    );
+}
+
+// #350: client error (4xx) must also reject — endpoint exists but denied access.
+#[tokio::test]
+async fn webhook_handler_rejects_on_client_error() {
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&server)
+        .await;
+    let url = format!("{}/approval", server.uri());
+    let handler = WebhookApprovalHandler::new(url.clone());
+    let approval = make_approval_for_channel("webhook", &url);
+    let status = handler
+        .request_approval("deploy", "Agent output here", &approval)
+        .await;
+    assert!(
+        matches!(status, ApprovalStatus::Rejected { .. }),
+        "webhook 403 must reject; got {status:?}"
     );
 }
 
