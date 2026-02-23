@@ -18,6 +18,8 @@ pub enum SecretError {
     /// Environment variable not found. Carries both the binding name and the env var name
     /// so error messages can distinguish between them (they are often different).
     EnvNotFound { binding: String, var: String },
+    /// Binding name not registered in this resolver's configuration.
+    BindingNotFound(String),
     /// Vault path not accessible (placeholder for real vault integration).
     VaultUnavailable(String),
 }
@@ -27,6 +29,12 @@ impl std::fmt::Display for SecretError {
         match self {
             Self::EnvNotFound { binding, var } => {
                 write!(f, "binding '{binding}' requires env var '{var}' (not set)")
+            }
+            Self::BindingNotFound(name) => {
+                write!(
+                    f,
+                    "secret binding '{name}' is not configured in this resolver"
+                )
             }
             Self::VaultUnavailable(path) => {
                 write!(
@@ -78,10 +86,7 @@ impl SecretResolver {
             .bindings
             .iter()
             .find(|(n, _)| n == name)
-            .ok_or_else(|| SecretError::EnvNotFound {
-                binding: name.to_string(),
-                var: name.to_string(),
-            })?;
+            .ok_or_else(|| SecretError::BindingNotFound(name.to_string()))?;
         resolve_source(name, source)
     }
 

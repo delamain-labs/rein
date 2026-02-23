@@ -74,7 +74,11 @@ async fn mock_multiple_tools() {
 }
 
 #[tokio::test]
-async fn execute_context_carries_secrets_to_executor() {
+async fn execute_accepts_context_with_secrets() {
+    // Verifies that execute() accepts a ToolCallContext carrying a non-empty
+    // secrets map without panicking or returning an error. MockExecutor does
+    // not inspect secrets; this test confirms the interface wiring compiles
+    // and runs correctly end-to-end.
     let executor = MockExecutor::new();
     executor.on_call("api", "call", "ok");
 
@@ -84,6 +88,7 @@ async fn execute_context_carries_secrets_to_executor() {
     let result = executor
         .execute(&ctx(&call, &secrets))
         .await
-        .expect("executor should receive context");
+        .expect("executor should accept context carrying secrets");
     assert!(result.success);
+    assert_eq!(result.output, "ok");
 }

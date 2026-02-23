@@ -131,3 +131,20 @@ fn count_reports_bindings() {
     let resolver = SecretResolver::from_def(&def);
     assert_eq!(resolver.count(), 2);
 }
+
+#[test]
+fn resolve_unregistered_binding_returns_binding_not_found() {
+    let def = SecretsDef {
+        bindings: vec![SecretBinding {
+            name: "token".to_string(),
+            source: SecretSource::Env {
+                var: "SOME_VAR".to_string(),
+            },
+            span: span(),
+        }],
+        span: span(),
+    };
+    let resolver = SecretResolver::from_def(&def);
+    let err = resolver.resolve("nonexistent").unwrap_err();
+    assert_eq!(err, SecretError::BindingNotFound("nonexistent".to_string()));
+}
