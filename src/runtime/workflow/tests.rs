@@ -2050,6 +2050,15 @@ async fn failed_dependency_skips_dependent_step() {
     // step_b should appear in results as a skipped entry (empty output)
     assert_eq!(results.len(), 2, "both steps should produce a result entry");
 
+    // StepFailed event must be emitted for step_a (the step that actually failed)
+    let failed_event = events.iter().find(
+        |e| matches!(e, crate::runtime::RunEvent::StepFailed { step, .. } if step == "step_a"),
+    );
+    assert!(
+        failed_event.is_some(),
+        "expected StepFailed for step_a, got events: {events:?}"
+    );
+
     // StepSkipped event must be emitted for step_b
     let skipped_event = events.iter().find(
         |e| matches!(e, crate::runtime::RunEvent::StepSkipped { step, .. } if step == "step_b"),

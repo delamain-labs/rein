@@ -884,7 +884,12 @@ pub async fn run_workflow(
         for sr in step_results {
             result.total_cost_cents += sr.cost_cents;
             result.total_tokens += sr.tokens;
-            result.final_output.clone_from(&sr.output);
+            // Only propagate non-empty output so that failed/skipped steps
+            // (which produce "" via their sentinel StageResult) do not
+            // overwrite the last real output with an empty string.
+            if !sr.output.is_empty() {
+                result.final_output.clone_from(&sr.output);
+            }
             result.stage_results.push(sr);
         }
         result.events.extend(step_events);
