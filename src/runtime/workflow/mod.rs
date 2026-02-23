@@ -252,7 +252,11 @@ pub async fn run_sequential(
 ///
 /// Returns `(stage_results, current_input, skip_stages)`.
 /// Execute all workflow stages with the trigger as input (fan-out pattern).
-/// Each stage receives the same trigger input independently.
+///
+/// Stages run **concurrently** — each receives the same trigger input
+/// independently and all are polled simultaneously. Results are returned in
+/// stage-declaration order regardless of completion order. The first stage
+/// error short-circuits and returns immediately.
 ///
 /// # Errors
 /// Returns `WorkflowError` if an agent is missing or any stage fails.
@@ -260,13 +264,21 @@ pub async fn run_parallel(
     workflow: &WorkflowDef,
     ctx: &WorkflowContext<'_>,
 ) -> Result<WorkflowResult, WorkflowError> {
-    let trigger_input = format!("Trigger: {}", workflow.trigger);
-    let mut stage_results = Vec::new();
-    let mut all_events: Vec<super::RunEvent> = Vec::new();
+    use futures::future::try_join_all;
 
-    for stage in &workflow.stages {
-        let (result, stage_events) =
-            run_stage(&stage.name, &stage.agent, &trigger_input, ctx).await?;
+    let trigger_input = format!("Trigger: {}", workflow.trigger);
+
+    let outcomes = try_join_all(
+        workflow
+            .stages
+            .iter()
+            .map(|stage| run_stage(&stage.name, &stage.agent, &trigger_input, ctx)),
+    )
+    .await?;
+
+    let mut stage_results = Vec::with_capacity(outcomes.len());
+    let mut all_events: Vec<super::RunEvent> = Vec::new();
+    for (result, stage_events) in outcomes {
         stage_results.push(result);
         all_events.extend(stage_events);
     }
