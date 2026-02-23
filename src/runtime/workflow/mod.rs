@@ -938,9 +938,9 @@ pub async fn run_workflow(
             // Only update final_output for steps that actually ran. Sentinel
             // agent names mark steps that failed (SENTINEL_FAILED) or were
             // cascade-skipped (SENTINEL_SKIPPED); their output is always "".
-            // Filtering by sentinel rather than by empty string correctly
+            // Using is_real_execution() rather than `output.is_empty()` correctly
             // handles agents that legitimately produce empty output.
-            if sr.agent_name != SENTINEL_FAILED && sr.agent_name != SENTINEL_SKIPPED {
+            if sr.is_real_execution() {
                 result.final_output.clone_from(&sr.output);
             }
             result.stage_results.push(sr);

@@ -2378,7 +2378,9 @@ async fn for_each_step_failure_cascades_to_dependent() {
     // "ghost" does not exist in the file → for_each step fails with AgentNotFound.
     let file = parse_file(r#"agent follower { model: openai }"#);
     let provider = MockProvider::new();
-    provider.push_response(simple_response("follower ran"));
+    // step_a uses "ghost" (AgentNotFound) — provider is never called for it.
+    // step_b is skipped (depends on step_a). Only step_c (independent) runs.
+    provider.push_response(simple_response("follower ran")); // consumed by step_c
     let executor = MockExecutor::new();
 
     // step_a: for_each with non-existent agent → will fail
@@ -2558,4 +2560,76 @@ async fn all_steps_fail_gives_empty_final_output() {
     // Both steps should have failed entries in stage_results.
     assert_eq!(result.stage_results.len(), 2);
     assert!(result.stage_results.iter().all(|r| !r.is_real_execution()));
+}
+
+/// #363 — A 3-hop cascade: step_a fails → step_b (depends on step_a) is skipped
+/// → step_c (depends on step_b) must ALSO be skipped. This validates that a
+/// skipped step is added to `blocked_steps` so its own dependents propagate the
+/// skip correctly, not just direct dependents of the original failure.
+#[tokio::test]
+async fn cascade_skip_propagates_three_hops() {
+    let file = parse_file(r#"agent bot { model: openai }"#);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // step_a: fails (agent not found)
+    // step_b: depends on step_a → skipped
+    // step_c: depends on step_b → must also be skipped (not on step_a directly)
+    let step_a = make_step("step_a", "nonexistent", vec![]);
+    let step_b = make_step("step_b", "bot", vec!["step_a"]);
+    let step_c = make_step("step_c", "bot", vec!["step_b"]);
+    let workflow = make_workflow_steps("three_hop", "start", vec![step_a, step_b, step_c]);
+
+    // No provider responses needed — no step should actually run.
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+    };
+
+    let (results, events) = run_steps(&workflow, &ctx)
+        .await
+        .expect("run_steps must not abort on soft errors");
+
+    assert_eq!(
+        results.len(),
+        3,
+        "all three steps must produce a result entry"
+    );
+
+    // step_a failed
+    let step_a_r = results.iter().find(|r| r.stage_name == "step_a").unwrap();
+    assert_eq!(step_a_r.agent_name, SENTINEL_FAILED);
+
+    // step_b skipped (direct dependent of failed step)
+    let step_b_r = results.iter().find(|r| r.stage_name == "step_b").unwrap();
+    assert_eq!(
+        step_b_r.agent_name, SENTINEL_SKIPPED,
+        "step_b must be skipped"
+    );
+
+    // step_c skipped (transitive — depends on skipped step_b, not on step_a)
+    let step_c_r = results.iter().find(|r| r.stage_name == "step_c").unwrap();
+    assert_eq!(
+        step_c_r.agent_name, SENTINEL_SKIPPED,
+        "step_c must be skipped transitively; got agent: {}",
+        step_c_r.agent_name
+    );
+
+    // StepSkipped events for both step_b and step_c
+    assert!(
+        events.iter().any(
+            |e| matches!(e, crate::runtime::RunEvent::StepSkipped { step, .. } if step == "step_b")
+        ),
+        "expected StepSkipped for step_b; events: {events:?}"
+    );
+    assert!(
+        events.iter().any(
+            |e| matches!(e, crate::runtime::RunEvent::StepSkipped { step, .. } if step == "step_c")
+        ),
+        "expected StepSkipped for step_c (transitive); events: {events:?}"
+    );
 }
