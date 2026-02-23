@@ -89,12 +89,29 @@ impl StreamCallback for StdoutStream {
 struct RunState {
     messages: Vec<Message>,
     events: Vec<RunEvent>,
+    /// Wall-clock offsets (ms from `start`) captured at each event push.
+    /// Always the same length as `events`.
+    event_timestamps_ms: Vec<u64>,
+    /// Monotonic start time for computing per-event offsets.
+    start: std::time::Instant,
     total_tokens: u64,
     total_cost_cents: u64,
     budget: Option<BudgetTracker>,
     /// Accumulated LLM cost (in cents) attributed to each capped tool.
     /// Key is `"namespace.action"`. Only populated for `CappedAt` tools.
     per_tool_spent: HashMap<String, u64>,
+}
+
+impl RunState {
+    /// Push an event and record its real wall-clock offset from run start.
+    fn push(&mut self, event: RunEvent) {
+        // Saturate at u64::MAX (~585 million years). We clamp before casting so
+        // the truncation is intentional and the value is always representable.
+        #[allow(clippy::cast_possible_truncation)]
+        let elapsed_ms = self.start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+        self.event_timestamps_ms.push(elapsed_ms);
+        self.events.push(event);
+    }
 }
 
 /// The agent execution engine. Orchestrates the LLM, tool call, result loop
@@ -201,6 +218,8 @@ impl<'a> AgentEngine<'a> {
         let mut state = RunState {
             messages: Vec::new(),
             events: Vec::new(),
+            event_timestamps_ms: Vec::new(),
+            start: run_start,
             total_tokens: 0,
             total_cost_cents: 0,
             budget: if self.config.budget_cents > 0 {
@@ -221,7 +240,7 @@ impl<'a> AgentEngine<'a> {
             if let Some(ref cb_mutex) = self.circuit_breaker {
                 let mut cb = cb_mutex.lock().expect("circuit breaker lock");
                 if let Err(_reason) = cb.check() {
-                    state.events.push(RunEvent::CircuitBreakerTripped {
+                    state.push(RunEvent::CircuitBreakerTripped {
                         name: cb.name().to_string(),
                         failures: 0,
                         threshold: 0,
@@ -255,7 +274,7 @@ impl<'a> AgentEngine<'a> {
             state.total_tokens += response.usage.input_tokens + response.usage.output_tokens;
             state.total_cost_cents += cost;
 
-            state.events.push(RunEvent::LlmCall {
+            state.push(RunEvent::LlmCall {
                 model: response.model.clone(),
                 input_tokens: response.usage.input_tokens,
                 output_tokens: response.usage.output_tokens,
@@ -272,7 +291,7 @@ impl<'a> AgentEngine<'a> {
             } else {
                 let result = self.guardrails.apply(&response.content);
                 for violation in &result.violations {
-                    state.events.push(RunEvent::GuardrailTriggered {
+                    state.push(RunEvent::GuardrailTriggered {
                         rule: violation.rule_key.clone(),
                         action: format!("{:?}", violation.action),
                         blocked: result.blocked,
@@ -312,18 +331,38 @@ impl<'a> AgentEngine<'a> {
 
     /// Check budget and record the cost. Returns `Err` if exceeded.
     fn check_budget(&self, state: &mut RunState, cost: u64) -> Result<(), RunError> {
-        if let Some(ref mut tracker) = state.budget {
+        /// Outcome of a single budget check, carrying the event to emit.
+        enum BudgetOutcome {
+            /// Budget updated and still within limit.
+            WithinLimit(RunEvent),
+            /// Budget exceeded; emit this event then abort.
+            Exceeded(RunEvent),
+            /// No budget configured; nothing to do.
+            NoBudget,
+        }
+
+        let outcome = if let Some(ref mut tracker) = state.budget {
             if tracker.record_usage(cost).is_err() {
-                state.events.push(RunEvent::BudgetUpdate {
+                BudgetOutcome::Exceeded(RunEvent::BudgetUpdate {
                     spent_cents: state.total_cost_cents,
                     limit_cents: self.config.budget_cents,
-                });
+                })
+            } else {
+                BudgetOutcome::WithinLimit(RunEvent::BudgetUpdate {
+                    spent_cents: tracker.spent_cents(),
+                    limit_cents: tracker.limit_cents(),
+                })
+            }
+        } else {
+            BudgetOutcome::NoBudget
+        };
+        match outcome {
+            BudgetOutcome::Exceeded(event) => {
+                state.push(event);
                 return Err(RunError::BudgetExceeded);
             }
-            state.events.push(RunEvent::BudgetUpdate {
-                spent_cents: tracker.spent_cents(),
-                limit_cents: tracker.limit_cents(),
-            });
+            BudgetOutcome::WithinLimit(event) => state.push(event),
+            BudgetOutcome::NoBudget => {}
         }
         Ok(())
     }
@@ -340,7 +379,7 @@ impl<'a> AgentEngine<'a> {
             ("cost".to_string(), state.total_cost_cents as f64),
         ];
         if let Some(ev) = policy.evaluate_promotion(&metrics) {
-            state.events.push(RunEvent::PolicyPromotion {
+            state.push(RunEvent::PolicyPromotion {
                 from_tier: ev.from_tier,
                 to_tier: ev.to_tier,
             });
@@ -404,7 +443,7 @@ impl<'a> AgentEngine<'a> {
                             "monetary cap of {max_cents}¢ exceeded \
                              ({spent}¢ attributed to `{key}`)"
                         );
-                        state.events.push(RunEvent::ToolCallAttempt {
+                        state.push(RunEvent::ToolCallAttempt {
                             tool: tool_call,
                             allowed: false,
                             reason: Some(reason.clone()),
@@ -423,7 +462,7 @@ impl<'a> AgentEngine<'a> {
                     }
                 }
                 InterceptResult::Denied { reason } => {
-                    state.events.push(RunEvent::ToolCallAttempt {
+                    state.push(RunEvent::ToolCallAttempt {
                         tool: tool_call,
                         allowed: false,
                         reason: Some(reason.clone()),
@@ -439,7 +478,7 @@ impl<'a> AgentEngine<'a> {
 
     /// Execute an allowed tool call and record the results.
     async fn execute_allowed_tool(&self, state: &mut RunState, call_id: &str, tool_call: ToolCall) {
-        state.events.push(RunEvent::ToolCallAttempt {
+        state.push(RunEvent::ToolCallAttempt {
             tool: tool_call.clone(),
             allowed: true,
             reason: None,
@@ -452,7 +491,7 @@ impl<'a> AgentEngine<'a> {
         match self.executor.execute(&ctx).await {
             Ok(output) => {
                 state.messages.push(Message::tool(call_id, &output.output));
-                state.events.push(RunEvent::ToolCallResult {
+                state.push(RunEvent::ToolCallResult {
                     tool: tool_call,
                     result: super::ToolResult {
                         success: output.success,
@@ -463,7 +502,7 @@ impl<'a> AgentEngine<'a> {
             Err(e) => {
                 let error_msg = e.to_string();
                 state.messages.push(Message::tool(call_id, &error_msg));
-                state.events.push(RunEvent::ToolCallResult {
+                state.push(RunEvent::ToolCallResult {
                     tool: tool_call,
                     result: super::ToolResult {
                         success: false,
@@ -475,15 +514,15 @@ impl<'a> AgentEngine<'a> {
     }
 
     /// Build the final `RunResult`.
-    fn finish(state: RunState, response: String) -> RunResult {
-        let mut events = state.events;
-        events.push(RunEvent::RunComplete {
+    fn finish(mut state: RunState, response: String) -> RunResult {
+        state.push(RunEvent::RunComplete {
             total_cost_cents: state.total_cost_cents,
             total_tokens: state.total_tokens,
         });
+        let trace = RunTrace::from_events_timed(state.events, state.event_timestamps_ms);
         RunResult {
             response,
-            trace: RunTrace { events },
+            trace,
             total_tokens: state.total_tokens,
             total_cost_cents: state.total_cost_cents,
         }

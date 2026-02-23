@@ -124,13 +124,59 @@ pub enum RunEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunTrace {
     pub events: Vec<RunEvent>,
+    /// Real wall-clock offsets (ms from run start) captured at event-push time.
+    /// Empty for deserialized or test-constructed traces; `to_structured` falls
+    /// back to a fake counter when this is empty.
+    #[serde(skip)]
+    timestamps_ms: Vec<u64>,
 }
 
 impl RunTrace {
+    /// Construct a trace from events with no timing information.
+    /// `to_structured` will fall back to a monotonic counter for offsets.
+    #[must_use]
+    pub fn from_events(events: Vec<RunEvent>) -> Self {
+        Self {
+            timestamps_ms: Vec::new(),
+            events,
+        }
+    }
+
+    /// Construct a trace from events paired with real wall-clock offsets (ms
+    /// from run start). `timestamps_ms` must be the same length as `events`.
+    ///
+    /// Note: `timestamps_ms` carries `#[serde(skip)]` and is **not** round-tripped
+    /// through JSON. Deserialized traces fall back to the monotonic counter in
+    /// `to_structured`. This is intentional: timestamps are only needed at
+    /// export time, not during deserialization.
+    #[must_use]
+    pub(crate) fn from_events_timed(events: Vec<RunEvent>, timestamps_ms: Vec<u64>) -> Self {
+        // Hard assert: this is called exclusively from `AgentEngine::finish`
+        // where `RunState::push()` keeps the two vecs in sync. A length
+        // mismatch is always a bug in the call site, not a runtime condition —
+        // fail fast in all build profiles rather than silently degrading to the
+        // fake counter.
+        assert_eq!(
+            events.len(),
+            timestamps_ms.len(),
+            "from_events_timed: events and timestamps_ms must have the same length"
+        );
+        Self {
+            events,
+            timestamps_ms,
+        }
+    }
+
     /// Serialize to pretty-printed JSON.
     ///
     /// # Errors
     /// Returns a serialization error if the trace cannot be serialized.
+    ///
+    /// # Note
+    /// `timestamps_ms` is not serialized (`#[serde(skip)]`). A trace deserialized
+    /// from JSON and then passed to `to_structured` will use fallback `(i * 100)`
+    /// offsets rather than real wall-clock values. OTEL export should be done
+    /// at run-time from the in-memory trace, not from a serialized round-trip.
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
     }
@@ -149,6 +195,7 @@ impl RunTrace {
         let mut llm_calls = 0u64;
         let mut tool_calls = 0u64;
         let mut tool_denied = 0u64;
+        let has_real_timestamps = self.timestamps_ms.len() == self.events.len();
 
         let events: Vec<TimestampedEvent> = self
             .events
@@ -175,8 +222,13 @@ impl RunTrace {
                     }
                     _ => {}
                 }
+                let offset_ms = if has_real_timestamps {
+                    self.timestamps_ms[i]
+                } else {
+                    (i as u64) * 100
+                };
                 TimestampedEvent {
-                    offset_ms: (i as u64) * 100,
+                    offset_ms,
                     event: e.clone(),
                 }
             })
@@ -205,6 +257,13 @@ impl RunTrace {
     /// `chrono::Utc::now().to_rfc3339()`). `duration_ms` is the wall-clock
     /// run duration in milliseconds. All three values are recorded in the
     /// trace and used by OTLP exporters to produce accurate span timestamps.
+    ///
+    /// # Note
+    /// Real per-event timestamps (`timestamps_ms`) are not written to the JSON
+    /// file (`#[serde(skip)]`). If the file is later deserialized and passed to
+    /// an OTEL exporter, fallback `(i * 100)` offsets are used instead of real
+    /// wall-clock values. OTEL export should be performed from the in-memory
+    /// trace at run-time, not from a deserialized JSON round-trip.
     ///
     /// # Errors
     /// Returns IO or serialization errors.

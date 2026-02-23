@@ -419,7 +419,7 @@ fn run_event_run_complete_has_type_tag() {
 
 #[test]
 fn run_trace_empty_roundtrips() {
-    let trace = RunTrace { events: vec![] };
+    let trace = RunTrace::from_events(vec![]);
     let json = serde_json::to_string(&trace).expect("serialize");
     let back: RunTrace = serde_json::from_str(&json).expect("deserialize");
     assert!(back.events.is_empty());
@@ -427,24 +427,22 @@ fn run_trace_empty_roundtrips() {
 
 #[test]
 fn run_trace_with_events_roundtrips() {
-    let trace = RunTrace {
-        events: vec![
-            RunEvent::LlmCall {
-                model: "claude-haiku-4-5-20251001".into(),
-                input_tokens: 512,
-                output_tokens: 128,
-                cost_cents: 1,
-            },
-            RunEvent::BudgetUpdate {
-                spent_cents: 1,
-                limit_cents: 1000,
-            },
-            RunEvent::RunComplete {
-                total_cost_cents: 1,
-                total_tokens: 640,
-            },
-        ],
-    };
+    let trace = RunTrace::from_events(vec![
+        RunEvent::LlmCall {
+            model: "claude-haiku-4-5-20251001".into(),
+            input_tokens: 512,
+            output_tokens: 128,
+            cost_cents: 1,
+        },
+        RunEvent::BudgetUpdate {
+            spent_cents: 1,
+            limit_cents: 1000,
+        },
+        RunEvent::RunComplete {
+            total_cost_cents: 1,
+            total_tokens: 640,
+        },
+    ]);
     let json = serde_json::to_string(&trace).expect("serialize");
     let back: RunTrace = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(back.events.len(), 3);
@@ -503,20 +501,18 @@ fn run_error_serializes_as_snake_case() {
 
 #[test]
 fn trace_to_json_produces_valid_json() {
-    let trace = RunTrace {
-        events: vec![
-            RunEvent::LlmCall {
-                model: "gpt-4o".into(),
-                input_tokens: 100,
-                output_tokens: 50,
-                cost_cents: 1,
-            },
-            RunEvent::RunComplete {
-                total_cost_cents: 1,
-                total_tokens: 150,
-            },
-        ],
-    };
+    let trace = RunTrace::from_events(vec![
+        RunEvent::LlmCall {
+            model: "gpt-4o".into(),
+            input_tokens: 100,
+            output_tokens: 50,
+            cost_cents: 1,
+        },
+        RunEvent::RunComplete {
+            total_cost_cents: 1,
+            total_tokens: 150,
+        },
+    ]);
     let json = trace.to_json().expect("should serialize");
     let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
     assert!(parsed["events"].is_array());
@@ -525,40 +521,38 @@ fn trace_to_json_produces_valid_json() {
 
 #[test]
 fn trace_summary_contains_turns() {
-    let trace = RunTrace {
-        events: vec![
-            RunEvent::LlmCall {
-                model: "gpt-4o".into(),
-                input_tokens: 100,
-                output_tokens: 50,
-                cost_cents: 1,
+    let trace = RunTrace::from_events(vec![
+        RunEvent::LlmCall {
+            model: "gpt-4o".into(),
+            input_tokens: 100,
+            output_tokens: 50,
+            cost_cents: 1,
+        },
+        RunEvent::ToolCallAttempt {
+            tool: ToolCall {
+                namespace: "zendesk".into(),
+                action: "read_ticket".into(),
+                arguments: serde_json::Value::Null,
             },
-            RunEvent::ToolCallAttempt {
-                tool: ToolCall {
-                    namespace: "zendesk".into(),
-                    action: "read_ticket".into(),
-                    arguments: serde_json::Value::Null,
-                },
-                allowed: true,
-                reason: None,
+            allowed: true,
+            reason: None,
+        },
+        RunEvent::ToolCallResult {
+            tool: ToolCall {
+                namespace: "zendesk".into(),
+                action: "read_ticket".into(),
+                arguments: serde_json::Value::Null,
             },
-            RunEvent::ToolCallResult {
-                tool: ToolCall {
-                    namespace: "zendesk".into(),
-                    action: "read_ticket".into(),
-                    arguments: serde_json::Value::Null,
-                },
-                result: ToolResult {
-                    success: true,
-                    output: "ticket data".into(),
-                },
+            result: ToolResult {
+                success: true,
+                output: "ticket data".into(),
             },
-            RunEvent::RunComplete {
-                total_cost_cents: 1,
-                total_tokens: 150,
-            },
-        ],
-    };
+        },
+        RunEvent::RunComplete {
+            total_cost_cents: 1,
+            total_tokens: 150,
+        },
+    ]);
     let summary = trace.summary();
     assert!(summary.contains("turn 1"), "summary: {summary}");
     assert!(
@@ -570,29 +564,27 @@ fn trace_summary_contains_turns() {
 
 #[test]
 fn trace_summary_shows_denied_tools() {
-    let trace = RunTrace {
-        events: vec![
-            RunEvent::LlmCall {
-                model: "gpt-4o".into(),
-                input_tokens: 50,
-                output_tokens: 25,
-                cost_cents: 1,
+    let trace = RunTrace::from_events(vec![
+        RunEvent::LlmCall {
+            model: "gpt-4o".into(),
+            input_tokens: 50,
+            output_tokens: 25,
+            cost_cents: 1,
+        },
+        RunEvent::ToolCallAttempt {
+            tool: ToolCall {
+                namespace: "stripe".into(),
+                action: "charge".into(),
+                arguments: serde_json::Value::Null,
             },
-            RunEvent::ToolCallAttempt {
-                tool: ToolCall {
-                    namespace: "stripe".into(),
-                    action: "charge".into(),
-                    arguments: serde_json::Value::Null,
-                },
-                allowed: false,
-                reason: Some("not in can list".into()),
-            },
-            RunEvent::RunComplete {
-                total_cost_cents: 1,
-                total_tokens: 75,
-            },
-        ],
-    };
+            allowed: false,
+            reason: Some("not in can list".into()),
+        },
+        RunEvent::RunComplete {
+            total_cost_cents: 1,
+            total_tokens: 75,
+        },
+    ]);
     let summary = trace.summary();
     assert!(summary.contains("✗"), "should show denied marker");
     assert!(summary.contains("not in can list"), "summary: {summary}");
@@ -600,41 +592,39 @@ fn trace_summary_shows_denied_tools() {
 
 #[test]
 fn trace_summary_empty_trace() {
-    let trace = RunTrace { events: vec![] };
+    let trace = RunTrace::from_events(vec![]);
     let summary = trace.summary();
     assert!(summary.is_empty());
 }
 
 #[test]
 fn structured_trace_has_stats() {
-    let trace = RunTrace {
-        events: vec![
-            RunEvent::LlmCall {
-                model: "gpt-4o".into(),
-                input_tokens: 100,
-                output_tokens: 50,
-                cost_cents: 2,
+    let trace = RunTrace::from_events(vec![
+        RunEvent::LlmCall {
+            model: "gpt-4o".into(),
+            input_tokens: 100,
+            output_tokens: 50,
+            cost_cents: 2,
+        },
+        RunEvent::ToolCallAttempt {
+            tool: ToolCall {
+                namespace: "fs".into(),
+                action: "read".into(),
+                arguments: serde_json::Value::Null,
             },
-            RunEvent::ToolCallAttempt {
-                tool: ToolCall {
-                    namespace: "fs".into(),
-                    action: "read".into(),
-                    arguments: serde_json::Value::Null,
-                },
-                allowed: true,
-                reason: None,
+            allowed: true,
+            reason: None,
+        },
+        RunEvent::ToolCallAttempt {
+            tool: ToolCall {
+                namespace: "fs".into(),
+                action: "delete".into(),
+                arguments: serde_json::Value::Null,
             },
-            RunEvent::ToolCallAttempt {
-                tool: ToolCall {
-                    namespace: "fs".into(),
-                    action: "delete".into(),
-                    arguments: serde_json::Value::Null,
-                },
-                allowed: false,
-                reason: Some("denied".into()),
-            },
-        ],
-    };
+            allowed: false,
+            reason: Some("denied".into()),
+        },
+    ]);
     let structured = trace.to_structured(
         "test_agent",
         "2024-01-01T00:00:00Z",
@@ -653,7 +643,7 @@ fn structured_trace_has_stats() {
 
 #[test]
 fn structured_trace_serializes_to_json() {
-    let trace = RunTrace { events: vec![] };
+    let trace = RunTrace::from_events(vec![]);
     let structured = trace.to_structured("agent", "t0", "t1", 0);
     let json = serde_json::to_string(&structured).unwrap();
     assert!(json.contains("\"version\":\"1.0\""));
@@ -663,7 +653,7 @@ fn structured_trace_serializes_to_json() {
 // #346: write_to_file must accept caller-provided timestamps; output must not have blank fields.
 #[test]
 fn write_to_file_records_provided_timestamps() {
-    let trace = RunTrace { events: vec![] };
+    let trace = RunTrace::from_events(vec![]);
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("trace.json");
     trace
@@ -688,5 +678,77 @@ fn write_to_file_records_provided_timestamps() {
     assert!(
         json.contains("\"duration_ms\": 1000"),
         "duration_ms must be recorded in trace file"
+    );
+}
+
+// #352: from_events (no timestamps) must fall back to (i * 100) monotonic counter.
+#[test]
+fn structured_trace_fallback_uses_monotonic_counter() {
+    let events = vec![
+        RunEvent::LlmCall {
+            model: "gpt-4o".into(),
+            input_tokens: 10,
+            output_tokens: 5,
+            cost_cents: 1,
+        },
+        RunEvent::LlmCall {
+            model: "gpt-4o".into(),
+            input_tokens: 10,
+            output_tokens: 5,
+            cost_cents: 1,
+        },
+        RunEvent::LlmCall {
+            model: "gpt-4o".into(),
+            input_tokens: 10,
+            output_tokens: 5,
+            cost_cents: 1,
+        },
+    ];
+    let trace = RunTrace::from_events(events);
+    let structured = trace.to_structured("a", "t0", "t1", 300);
+    assert_eq!(structured.events[0].offset_ms, 0, "index 0 → 0 * 100 = 0");
+    assert_eq!(
+        structured.events[1].offset_ms, 100,
+        "index 1 → 1 * 100 = 100"
+    );
+    assert_eq!(
+        structured.events[2].offset_ms, 200,
+        "index 2 → 2 * 100 = 200"
+    );
+}
+
+// #352: to_structured must use real event timestamps, not fake (i * 100) offsets.
+#[test]
+fn structured_trace_uses_real_timestamps() {
+    let events = vec![
+        RunEvent::LlmCall {
+            model: "gpt-4o".into(),
+            input_tokens: 10,
+            output_tokens: 5,
+            cost_cents: 1,
+        },
+        RunEvent::LlmCall {
+            model: "gpt-4o".into(),
+            input_tokens: 10,
+            output_tokens: 5,
+            cost_cents: 1,
+        },
+    ];
+    // Provide explicit timestamps: 0ms and 250ms
+    let timestamps = vec![0u64, 250u64];
+    let trace = RunTrace::from_events_timed(events, timestamps);
+    let structured = trace.to_structured("a", "t0", "t1", 300);
+    assert_eq!(
+        structured.events[0].offset_ms, 0,
+        "first event offset must be 0"
+    );
+    assert_eq!(
+        structured.events[1].offset_ms, 250,
+        "second event offset must use real timestamp"
+    );
+    // The old fake formula would give 100 for index 1 — verify we're not using it
+    assert_ne!(
+        structured.events[1].offset_ms, 100,
+        "offset_ms must not use the fake (i * 100) formula"
     );
 }
