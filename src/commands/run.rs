@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Instant;
 
 pub fn run_agent(
@@ -100,6 +101,51 @@ pub fn run_agent(
         );
     }
 
+    // If the file has workflows, run the first workflow instead of single-agent execution.
+    if let Some(workflow) = file.workflows.first() {
+        let approval_handler = resolve_approval_handler();
+        let wf_config = rein::runtime::engine::RunConfig {
+            system_prompt: None,
+            max_turns: 10,
+            budget_cents: agent.budget.as_ref().map_or(0, |b| b.amount),
+        };
+        let ctx = rein::runtime::workflow::WorkflowContext {
+            file: &file,
+            provider: provider.as_ref(),
+            executor: &executor,
+            tool_defs: &[],
+            config: &wf_config,
+            approval_handler: Some(approval_handler),
+        };
+        let start = Instant::now();
+        let handle = tokio::runtime::Handle::try_current();
+        let wf_result = if let Ok(handle) = handle {
+            tokio::task::block_in_place(|| {
+                handle.block_on(rein::runtime::workflow::run_workflow(workflow, &ctx))
+            })
+        } else {
+            let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+            rt.block_on(rein::runtime::workflow::run_workflow(workflow, &ctx))
+        };
+        let duration = start.elapsed();
+        match wf_result {
+            Ok(result) => {
+                eprintln!();
+                eprintln!(
+                    "--- Workflow complete ({} stages) ---",
+                    result.stage_results.len()
+                );
+                eprintln!("Final output: {}", result.final_output);
+                eprintln!("Duration: {duration:.2?}");
+                return 0;
+            }
+            Err(e) => {
+                eprintln!("Workflow failed: {e}");
+                return 1;
+            }
+        }
+    }
+
     // Execute.
     let start = Instant::now();
     let handle = tokio::runtime::Handle::try_current();
@@ -129,6 +175,18 @@ pub fn run_agent(
             eprintln!("Run failed: {e:?}");
             1
         }
+    }
+}
+
+fn resolve_approval_handler() -> Arc<dyn rein::runtime::approval::ApprovalHandler> {
+    if std::env::var("REIN_AUTO_APPROVE").as_deref() == Ok("1") {
+        Arc::new(rein::runtime::approval::AutoApproveHandler)
+    } else if std::env::var("REIN_AUTO_REJECT").as_deref() == Ok("1") {
+        Arc::new(rein::runtime::approval::AutoRejectHandler::new(
+            "auto-rejected by REIN_AUTO_REJECT",
+        ))
+    } else {
+        Arc::new(rein::runtime::approval::CliApprovalHandler)
     }
 }
 
