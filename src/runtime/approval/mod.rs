@@ -311,6 +311,8 @@ impl<H: ApprovalHandler> ApprovalHandler for AuditingApprovalHandler<H> {
             "timeout": approval.timeout,
         });
         if let Err(e) = self.log.append(&requested) {
+            // TODO: replace with tracing::warn! once the `tracing` crate is
+            // available.
             eprintln!("rein[audit]: warning: could not write ApprovalRequested entry: {e}");
         }
 
@@ -319,11 +321,20 @@ impl<H: ApprovalHandler> ApprovalHandler for AuditingApprovalHandler<H> {
             .request_approval(step_name, agent_output, approval)
             .await;
 
-        let elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+        // Saturate at u64::MAX rather than failing; a run long enough to
+        // overflow (~585 million years) is not realistic in practice.
+        // TODO: replace eprintln! with tracing::warn! once the `tracing` crate
+        // is added to Cargo.toml.
+        #[allow(clippy::cast_possible_truncation)]
+        let elapsed_ms = start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
         let decision = match &status {
             ApprovalStatus::Approved => "approved",
             ApprovalStatus::Rejected { .. } => "rejected",
             ApprovalStatus::TimedOut => "timed_out",
+            // `Pending` is returned by the inner handler if it defers to an
+            // async polling mechanism. In practice the CLI/webhook handlers
+            // always resolve synchronously, so this arm is unlikely to fire
+            // in production. It is kept here for completeness.
             ApprovalStatus::Pending => "pending",
         };
 
@@ -339,6 +350,8 @@ impl<H: ApprovalHandler> ApprovalHandler for AuditingApprovalHandler<H> {
             "elapsed_ms": elapsed_ms,
         });
         if let Err(e) = self.log.append(&resolved) {
+            // TODO: replace with tracing::warn! once the `tracing` crate is
+            // available.
             eprintln!("rein[audit]: warning: could not write ApprovalResolved entry: {e}");
         }
 

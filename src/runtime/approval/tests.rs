@@ -240,6 +240,20 @@ async fn resolve_handler_returns_webhook_for_webhook_channel() {
     );
 }
 
+// Handler that always returns TimedOut, for testing that path.
+struct AutoTimedOutHandler;
+#[async_trait::async_trait]
+impl ApprovalHandler for AutoTimedOutHandler {
+    async fn request_approval(
+        &self,
+        _step_name: &str,
+        _agent_output: &str,
+        _approval: &crate::ast::ApprovalDef,
+    ) -> ApprovalStatus {
+        ApprovalStatus::TimedOut
+    }
+}
+
 // --- #358 Approval Audit Events ---
 
 #[tokio::test]
@@ -317,4 +331,30 @@ async fn auditing_handler_records_channel_in_metadata() {
     let entries = log.read_all().unwrap();
     assert_eq!(entries[0].metadata["channel"], "slack");
     assert_eq!(entries[1].metadata["channel"], "slack");
+}
+
+#[tokio::test]
+async fn auditing_handler_records_timed_out_decision() {
+    use crate::runtime::audit::{AuditKind, AuditLog};
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
+
+    let handler = AuditingApprovalHandler::new(AutoTimedOutHandler, Arc::clone(&log));
+    let approval = make_approval_for_channel("cli", "");
+    let status = handler
+        .request_approval("timeout-step", "Agent output", &approval)
+        .await;
+
+    assert_eq!(status, ApprovalStatus::TimedOut);
+
+    let entries = log.read_all().unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[1].kind, AuditKind::ApprovalResolved);
+    assert_eq!(
+        entries[1].metadata["decision"], "timed_out",
+        "timed_out decision must be recorded in metadata"
+    );
 }
