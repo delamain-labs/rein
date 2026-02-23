@@ -711,11 +711,10 @@ pub async fn run_steps(
 /// the step for each element. Iteration outputs are aggregated as a JSON array
 /// string (to avoid ambiguity with newlines in LLM output).
 ///
-/// **All-or-nothing semantics**: a soft error on *any* iteration (agent not
-/// found, provider failure) aborts the remaining iterations and propagates the
-/// error to `run_steps`, which records the whole step as failed. Partial
-/// results from completed iterations are discarded. Per-iteration partial
-/// success is not supported; track that as a future improvement if needed.
+/// **All-or-nothing semantics**: a soft error on any iteration aborts the
+/// remaining iterations and propagates the error to `run_steps`, which records
+/// the whole step as failed. Partial results from completed iterations are
+/// discarded. Per-iteration partial success is not supported (tracked as #428).
 ///
 /// If the JSON key is missing or the input is not valid JSON, the step is
 /// executed once with the full input. This is intentional: callers with a
