@@ -51,7 +51,7 @@ pub fn run_agent(
         eprintln!("🎭 Demo mode: using mock provider (no API keys needed)\n");
         Box::new(rein::runtime::provider::demo::DemoProvider::new())
     } else {
-        match resolve_provider(agent) {
+        match super::provider::resolve(agent) {
             Ok(p) => p,
             Err(code) => return code,
         }
@@ -102,14 +102,7 @@ pub fn run_agent(
 
     // Execute.
     let start = Instant::now();
-    let handle = tokio::runtime::Handle::try_current();
-    let result = if let Ok(handle) = handle {
-        // Already inside a tokio runtime (e.g. #[tokio::main])
-        tokio::task::block_in_place(|| handle.block_on(engine.run(user_message)))
-    } else {
-        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
-        rt.block_on(engine.run(user_message))
-    };
+    let result = super::provider::block_on(engine.run(user_message));
 
     match result {
         Ok(run_result) => {
@@ -130,28 +123,6 @@ pub fn run_agent(
             1
         }
     }
-}
-
-fn resolve_provider(
-    agent: &rein::ast::AgentDef,
-) -> Result<Box<dyn rein::runtime::provider::Provider>, i32> {
-    let model_field = agent
-        .model
-        .as_ref()
-        .map_or("openai".to_string(), format_value_expr);
-
-    let config = rein::runtime::provider::resolver::ProviderConfig {
-        openai_api_key: std::env::var("OPENAI_API_KEY").ok(),
-        openai_base_url: std::env::var("OPENAI_BASE_URL").ok(),
-        anthropic_api_key: std::env::var("ANTHROPIC_API_KEY").ok(),
-        anthropic_base_url: std::env::var("ANTHROPIC_BASE_URL").ok(),
-    };
-
-    rein::runtime::provider::resolver::resolve(&model_field, &config).map_err(|e| {
-        eprintln!("error: {e}");
-        eprintln!("hint: set OPENAI_API_KEY or ANTHROPIC_API_KEY environment variable");
-        1
-    })
 }
 
 fn write_otel_trace(
@@ -180,17 +151,7 @@ fn write_otel_trace(
     }
 }
 
-fn format_value_expr(v: &rein::ast::ValueExpr) -> String {
-    match v {
-        rein::ast::ValueExpr::Literal(s) => s.clone(),
-        rein::ast::ValueExpr::EnvRef {
-            var_name, default, ..
-        } => match default {
-            Some(d) => format!("env(\"{var_name}\", \"{d}\")"),
-            None => format!("env(\"{var_name}\")"),
-        },
-    }
-}
+use super::provider::format_value_expr;
 
 fn print_execution_plan(file: &rein::ast::ReinFile, message: Option<&str>) -> i32 {
     println!("📋 Execution Plan (dry run)\n");

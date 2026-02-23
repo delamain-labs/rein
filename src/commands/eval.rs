@@ -1,12 +1,15 @@
-use std::path::PathBuf;
+use super::provider::{block_on, resolve};
 
-/// Run `rein eval <file>` — execute all scenario and eval blocks and report pass/fail.
+/// Run `rein eval <file>` — execute all scenario blocks and report pass/fail.
 ///
 /// Exit code 0 = all pass, exit code 1 = any failure.
+///
+/// Note: `eval` blocks (dataset-based assertions) are not yet executed by the
+/// CLI — use `rein validate --strict` to surface unenforced eval blocks.
 pub fn run_eval_command(
-    path: &PathBuf,
+    path: &std::path::PathBuf,
     scenario_filter: Option<&str>,
-    _verbose: bool,
+    verbose: bool,
     demo: bool,
 ) -> i32 {
     let filename = path.to_string_lossy();
@@ -27,8 +30,16 @@ pub fn run_eval_command(
         }
     };
 
-    if file.scenarios.is_empty() && file.evals.is_empty() {
-        eprintln!("No scenario or eval blocks found in '{filename}'.");
+    if file.scenarios.is_empty() {
+        if file.evals.is_empty() {
+            eprintln!("No scenario blocks found in '{filename}'.");
+        } else {
+            eprintln!(
+                "note: {filename} has {} eval block(s) — dataset-based eval is not yet \
+                 supported by the CLI. Use `rein validate --strict` to check coverage.",
+                file.evals.len()
+            );
+        }
         return 0;
     }
 
@@ -38,12 +49,12 @@ pub fn run_eval_command(
             Err(code) => return code,
         };
 
-    let total_scenarios = file.scenarios.len();
-    if !file.scenarios.is_empty() {
-        eprintln!("Running {total_scenarios} scenario(s) in {filename}...\n");
-    }
+    eprintln!(
+        "Running {} scenario(s) in {filename}...\n",
+        file.scenarios.len()
+    );
 
-    let (passed, failed) = run_scenarios(&file, scenario_filter, provider.as_ref());
+    let (passed, failed) = run_scenarios(&file, scenario_filter, provider.as_ref(), verbose);
 
     if failed == 0 && passed > 0 {
         eprintln!("\n{passed} passed");
@@ -65,6 +76,7 @@ fn run_scenarios(
     file: &rein::ast::ReinFile,
     scenario_filter: Option<&str>,
     provider: &dyn rein::runtime::provider::Provider,
+    verbose: bool,
 ) -> (usize, usize) {
     let mut passed = 0usize;
     let mut failed = 0usize;
@@ -102,13 +114,7 @@ fn run_scenarios(
             config,
         );
 
-        let handle = tokio::runtime::Handle::try_current();
-        let response = match if let Ok(handle) = handle {
-            tokio::task::block_in_place(|| handle.block_on(engine.run(&user_message)))
-        } else {
-            let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
-            rt.block_on(engine.run(&user_message))
-        } {
+        let response = match block_on(engine.run(&user_message)) {
             Ok(r) => r.response,
             Err(e) => {
                 eprintln!("  ✗ {} — agent run failed: {e:?}", scenario.name);
@@ -116,6 +122,10 @@ fn run_scenarios(
                 continue;
             }
         };
+
+        if verbose {
+            eprintln!("  [response] {response}");
+        }
 
         if scenario.expect.is_empty() {
             eprintln!("  ✓ {} — ran successfully (no expectations)", scenario.name);
@@ -130,17 +140,20 @@ fn run_scenarios(
                     "  ✓ {} — {key} contains \"{expected_value}\"",
                     scenario.name
                 );
-                passed += 1;
             } else {
                 eprintln!(
                     "  ✗ {} — {key} expected \"{expected_value}\" but not found in response",
                     scenario.name
                 );
-                failed += 1;
                 scenario_passed = false;
             }
         }
-        let _ = scenario_passed;
+
+        if scenario_passed {
+            passed += 1;
+        } else {
+            failed += 1;
+        }
     }
 
     (passed, failed)
@@ -159,39 +172,5 @@ fn resolve_provider_for_eval(
         eprintln!("No agents defined in '{filename}'. Eval requires at least one agent.");
         return Err(1);
     };
-    resolve_provider(agent)
-}
-
-fn resolve_provider(
-    agent: &rein::ast::AgentDef,
-) -> Result<Box<dyn rein::runtime::provider::Provider>, i32> {
-    let model_field = agent
-        .model
-        .as_ref()
-        .map_or("openai".to_string(), format_value_expr);
-
-    let config = rein::runtime::provider::resolver::ProviderConfig {
-        openai_api_key: std::env::var("OPENAI_API_KEY").ok(),
-        openai_base_url: std::env::var("OPENAI_BASE_URL").ok(),
-        anthropic_api_key: std::env::var("ANTHROPIC_API_KEY").ok(),
-        anthropic_base_url: std::env::var("ANTHROPIC_BASE_URL").ok(),
-    };
-
-    rein::runtime::provider::resolver::resolve(&model_field, &config).map_err(|e| {
-        eprintln!("error: {e}");
-        eprintln!("hint: set OPENAI_API_KEY or ANTHROPIC_API_KEY, or use --demo");
-        1
-    })
-}
-
-fn format_value_expr(v: &rein::ast::ValueExpr) -> String {
-    match v {
-        rein::ast::ValueExpr::Literal(s) => s.clone(),
-        rein::ast::ValueExpr::EnvRef {
-            var_name, default, ..
-        } => match default {
-            Some(d) => format!("env(\"{var_name}\", \"{d}\")"),
-            None => format!("env(\"{var_name}\")"),
-        },
-    }
+    resolve(agent)
 }

@@ -153,7 +153,9 @@ fn eval_no_scenarios_exits_zero() {
 }
 
 #[test]
-fn eval_demo_mode_runs_without_crash() {
+fn eval_demo_mode_all_scenarios_pass() {
+    // The demo provider returns a canned response containing "customer info",
+    // which satisfies the expectation in eval_scenarios.rein. Exit must be 0.
     let out = Command::new(rein_bin())
         .args([
             "eval",
@@ -162,11 +164,11 @@ fn eval_demo_mode_runs_without_crash() {
         ])
         .output()
         .expect("failed to spawn rein");
-    // Exit code is 0 (all pass) or 1 (some fail), never a crash (101+)
-    let code = out.status.code().unwrap_or(101);
-    assert!(
-        code == 0 || code == 1,
-        "expected exit 0 or 1, got {code} (stderr: {})",
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "expected all demo scenarios to pass (exit 0), got {} (stderr: {})",
+        out.status.code().unwrap_or(101),
         String::from_utf8_lossy(&out.stderr)
     );
 }

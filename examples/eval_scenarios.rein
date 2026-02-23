@@ -1,16 +1,19 @@
 // Example for rein eval — scenario blocks for testing agent behavior.
+//
+// In demo mode the mock provider returns a fixed "customer info" response,
+// so the expectation below is satisfied without real API keys.
 
 agent support_agent {
     model: openai
     can [ zendesk.read_ticket ]
 }
 
-scenario handles_refund_request {
+scenario handles_customer_info_request {
     given {
-        input: "I need a refund for my order"
+        input: "Show me the customer details for order #42"
     }
     expect {
-        response: "refund"
+        response: "customer info"
     }
 }
 
