@@ -109,25 +109,29 @@ fn pseudo_id(seed: u64, len: usize) -> String {
     out
 }
 
-/// Parse an RFC 3339 timestamp string and return nanoseconds since Unix epoch.
-///
-/// Emits a warning to stderr and falls back to `0` if the string cannot be
-/// parsed, so callers always get a `u64` rather than propagating a parse
-/// error through the telemetry path. A fallback value of `0` (Unix epoch)
-/// will appear clearly wrong in any OTLP viewer and is therefore detectable.
-fn rfc3339_to_unix_nanos(ts: &str) -> u64 {
+/// Parse an RFC 3339 timestamp string and return nanoseconds since Unix epoch,
+/// or `None` if the string cannot be parsed or represents a pre-epoch time.
+fn try_rfc3339_to_unix_nanos(ts: &str) -> Option<u64> {
     use chrono::DateTime;
     DateTime::parse_from_rfc3339(ts)
         .ok()
         .and_then(|dt| dt.timestamp_nanos_opt())
         .and_then(|n| u64::try_from(n).ok())
-        .unwrap_or_else(|| {
-            eprintln!(
-                "rein[otel]: warning: could not parse timestamp '{ts}' as RFC 3339; \
-                 falling back to Unix epoch 0 — spans will have incorrect timestamps"
-            );
-            0
-        })
+}
+
+/// Parse an RFC 3339 timestamp string and return nanoseconds since Unix epoch.
+///
+/// Emits a warning to stderr and falls back to `0` if the string cannot be
+/// parsed or represents a pre-epoch time. A fallback value of `0` (Unix epoch)
+/// will appear clearly wrong in any OTLP viewer and is therefore detectable.
+fn rfc3339_to_unix_nanos(ts: &str) -> u64 {
+    try_rfc3339_to_unix_nanos(ts).unwrap_or_else(|| {
+        eprintln!(
+            "rein[otel]: warning: could not parse timestamp '{ts}' as RFC 3339; \
+             falling back to Unix epoch 0 — spans will have incorrect timestamps"
+        );
+        0
+    })
 }
 
 pub fn to_otlp(trace: &StructuredTrace) -> OtelResourceSpans {
@@ -143,14 +147,11 @@ pub fn to_otlp(trace: &StructuredTrace) -> OtelResourceSpans {
     let start_ns = rfc3339_to_unix_nanos(&trace.started_at);
     // Use completed_at for end_ns so the root span reflects the actual wall-clock
     // end time. Falls back to start_ns + duration_ms if completed_at is unparseable.
-    let end_ns = {
-        let completed = rfc3339_to_unix_nanos(&trace.completed_at);
-        if completed > 0 {
-            completed
-        } else {
-            start_ns + trace.stats.duration_ms * 1_000_000
-        }
-    };
+    // Uses try_ variant to correctly distinguish parse failure from a legitimately
+    // epoch-zero completed_at (avoiding silent fallback for valid epoch timestamps).
+    let end_ns = try_rfc3339_to_unix_nanos(&trace.completed_at).unwrap_or_else(|| {
+        start_ns.saturating_add(trace.stats.duration_ms.saturating_mul(1_000_000))
+    });
 
     let mut spans = Vec::new();
 
@@ -199,8 +200,10 @@ pub fn to_otlp(trace: &StructuredTrace) -> OtelResourceSpans {
             // RunEvents have no intrinsic duration — they mark when the event
             // occurred, not how long it took. OTLP collectors render these as
             // instant markers rather than duration bars.
-            start_time_unix_nano: start_ns + te.offset_ms * 1_000_000,
-            end_time_unix_nano: start_ns + te.offset_ms * 1_000_000,
+            start_time_unix_nano: start_ns
+                .saturating_add(te.offset_ms.saturating_mul(1_000_000)),
+            end_time_unix_nano: start_ns
+                .saturating_add(te.offset_ms.saturating_mul(1_000_000)),
             attributes: attrs,
             status: OtelStatus {
                 code: 1,
