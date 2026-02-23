@@ -74,6 +74,8 @@ pub enum WorkflowError {
     ApprovalRejected { step: String, reason: String },
     /// A step's approval gate timed out.
     ApprovalTimedOut { step: String },
+    /// A cyclic dependency was detected in step `depends_on` declarations.
+    CyclicDependency(String),
 }
 
 impl std::fmt::Display for WorkflowError {
@@ -91,6 +93,9 @@ impl std::fmt::Display for WorkflowError {
             }
             Self::ApprovalTimedOut { step } => {
                 write!(f, "approval timed out for step '{step}'")
+            }
+            Self::CyclicDependency(detail) => {
+                write!(f, "Cycle detected in workflow step dependencies: {detail}")
             }
         }
     }
@@ -257,6 +262,76 @@ pub async fn run_parallel(
     Ok(build_result(stage_results, final_output))
 }
 
+/// Resolve step execution order using Kahn's topological sort algorithm.
+///
+/// Steps with no `depends_on` maintain their relative file order.
+/// Returns `Err(WorkflowError::CyclicDependency)` if a cycle is detected.
+pub fn resolve_dag(
+    steps: &[crate::ast::StepDef],
+) -> Result<Vec<&crate::ast::StepDef>, WorkflowError> {
+    use std::collections::HashMap;
+
+    let mut in_degree: HashMap<&str, usize> = HashMap::new();
+    let mut dependents: HashMap<&str, Vec<&str>> = HashMap::new();
+
+    for step in steps {
+        in_degree.entry(&step.name).or_insert(0);
+        for dep in &step.depends_on {
+            *in_degree.entry(&step.name).or_insert(0) += 1;
+            dependents.entry(dep.as_str()).or_default().push(&step.name);
+        }
+    }
+
+    let mut ready: Vec<&str> = in_degree
+        .iter()
+        .filter(|&(_, &d)| d == 0)
+        .map(|(&name, _)| name)
+        .collect();
+
+    // Stable sort: steps with no deps preserve file order
+    let step_index: HashMap<&str, usize> = steps
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (s.name.as_str(), i))
+        .collect();
+    ready.sort_by_key(|name| step_index.get(name).copied().unwrap_or(usize::MAX));
+
+    let step_by_name: HashMap<&str, &crate::ast::StepDef> =
+        steps.iter().map(|s| (s.name.as_str(), s)).collect();
+
+    let mut order: Vec<&crate::ast::StepDef> = Vec::new();
+    let mut i = 0;
+
+    while i < ready.len() {
+        let name = ready[i];
+        i += 1;
+        if let Some(step) = step_by_name.get(name) {
+            order.push(step);
+        }
+        if let Some(deps) = dependents.get(name) {
+            let mut newly_ready: Vec<&str> = deps
+                .iter()
+                .filter(|&&dep| {
+                    let d = in_degree.get_mut(dep).unwrap();
+                    *d -= 1;
+                    *d == 0
+                })
+                .copied()
+                .collect();
+            newly_ready.sort_by_key(|name| step_index.get(name).copied().unwrap_or(usize::MAX));
+            ready.extend(newly_ready);
+        }
+    }
+
+    if order.len() != steps.len() {
+        return Err(WorkflowError::CyclicDependency(
+            "one or more steps form a dependency cycle".to_string(),
+        ));
+    }
+
+    Ok(order)
+}
+
 /// Execute a single step definition, running its referenced agent with the
 /// step's goal as additional context.
 ///
@@ -299,20 +374,39 @@ pub async fn run_step(
     run_stage(&step.name, &step.agent, &effective_input, ctx).await
 }
 
-/// Execute all step blocks in a workflow sequentially, chaining outputs.
+/// Execute all step blocks in a workflow, resolving `depends_on` ordering.
+///
+/// Steps are executed in topological order. Each step receives the concatenated
+/// outputs of its declared dependencies as input context.
 ///
 /// # Errors
-/// Returns `WorkflowError` if any step fails.
+/// Returns `WorkflowError` if any step fails or a dependency cycle is detected.
 pub async fn run_steps(
     workflow: &WorkflowDef,
     ctx: &WorkflowContext<'_>,
 ) -> Result<Vec<StageResult>, WorkflowError> {
-    let mut results = Vec::new();
-    let mut current_input = format!("Trigger: {}", workflow.trigger);
+    use std::collections::HashMap;
 
-    for step in &workflow.steps {
-        let result = run_step(step, &current_input, ctx).await?;
-        current_input.clone_from(&result.output);
+    let ordered = resolve_dag(&workflow.steps)?;
+    let trigger_input = format!("Trigger: {}", workflow.trigger);
+
+    let mut outputs: HashMap<String, String> = HashMap::new();
+    let mut results = Vec::new();
+
+    for step in ordered {
+        let input = if step.depends_on.is_empty() {
+            trigger_input.clone()
+        } else {
+            step.depends_on
+                .iter()
+                .filter_map(|dep| outputs.get(dep))
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        let result = run_step(step, &input, ctx).await?;
+        outputs.insert(step.name.clone(), result.output.clone());
         results.push(result);
     }
 
