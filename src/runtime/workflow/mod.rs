@@ -268,24 +268,24 @@ pub async fn run_step(
     ctx: &WorkflowContext<'_>,
 ) -> Result<StageResult, WorkflowError> {
     // Check approval gate before execution
-    if let Some(approval_def) = &step.approval {
-        if let Some(handler) = &ctx.approval_handler {
-            let status = handler
-                .request_approval(&step.name, input, approval_def)
-                .await;
-            match status {
-                ApprovalStatus::Approved => {}
-                ApprovalStatus::Rejected { reason } => {
-                    return Err(WorkflowError::ApprovalRejected {
-                        step: step.name.clone(),
-                        reason,
-                    });
-                }
-                ApprovalStatus::TimedOut | ApprovalStatus::Pending => {
-                    return Err(WorkflowError::ApprovalTimedOut {
-                        step: step.name.clone(),
-                    });
-                }
+    if let Some(approval_def) = &step.approval
+        && let Some(handler) = &ctx.approval_handler
+    {
+        let status = handler
+            .request_approval(&step.name, input, approval_def)
+            .await;
+        match status {
+            ApprovalStatus::Approved => {}
+            ApprovalStatus::Rejected { reason } => {
+                return Err(WorkflowError::ApprovalRejected {
+                    step: step.name.clone(),
+                    reason,
+                });
+            }
+            ApprovalStatus::TimedOut | ApprovalStatus::Pending => {
+                return Err(WorkflowError::ApprovalTimedOut {
+                    step: step.name.clone(),
+                });
             }
         }
     }

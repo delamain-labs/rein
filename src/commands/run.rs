@@ -103,54 +103,72 @@ pub fn run_agent(
 
     // If the file has workflows, run the first workflow instead of single-agent execution.
     if let Some(workflow) = file.workflows.first() {
-        let approval_handler = resolve_approval_handler();
-        let wf_config = rein::runtime::engine::RunConfig {
-            system_prompt: None,
-            max_turns: 10,
-            budget_cents: agent.budget.as_ref().map_or(0, |b| b.amount),
-        };
-        let ctx = rein::runtime::workflow::WorkflowContext {
-            file: &file,
-            provider: provider.as_ref(),
-            executor: &executor,
-            tool_defs: &[],
-            config: &wf_config,
-            approval_handler: Some(approval_handler),
-        };
-        let start = Instant::now();
-        let handle = tokio::runtime::Handle::try_current();
-        let wf_result = if let Ok(handle) = handle {
-            tokio::task::block_in_place(|| {
-                handle.block_on(rein::runtime::workflow::run_workflow(workflow, &ctx))
-            })
-        } else {
-            let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
-            rt.block_on(rein::runtime::workflow::run_workflow(workflow, &ctx))
-        };
-        let duration = start.elapsed();
-        match wf_result {
-            Ok(result) => {
-                eprintln!();
-                eprintln!(
-                    "--- Workflow complete ({} stages) ---",
-                    result.stage_results.len()
-                );
-                eprintln!("Final output: {}", result.final_output);
-                eprintln!("Duration: {duration:.2?}");
-                return 0;
-            }
-            Err(e) => {
-                eprintln!("Workflow failed: {e}");
-                return 1;
-            }
-        }
+        let budget_cents = agent.budget.as_ref().map_or(0, |b| b.amount);
+        return run_workflow_mode(workflow, &file, provider.as_ref(), &executor, budget_cents);
     }
 
-    // Execute.
+    run_engine(&engine, user_message, otel, &agent.name)
+}
+
+fn run_workflow_mode(
+    workflow: &rein::ast::WorkflowDef,
+    file: &rein::ast::ReinFile,
+    provider: &dyn rein::runtime::provider::Provider,
+    executor: &rein::runtime::executor::NoopExecutor,
+    budget_cents: u64,
+) -> i32 {
+    let approval_handler = resolve_approval_handler();
+    let wf_config = rein::runtime::engine::RunConfig {
+        system_prompt: None,
+        max_turns: 10,
+        budget_cents,
+    };
+    let ctx = rein::runtime::workflow::WorkflowContext {
+        file,
+        provider,
+        executor,
+        tool_defs: &[],
+        config: &wf_config,
+        approval_handler: Some(approval_handler),
+    };
+    let start = Instant::now();
+    let handle = tokio::runtime::Handle::try_current();
+    let wf_result = if let Ok(handle) = handle {
+        tokio::task::block_in_place(|| {
+            handle.block_on(rein::runtime::workflow::run_workflow(workflow, &ctx))
+        })
+    } else {
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        rt.block_on(rein::runtime::workflow::run_workflow(workflow, &ctx))
+    };
+    let duration = start.elapsed();
+    match wf_result {
+        Ok(result) => {
+            eprintln!();
+            eprintln!(
+                "--- Workflow complete ({} stages) ---",
+                result.stage_results.len()
+            );
+            eprintln!("Final output: {}", result.final_output);
+            eprintln!("Duration: {duration:.2?}");
+            0
+        }
+        Err(e) => {
+            eprintln!("Workflow failed: {e}");
+            1
+        }
+    }
+}
+
+fn run_engine(
+    engine: &rein::runtime::engine::AgentEngine<'_>,
+    user_message: &str,
+    otel: bool,
+    agent_name: &str,
+) -> i32 {
     let start = Instant::now();
     let handle = tokio::runtime::Handle::try_current();
     let result = if let Ok(handle) = handle {
-        // Already inside a tokio runtime (e.g. #[tokio::main])
         tokio::task::block_in_place(|| handle.block_on(engine.run(user_message)))
     } else {
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -164,9 +182,8 @@ pub fn run_agent(
             eprintln!("--- Run complete ---");
             eprintln!("{}", run_result.trace.summary());
             eprintln!("Duration: {duration:.2?}");
-
             if otel {
-                write_otel_trace(&run_result.trace, &agent.name, duration);
+                write_otel_trace(&run_result.trace, agent_name, duration);
             }
             0
         }
