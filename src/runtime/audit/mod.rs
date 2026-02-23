@@ -113,12 +113,21 @@ impl From<serde_json::Error> for AuditError {
 
 impl AuditLog {
     /// Create a new audit log at the given path.
-    /// Creates parent directories if needed.
+    ///
+    /// Creates parent directories if needed and performs a probe-open to verify
+    /// the file is writable at construction time. This ensures the fail-hard
+    /// CLI contract is enforced before any workflow execution begins — a
+    /// mis-configured audit path fails immediately rather than silently
+    /// dropping records at the first approval gate.
     pub fn new(path: impl Into<PathBuf>) -> Result<Self, AuditError> {
         let path = path.into();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
+        // Probe-open: verify the file is writable now. The handle is
+        // dropped immediately; actual writes use a separate open per
+        // append call (append-only, no persistent handle held).
+        OpenOptions::new().create(true).append(true).open(&path)?;
         Ok(Self {
             path,
             write_lock: Mutex::new(()),
@@ -130,7 +139,13 @@ impl AuditLog {
     /// Acquires `write_lock` before opening the file so concurrent calls from
     /// parallel workflow steps do not interleave partial JSONL lines.
     pub fn append(&self, entry: &AuditEntry) -> Result<(), AuditError> {
-        let _guard = self.write_lock.lock().expect("audit write_lock poisoned");
+        // Recover from lock poison: the guard holds `()` so a poisoned lock
+        // carries no invalid state. Panicking here would abort the approval
+        // flow and violate the fail-open-on-write contract.
+        let _guard = self
+            .write_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)

@@ -509,8 +509,7 @@ mod tests {
         );
     }
 
-    // #358: resolve_secrets_with_audit tests Arc<dyn ApprovalHandler> wrapping
-    // The run_step production path wraps an Arc<dyn ApprovalHandler> with
+    // #358: The run_step production path wraps an Arc<dyn ApprovalHandler> with
     // AuditingApprovalHandler — test that the blanket impl delegates correctly.
     #[tokio::test]
     async fn auditing_handler_wraps_arc_dyn_approval_handler() {

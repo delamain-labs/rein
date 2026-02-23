@@ -277,6 +277,12 @@ impl ApprovalHandler for SlackApprovalHandler {
 /// Blanket impl so `AuditingApprovalHandler<Arc<dyn ApprovalHandler>>` works.
 /// This allows a single resolved `Arc<dyn ApprovalHandler>` (whether injected
 /// via `WorkflowContext` or freshly resolved) to be wrapped by the auditor.
+///
+/// # Note
+/// Rust trait impls do not support visibility modifiers, so this impl is
+/// effectively public. It is crate-internal glue and should not be relied upon
+/// by external callers. A future `AuditSink` trait refactor (tracked in the
+/// backlog) will eliminate the need for this blanket impl entirely.
 #[async_trait::async_trait]
 impl ApprovalHandler for std::sync::Arc<dyn ApprovalHandler> {
     async fn request_approval(
@@ -377,6 +383,16 @@ impl<H: ApprovalHandler> ApprovalHandler for AuditingApprovalHandler<H> {
             // running when it has already been terminated.
             ApprovalStatus::TimedOut | ApprovalStatus::Pending => "timed_out",
         };
+        // Record the raw handler status separately from the compliance-stable
+        // `decision` field. This preserves diagnostic fidelity: an operator can
+        // distinguish a genuine timeout from a `Pending` return (e.g. a
+        // misconfigured async handler) without affecting compliance parsers.
+        let original_status = match &status {
+            ApprovalStatus::Approved => "approved",
+            ApprovalStatus::Rejected { .. } => "rejected",
+            ApprovalStatus::TimedOut => "timed_out",
+            ApprovalStatus::Pending => "pending",
+        };
         // Capture the rejection reason if present so the audit record can
         // reconstruct _why_ an approval was rejected (not just that it was).
         let rejection_reason = match &status {
@@ -401,6 +417,13 @@ impl<H: ApprovalHandler> ApprovalHandler for AuditingApprovalHandler<H> {
         // approved/timed-out outcomes avoids a noisy `null` in audit records.
         if let Some(r) = rejection_reason {
             meta["reason"] = serde_json::Value::String(r.to_string());
+        }
+        // Include "original_status" only when it diverges from "decision" —
+        // i.e., when the handler returned Pending but the compliance field
+        // shows "timed_out". This allows operators to diagnose handler
+        // misconfigurations without disrupting compliance consumers.
+        if original_status != decision {
+            meta["original_status"] = serde_json::Value::String(original_status.to_string());
         }
         resolved.metadata = meta;
         if let Err(e) = self.log.append(&resolved) {

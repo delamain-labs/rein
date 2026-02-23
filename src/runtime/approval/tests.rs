@@ -402,6 +402,14 @@ async fn auditing_handler_records_pending_decision() {
         entries[1].metadata["decision"], "timed_out",
         "pending decision must be recorded as timed_out in metadata"
     );
+    // When the handler returns Pending (not TimedOut), the audit record must
+    // also include "original_status": "pending" so operators can distinguish
+    // a genuine timeout from a handler that returned Pending (e.g. mis-configured
+    // async handler). The compliance-facing "decision" field is stable.
+    assert_eq!(
+        entries[1].metadata["original_status"], "pending",
+        "Pending must set original_status to 'pending' in metadata"
+    );
 }
 
 #[tokio::test]
