@@ -148,6 +148,13 @@ pub enum RunEvent {
         /// Human-readable reason (e.g. "dependency '`step_a`' failed").
         reason: String,
     },
+    /// A workflow step failed during execution (soft failure — workflow continues).
+    StepFailed {
+        /// Name of the step that failed.
+        step: String,
+        /// Human-readable error description.
+        reason: String,
+    },
 }
 
 /// An ordered log of all events that occurred during a run.
@@ -456,6 +463,9 @@ fn summarize_event(event: &RunEvent, lines: &mut Vec<String>, turn: &mut usize) 
         }
         RunEvent::StepSkipped { step, reason } => {
             lines.push(format!("  ⏭ step '{step}' skipped: {reason}"));
+        }
+        RunEvent::StepFailed { step, reason } => {
+            lines.push(format!("  ✗ step '{step}' failed: {reason}"));
         }
     }
 }

@@ -2049,6 +2049,75 @@ async fn failed_dependency_skips_dependent_step() {
     );
 }
 
+/// `ApprovalTimedOut` is a hard error and must abort `run_steps` immediately
+/// (not be absorbed as a soft failure).
+#[tokio::test]
+async fn approval_timed_out_aborts_workflow() {
+    use crate::ast::{ApprovalDef, ApprovalKind, Span as AstSpan};
+    use crate::runtime::approval::ApprovalStatus;
+    use std::sync::Arc;
+
+    struct TimedOutHandler;
+    #[async_trait::async_trait]
+    impl crate::runtime::approval::ApprovalHandler for TimedOutHandler {
+        async fn request_approval(
+            &self,
+            _step: &str,
+            _output: &str,
+            _approval: &crate::ast::ApprovalDef,
+        ) -> ApprovalStatus {
+            ApprovalStatus::TimedOut
+        }
+    }
+
+    let file = parse_file(r#"agent bot { model: openai }"#);
+    let step_a = crate::ast::StepDef {
+        name: "gated".to_string(),
+        agent: "bot".to_string(),
+        goal: None,
+        input: None,
+        output_constraints: vec![],
+        depends_on: vec![],
+        when: None,
+        on_failure: None,
+        send_to: None,
+        fallback: None,
+        for_each: None,
+        typed_input: None,
+        typed_outputs: vec![],
+        escalate: None,
+        approval: Some(ApprovalDef {
+            kind: ApprovalKind::Approve,
+            channel: "cli".to_string(),
+            destination: "#ops".to_string(),
+            timeout: Some("1m".to_string()),
+            mode: None,
+            span: AstSpan::new(0, 1),
+        }),
+        span: AstSpan::new(0, 1),
+    };
+    let workflow = make_workflow_steps("timed_out_wf", "start", vec![step_a]);
+
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    provider.push_response(simple_response("output"));
+
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: Some(Arc::new(TimedOutHandler)),
+    };
+
+    let result = run_steps(&workflow, &ctx).await;
+    assert!(
+        matches!(result, Err(WorkflowError::ApprovalTimedOut { .. })),
+        "ApprovalTimedOut must abort run_steps immediately; got: {result:?}"
+    );
+}
+
 /// Steps with no dependency on the failed step should still execute.
 #[tokio::test]
 async fn independent_step_runs_even_if_sibling_fails() {

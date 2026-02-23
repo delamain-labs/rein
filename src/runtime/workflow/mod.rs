@@ -568,16 +568,26 @@ pub async fn run_steps(
                 results.push(result);
             }
             Err(e) => {
-                // Hard errors (approval rejection, cycle) abort immediately.
-                // Soft errors (agent not found, LLM failure) record the failure
-                // and continue so that dependent steps can be skipped gracefully.
+                // Hard errors (approval rejection, timed-out approval, cycle) abort
+                // immediately — these represent policy enforcement failures, not
+                // transient infrastructure errors.
+                // Soft errors (agent not found, LLM failure) record the failure,
+                // emit a StepFailed event, and continue so that dependent steps
+                // can be skipped gracefully while independent steps still execute.
                 if matches!(
                     e,
-                    WorkflowError::ApprovalRejected { .. } | WorkflowError::CyclicDependency(_)
+                    WorkflowError::ApprovalRejected { .. }
+                        | WorkflowError::ApprovalTimedOut { .. }
+                        | WorkflowError::CyclicDependency(_)
                 ) {
                     return Err(e);
                 }
+                let reason = e.to_string();
                 failed_steps.insert(step.name.clone());
+                events.push(super::RunEvent::StepFailed {
+                    step: step.name.clone(),
+                    reason,
+                });
                 results.push(StageResult {
                     stage_name: step.name.clone(),
                     agent_name: step.agent.clone(),
@@ -585,10 +595,6 @@ pub async fn run_steps(
                     cost_cents: 0,
                     tokens: 0,
                 });
-                eprintln!(
-                    "rein[workflow]: step '{}' failed: {e} — skipping dependent steps",
-                    step.name
-                );
             }
         }
     }
