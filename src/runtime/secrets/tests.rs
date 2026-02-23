@@ -167,8 +167,7 @@ fn vault_fallback_source_indicates_env_fallback() {
     // so operators can reconstruct exactly which vault path was attempted and
     // which env var was used as fallback.
     assert_eq!(
-        resolved["db_pass"].source,
-        "vault(secret/rein/key)->env(VAULT_SECRET_REIN_KEY)",
+        resolved["db_pass"].source, "vault(secret/rein/key)->env(VAULT_SECRET_REIN_KEY)",
         "source must be composite vault->env format"
     );
 }
