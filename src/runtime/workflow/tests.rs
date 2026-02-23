@@ -1,5 +1,8 @@
 use super::*;
-use crate::ast::{ConditionMatcher, ExecutionMode, RouteRule, Span, Stage, StepDef, WorkflowDef};
+use crate::ast::{
+    AutoResolveBlock, AutoResolveCondition, CompareOp, ConditionMatcher, ExecutionMode, RouteRule,
+    Span, Stage, StepDef, WhenComparison, WhenValue, WorkflowDef,
+};
 use crate::runtime::executor::MockExecutor;
 use crate::runtime::provider::{ChatResponse, MockProvider, Usage};
 use tempfile::NamedTempFile;
@@ -1316,4 +1319,305 @@ async fn workflow_steps_respect_depends_on_order() {
     let result = run_workflow(&workflow, &ctx).await.unwrap();
     assert_eq!(result.stage_results.len(), 2);
     assert_eq!(result.final_output, "output from b");
+}
+
+// --- #307 Step Extensions Tests ---
+
+fn make_step_with_fallback(name: &str, agent: &str, fallback_agent: &str) -> StepDef {
+    let fallback = StepDef {
+        name: format!("{name}_fallback"),
+        agent: fallback_agent.to_string(),
+        goal: None,
+        input: None,
+        output_constraints: vec![],
+        depends_on: vec![],
+        when: None,
+        on_failure: None,
+        send_to: None,
+        fallback: None,
+        for_each: None,
+        typed_input: None,
+        typed_outputs: vec![],
+        escalate: None,
+        approval: None,
+        span: Span::new(0, 1),
+    };
+    StepDef {
+        name: name.to_string(),
+        agent: agent.to_string(),
+        goal: None,
+        input: None,
+        output_constraints: vec![],
+        depends_on: vec![],
+        when: None,
+        on_failure: None,
+        send_to: None,
+        fallback: Some(Box::new(fallback)),
+        for_each: None,
+        typed_input: None,
+        typed_outputs: vec![],
+        escalate: None,
+        approval: None,
+        span: Span::new(0, 1),
+    }
+}
+
+fn make_step_for_each(name: &str, agent: &str, collection: &str) -> StepDef {
+    StepDef {
+        name: name.to_string(),
+        agent: agent.to_string(),
+        goal: None,
+        input: None,
+        output_constraints: vec![],
+        depends_on: vec![],
+        when: None,
+        on_failure: None,
+        send_to: None,
+        fallback: None,
+        for_each: Some(collection.to_string()),
+        typed_input: None,
+        typed_outputs: vec![],
+        escalate: None,
+        approval: None,
+        span: Span::new(0, 1),
+    }
+}
+
+#[tokio::test]
+async fn step_fallback_runs_on_primary_failure() {
+    // "ghost" agent does not exist → primary step fails → fallback should run.
+    let file = parse_file(r"agent backup { model: openai }");
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // Fallback agent "backup" will produce this response.
+    provider.push_response(simple_response("fallback result"));
+
+    let step = make_step_with_fallback("classify", "ghost", "backup");
+    let workflow = WorkflowDef {
+        name: "wf".to_string(),
+        trigger: "test".to_string(),
+        stages: vec![],
+        steps: vec![step],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+    };
+
+    let results = run_steps(&workflow, &ctx).await.expect("should succeed");
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].output, "fallback result");
+}
+
+#[tokio::test]
+async fn step_without_fallback_propagates_error() {
+    let file = parse_file(r"agent backup { model: openai }");
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // Step references nonexistent agent with no fallback.
+    let step = make_step("alone", "ghost_no_fallback", vec![]);
+    let workflow = WorkflowDef {
+        name: "wf".to_string(),
+        trigger: "test".to_string(),
+        stages: vec![],
+        steps: vec![step],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+    };
+
+    let err = run_steps(&workflow, &ctx).await.unwrap_err();
+    assert!(matches!(
+        err,
+        WorkflowError::StageFailed { .. } | WorkflowError::AgentNotFound(_)
+    ));
+}
+
+#[tokio::test]
+async fn step_for_each_iterates_over_array() {
+    let file = parse_file(r"agent bot { model: openai }");
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // Three items → three responses.
+    provider.push_response(simple_response("processed a"));
+    provider.push_response(simple_response("processed b"));
+    provider.push_response(simple_response("processed c"));
+
+    let step = make_step_for_each("process_items", "bot", "items");
+    let workflow = WorkflowDef {
+        name: "wf".to_string(),
+        trigger: "test".to_string(),
+        stages: vec![],
+        steps: vec![step],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+    };
+
+    // Input with a JSON array keyed by "items".
+    let workflow_with_trigger = WorkflowDef {
+        trigger: r#"{"items": ["a", "b", "c"]}"#.to_string(),
+        ..workflow
+    };
+
+    let results = run_steps(&workflow_with_trigger, &ctx)
+        .await
+        .expect("should succeed");
+    // One aggregated StageResult per for_each step with all iteration outputs joined.
+    assert_eq!(results.len(), 1, "one result per for_each step");
+    let output = &results[0].output;
+    assert!(output.contains("processed a"), "missing iteration 0");
+    assert!(output.contains("processed b"), "missing iteration 1");
+    assert!(output.contains("processed c"), "missing iteration 2");
+}
+
+#[tokio::test]
+async fn workflow_auto_resolve_short_circuits_on_condition_met() {
+    // workflow.auto_resolve: when { confidence > 0 }
+    // First step outputs JSON with confidence=100; remaining steps should be skipped.
+    let file = parse_file(
+        r#"
+        agent bot { model: openai }
+        agent should_not_run { model: openai }
+        "#,
+    );
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // Only bot responds; should_not_run must not be called.
+    provider.push_response(simple_response(r#"{"confidence": 100}"#));
+
+    let auto_resolve = AutoResolveBlock {
+        conditions: vec![AutoResolveCondition::Comparison(WhenComparison {
+            field: "confidence".to_string(),
+            op: CompareOp::Gt,
+            value: WhenValue::Number("0".to_string()),
+        })],
+        span: Span::new(0, 1),
+    };
+
+    let workflow = WorkflowDef {
+        name: "wf".to_string(),
+        trigger: "test".to_string(),
+        stages: vec![],
+        steps: vec![
+            make_step("first", "bot", vec![]),
+            make_step("second", "should_not_run", vec![]),
+        ],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: Some(auto_resolve),
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+    };
+
+    let results = run_steps(&workflow, &ctx).await.expect("should succeed");
+    // Only the first step ran; second was short-circuited.
+    assert_eq!(results.len(), 1, "should stop after auto_resolve");
+    assert_eq!(results[0].stage_name, "first");
+}
+
+#[tokio::test]
+async fn workflow_auto_resolve_does_not_short_circuit_when_condition_unmet() {
+    let file = parse_file(
+        r#"
+        agent bot { model: openai }
+        "#,
+    );
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // Neither step's output satisfies confidence > 0; both should run.
+    provider.push_response(simple_response("plain text, no JSON"));
+    provider.push_response(simple_response("second result"));
+
+    let auto_resolve = AutoResolveBlock {
+        conditions: vec![AutoResolveCondition::Comparison(WhenComparison {
+            field: "confidence".to_string(),
+            op: CompareOp::Gt,
+            value: WhenValue::Number("99".to_string()),
+        })],
+        span: Span::new(0, 1),
+    };
+
+    let workflow = WorkflowDef {
+        name: "wf".to_string(),
+        trigger: "test".to_string(),
+        stages: vec![],
+        steps: vec![
+            make_step("first", "bot", vec![]),
+            make_step("second", "bot", vec![]),
+        ],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: Some(auto_resolve),
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+    };
+
+    let results = run_steps(&workflow, &ctx).await.expect("should succeed");
+    assert_eq!(
+        results.len(),
+        2,
+        "both steps should run when condition unmet"
+    );
 }

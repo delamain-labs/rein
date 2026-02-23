@@ -102,6 +102,22 @@ pub enum RunEvent {
         total_cost_cents: u64,
         total_tokens: u64,
     },
+    /// A step's fallback was triggered after the primary step failed.
+    StepFallback {
+        step: String,
+        fallback_step: String,
+    },
+    /// One iteration of a `for each` step.
+    ForEachIteration {
+        step: String,
+        index: usize,
+        total: usize,
+    },
+    /// A workflow's `auto resolve` conditions were met; remaining steps skipped.
+    AutoResolved {
+        step: String,
+        condition: String,
+    },
 }
 
 /// An ordered log of all events that occurred during a run.
@@ -293,10 +309,32 @@ impl RunTrace {
                         "Done. {total_tokens} tokens, {total_cost_cents}¢ total."
                     ));
                 }
+                e => lines.push(format_step_extension_event(e)),
             }
         }
 
         lines.join("\n")
+    }
+}
+
+fn format_step_extension_event(event: &RunEvent) -> String {
+    match event {
+        RunEvent::StepFallback {
+            step,
+            fallback_step,
+        } => {
+            format!("  ↩ fallback: step '{step}' → '{fallback_step}'")
+        }
+        RunEvent::ForEachIteration { step, index, total } => {
+            format!(
+                "  ↻ for each: step '{step}' iteration {}/{total}",
+                index + 1
+            )
+        }
+        RunEvent::AutoResolved { step, condition } => {
+            format!("  ✓ auto resolved after step '{step}': {condition}")
+        }
+        _ => String::new(),
     }
 }
 

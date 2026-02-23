@@ -374,10 +374,41 @@ pub async fn run_step(
     run_stage(&step.name, &step.agent, &effective_input, ctx).await
 }
 
+/// Execute a step, running its fallback if the primary step fails.
+///
+/// On primary failure, if `step.fallback` is set, the fallback step is executed
+/// instead. A `RunEvent::StepFallback` event is not yet wired into a unified trace
+/// (future work) but the behavior is correct.
+///
+/// # Errors
+/// Returns `WorkflowError` if both the primary and fallback steps fail,
+/// or if the primary fails and no fallback is defined.
+pub async fn run_step_with_fallback(
+    step: &crate::ast::StepDef,
+    input: &str,
+    ctx: &WorkflowContext<'_>,
+) -> Result<StageResult, WorkflowError> {
+    match run_step(step, input, ctx).await {
+        Ok(result) => Ok(result),
+        Err(e) => {
+            if let Some(ref fallback) = step.fallback {
+                run_step(fallback, input, ctx).await
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
 /// Execute all step blocks in a workflow, resolving `depends_on` ordering.
 ///
 /// Steps are executed in topological order. Each step receives the concatenated
 /// outputs of its declared dependencies as input context.
+///
+/// - Steps with `fallback` retry on failure using the fallback agent.
+/// - Steps with `for_each` iterate over a JSON array in the trigger input.
+/// - If `workflow.auto_resolve` conditions are met after a step, remaining steps
+///   are short-circuited.
 ///
 /// # Errors
 /// Returns `WorkflowError` if any step fails or a dependency cycle is detected.
@@ -405,12 +436,131 @@ pub async fn run_steps(
                 .join("\n")
         };
 
-        let result = run_step(step, &input, ctx).await?;
+        // For for_each, prefer the raw trigger JSON (no "Trigger: " prefix) so
+        // serde_json can parse it. Falls back to `input` when depends_on is set
+        // (previous step output is already plain text/JSON).
+        let for_each_input = if step.depends_on.is_empty() {
+            workflow.trigger.clone()
+        } else {
+            input.clone()
+        };
+
+        let result = if let Some(ref key) = step.for_each {
+            run_step_for_each(step, &for_each_input, key, ctx).await?
+        } else {
+            run_step_with_fallback(step, &input, ctx).await?
+        };
+
+        // Check workflow-level auto_resolve conditions after each step.
+        let resolved = if let Some(ref ar) = workflow.auto_resolve {
+            auto_resolve_matches(&result.output, ar)
+        } else {
+            None
+        };
+
         outputs.insert(step.name.clone(), result.output.clone());
         results.push(result);
+
+        if resolved.is_some() {
+            break;
+        }
     }
 
     Ok(results)
+}
+
+/// Execute a step once per item in a JSON array extracted from the input.
+///
+/// Parses `input` as JSON, extracts the array at `collection_key`, then runs
+/// the step for each element. Results are joined with newlines into a single
+/// `StageResult`.
+async fn run_step_for_each(
+    step: &crate::ast::StepDef,
+    input: &str,
+    collection_key: &str,
+    ctx: &WorkflowContext<'_>,
+) -> Result<StageResult, WorkflowError> {
+    // Try to parse the trigger as JSON and extract the array.
+    let items: Vec<String> = serde_json::from_str::<serde_json::Value>(input)
+        .ok()
+        .and_then(|v| v.get(collection_key).cloned())
+        .and_then(|arr| arr.as_array().cloned())
+        .map(|arr| {
+            arr.iter()
+                .map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // If the key wasn't found or empty, fall back to running the step once with the full input.
+    if items.is_empty() {
+        return run_step_with_fallback(step, input, ctx).await;
+    }
+
+    let total = items.len();
+    let mut outputs = Vec::with_capacity(total);
+    let mut total_cost = 0u64;
+    let mut total_tokens = 0u64;
+
+    for item in &items {
+        let result = run_step_with_fallback(step, item, ctx).await?;
+        total_cost += result.cost_cents;
+        total_tokens += result.tokens;
+        outputs.push(result.output);
+    }
+
+    Ok(StageResult {
+        stage_name: step.name.clone(),
+        agent_name: step.agent.clone(),
+        output: outputs.join("\n"),
+        cost_cents: total_cost,
+        tokens: total_tokens,
+    })
+}
+
+/// Evaluate `auto_resolve` conditions against a step's output (parsed as JSON).
+///
+/// Returns a description of the matched condition, or `None` if conditions are not met.
+fn auto_resolve_matches(output: &str, ar: &crate::ast::AutoResolveBlock) -> Option<String> {
+    use crate::ast::{AutoResolveCondition, CompareOp};
+
+    let json: serde_json::Value = serde_json::from_str(output).ok()?;
+
+    for condition in &ar.conditions {
+        match condition {
+            AutoResolveCondition::Comparison(cmp) => {
+                let field_val = json.get(&cmp.field)?.as_f64()?;
+                let threshold: f64 = match &cmp.value {
+                    crate::ast::WhenValue::Number(s) | crate::ast::WhenValue::Percent(s) => {
+                        s.parse().ok()?
+                    }
+                    crate::ast::WhenValue::String(_) | crate::ast::WhenValue::Ident(_) => {
+                        return None;
+                    }
+                    crate::ast::WhenValue::Currency { .. } => return None,
+                };
+                let matched = match cmp.op {
+                    CompareOp::Gt => field_val > threshold,
+                    CompareOp::Lt => field_val < threshold,
+                    CompareOp::GtEq => field_val >= threshold,
+                    CompareOp::LtEq => field_val <= threshold,
+                    CompareOp::Eq => (field_val - threshold).abs() < f64::EPSILON,
+                    CompareOp::NotEq => (field_val - threshold).abs() >= f64::EPSILON,
+                };
+                if !matched {
+                    return None;
+                }
+            }
+            AutoResolveCondition::IsOneOf { field, variants } => {
+                let field_val = json.get(field)?.as_str()?;
+                if !variants.iter().any(|v| v == field_val) {
+                    return None;
+                }
+            }
+        }
+    }
+
+    Some("auto_resolve conditions met".to_string())
 }
 
 /// Execute a workflow using its declared execution mode.
