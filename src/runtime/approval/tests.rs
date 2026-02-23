@@ -239,3 +239,80 @@ async fn resolve_handler_returns_webhook_for_webhook_channel() {
         "resolved webhook handler must reject on network failure; got {status:?}"
     );
 }
+
+// --- #358 Approval Audit Events ---
+
+#[tokio::test]
+async fn auditing_handler_logs_approval_requested_and_resolved() {
+    use crate::runtime::audit::{AuditKind, AuditLog};
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
+
+    let inner = AutoApproveHandler;
+    let handler = AuditingApprovalHandler::new(inner, Arc::clone(&log));
+
+    let approval = make_approval_for_channel("cli", "");
+    let status = handler
+        .request_approval("deploy", "Agent output", &approval)
+        .await;
+
+    assert_eq!(status, ApprovalStatus::Approved);
+
+    let entries = log.read_all().unwrap();
+    assert_eq!(entries.len(), 2, "expected ApprovalRequested + ApprovalResolved");
+
+    assert_eq!(entries[0].kind, AuditKind::ApprovalRequested);
+    assert!(entries[0].step.as_deref() == Some("deploy"));
+
+    assert_eq!(entries[1].kind, AuditKind::ApprovalResolved);
+    assert!(entries[1].step.as_deref() == Some("deploy"));
+    assert_eq!(entries[1].metadata["decision"], "approved");
+}
+
+#[tokio::test]
+async fn auditing_handler_records_rejected_decision() {
+    use crate::runtime::audit::{AuditKind, AuditLog};
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
+
+    let inner = AutoRejectHandler::new("policy violation");
+    let handler = AuditingApprovalHandler::new(inner, Arc::clone(&log));
+
+    let approval = make_approval_for_channel("cli", "");
+    let status = handler
+        .request_approval("review", "Agent output", &approval)
+        .await;
+
+    assert!(matches!(status, ApprovalStatus::Rejected { .. }));
+
+    let entries = log.read_all().unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[1].kind, AuditKind::ApprovalResolved);
+    assert_eq!(entries[1].metadata["decision"], "rejected");
+}
+
+#[tokio::test]
+async fn auditing_handler_records_channel_in_metadata() {
+    use crate::runtime::audit::AuditLog;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
+
+    let handler = AuditingApprovalHandler::new(AutoApproveHandler, Arc::clone(&log));
+    let approval = make_approval_for_channel("slack", "https://hooks.slack.com/fake");
+    handler
+        .request_approval("notify", "out", &approval)
+        .await;
+
+    let entries = log.read_all().unwrap();
+    assert_eq!(entries[0].metadata["channel"], "slack");
+    assert_eq!(entries[1].metadata["channel"], "slack");
+}

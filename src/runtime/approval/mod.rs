@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use crate::ast::{ApprovalDef, ApprovalKind};
+use crate::runtime::audit::{self, AuditKind, AuditLog};
 
 #[cfg(test)]
 mod tests;
@@ -268,6 +271,75 @@ impl ApprovalHandler for SlackApprovalHandler {
 
         // MVP: notify-and-auto-approve. Interactive callbacks are v2.
         ApprovalStatus::Approved
+    }
+}
+
+/// Wraps any `ApprovalHandler` and emits `ApprovalRequested` / `ApprovalResolved`
+/// audit entries before and after each approval decision.
+///
+/// This is the canonical way to add audit trails to approval flows — callers
+/// construct the appropriate inner handler and wrap it here.
+pub struct AuditingApprovalHandler<H> {
+    inner: H,
+    log: Arc<AuditLog>,
+}
+
+impl<H> AuditingApprovalHandler<H> {
+    pub fn new(inner: H, log: Arc<AuditLog>) -> Self {
+        Self { inner, log }
+    }
+}
+
+#[async_trait::async_trait]
+impl<H: ApprovalHandler> ApprovalHandler for AuditingApprovalHandler<H> {
+    async fn request_approval(
+        &self,
+        step_name: &str,
+        agent_output: &str,
+        approval: &ApprovalDef,
+    ) -> ApprovalStatus {
+        let start = std::time::Instant::now();
+
+        // Emit ApprovalRequested before delegating.
+        let mut requested = audit::entry(
+            AuditKind::ApprovalRequested,
+            format!("Approval requested for step '{step_name}'"),
+        );
+        requested.step = Some(step_name.to_string());
+        requested.metadata = serde_json::json!({
+            "channel": approval.channel,
+            "timeout": approval.timeout,
+        });
+        if let Err(e) = self.log.append(&requested) {
+            eprintln!("rein[audit]: warning: could not write ApprovalRequested entry: {e}");
+        }
+
+        let status = self.inner.request_approval(step_name, agent_output, approval).await;
+
+        let elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let decision = match &status {
+            ApprovalStatus::Approved => "approved",
+            ApprovalStatus::Rejected { .. } => "rejected",
+            ApprovalStatus::TimedOut => "timed_out",
+            ApprovalStatus::Pending => "pending",
+        };
+
+        // Emit ApprovalResolved after delegating.
+        let mut resolved = audit::entry(
+            AuditKind::ApprovalResolved,
+            format!("Approval resolved for step '{step_name}': {decision}"),
+        );
+        resolved.step = Some(step_name.to_string());
+        resolved.metadata = serde_json::json!({
+            "channel": approval.channel,
+            "decision": decision,
+            "elapsed_ms": elapsed_ms,
+        });
+        if let Err(e) = self.log.append(&resolved) {
+            eprintln!("rein[audit]: warning: could not write ApprovalResolved entry: {e}");
+        }
+
+        status
     }
 }
 

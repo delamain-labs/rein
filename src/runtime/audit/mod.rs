@@ -57,6 +57,10 @@ pub enum AuditKind {
     ToolDenied,
     /// Budget limit reached.
     BudgetExceeded,
+    /// Approval was requested for a workflow step.
+    ApprovalRequested,
+    /// Approval decision was recorded for a workflow step.
+    ApprovalResolved,
     /// Custom event.
     Custom(String),
 }
