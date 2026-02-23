@@ -125,6 +125,46 @@ fn ast_flag_invalid_file_exits_one() {
     );
 }
 
+// ── fmt command ───────────────────────────────────────────────────────────────
+
+// #353: rein fmt must exit non-zero and report an error for syntactically
+// invalid files instead of silently returning success.
+#[test]
+fn fmt_invalid_file_exits_nonzero() {
+    let out = Command::new(rein_bin())
+        .args(["fmt", example("invalid.rein").to_str().unwrap()])
+        .output()
+        .expect("failed to spawn rein");
+    assert_ne!(
+        out.status.code(),
+        Some(0),
+        "rein fmt must not exit 0 on an invalid file"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("syntax error") || stderr.contains("invalid.rein"),
+        "rein fmt must emit a diagnostic error message to stderr, got: {stderr}"
+    );
+}
+
+#[test]
+fn fmt_check_invalid_file_exits_nonzero() {
+    let out = Command::new(rein_bin())
+        .args(["fmt", "--check", example("invalid.rein").to_str().unwrap()])
+        .output()
+        .expect("failed to spawn rein");
+    assert_ne!(
+        out.status.code(),
+        Some(0),
+        "rein fmt --check must not exit 0 on an invalid file"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("syntax error") || stderr.contains("invalid.rein"),
+        "rein fmt --check must emit a diagnostic error message to stderr, got: {stderr}"
+    );
+}
+
 // ── error paths ───────────────────────────────────────────────────────────────
 
 #[test]

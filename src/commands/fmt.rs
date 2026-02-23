@@ -51,8 +51,25 @@ pub fn run_fmt(files: &[std::path::PathBuf], check: bool) -> i32 {
 }
 
 /// Format a .rein file source to canonical style.
+///
+/// # Errors
+/// Returns an error if the file cannot be read or contains syntax errors.
+/// Refusing to format syntactically invalid files prevents silent data loss
+/// (e.g. accidentally whitespace-normalising a broken file and masking errors).
 pub fn format_file(path: &Path) -> Result<String, std::io::Error> {
     let source = fs::read_to_string(path)?;
+    let (_, errors) = rein::parser::parse_collecting(&source);
+    if !errors.is_empty() {
+        let msg = errors
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("syntax error: {msg}"),
+        ));
+    }
     Ok(format_source(&source))
 }
 
