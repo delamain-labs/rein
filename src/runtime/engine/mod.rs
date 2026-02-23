@@ -409,9 +409,10 @@ impl<'a> AgentEngine<'a> {
                             allowed: false,
                             reason: Some(reason.clone()),
                         });
-                        state
-                            .messages
-                            .push(Message::tool(&tc_req.id, format!("Permission denied: {reason}")));
+                        state.messages.push(Message::tool(
+                            &tc_req.id,
+                            format!("Permission denied: {reason}"),
+                        ));
                     } else {
                         // Attribute this turn's LLM cost evenly across capped tools
                         // that are actually executing (not already over-cap).
