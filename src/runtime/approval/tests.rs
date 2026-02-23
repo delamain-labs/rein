@@ -262,7 +262,11 @@ async fn auditing_handler_logs_approval_requested_and_resolved() {
     assert_eq!(status, ApprovalStatus::Approved);
 
     let entries = log.read_all().unwrap();
-    assert_eq!(entries.len(), 2, "expected ApprovalRequested + ApprovalResolved");
+    assert_eq!(
+        entries.len(),
+        2,
+        "expected ApprovalRequested + ApprovalResolved"
+    );
 
     assert_eq!(entries[0].kind, AuditKind::ApprovalRequested);
     assert!(entries[0].step.as_deref() == Some("deploy"));
@@ -308,9 +312,7 @@ async fn auditing_handler_records_channel_in_metadata() {
 
     let handler = AuditingApprovalHandler::new(AutoApproveHandler, Arc::clone(&log));
     let approval = make_approval_for_channel("slack", "https://hooks.slack.com/fake");
-    handler
-        .request_approval("notify", "out", &approval)
-        .await;
+    handler.request_approval("notify", "out", &approval).await;
 
     let entries = log.read_all().unwrap();
     assert_eq!(entries[0].metadata["channel"], "slack");

@@ -314,7 +314,10 @@ impl<H: ApprovalHandler> ApprovalHandler for AuditingApprovalHandler<H> {
             eprintln!("rein[audit]: warning: could not write ApprovalRequested entry: {e}");
         }
 
-        let status = self.inner.request_approval(step_name, agent_output, approval).await;
+        let status = self
+            .inner
+            .request_approval(step_name, agent_output, approval)
+            .await;
 
         let elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
         let decision = match &status {

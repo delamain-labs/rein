@@ -94,24 +94,39 @@ fn serialization_roundtrip() {
 
 #[test]
 fn approval_requested_kind_serializes_correctly() {
-    let e = entry(AuditKind::ApprovalRequested, "Approval requested for step deploy");
+    let e = entry(
+        AuditKind::ApprovalRequested,
+        "Approval requested for step deploy",
+    );
     let json = serde_json::to_string(&e).unwrap();
-    assert!(json.contains("approval_requested"), "kind must serialize to snake_case");
+    assert!(
+        json.contains("approval_requested"),
+        "kind must serialize to snake_case"
+    );
 }
 
 #[test]
 fn approval_resolved_kind_serializes_correctly() {
-    let e = entry(AuditKind::ApprovalResolved, "Approval resolved for step deploy");
+    let e = entry(
+        AuditKind::ApprovalResolved,
+        "Approval resolved for step deploy",
+    );
     let json = serde_json::to_string(&e).unwrap();
-    assert!(json.contains("approval_resolved"), "kind must serialize to snake_case");
+    assert!(
+        json.contains("approval_resolved"),
+        "kind must serialize to snake_case"
+    );
 }
 
 #[test]
 fn query_by_approval_requested_kind() {
     let (_tmp, log) = test_log();
-    log.append(&entry(AuditKind::WorkflowStart, "start")).unwrap();
-    log.append(&entry(AuditKind::ApprovalRequested, "req")).unwrap();
-    log.append(&entry(AuditKind::ApprovalResolved, "res")).unwrap();
+    log.append(&entry(AuditKind::WorkflowStart, "start"))
+        .unwrap();
+    log.append(&entry(AuditKind::ApprovalRequested, "req"))
+        .unwrap();
+    log.append(&entry(AuditKind::ApprovalResolved, "res"))
+        .unwrap();
 
     let requested = log.query_by_kind(&AuditKind::ApprovalRequested).unwrap();
     assert_eq!(requested.len(), 1);
