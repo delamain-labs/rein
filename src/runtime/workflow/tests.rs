@@ -1357,6 +1357,99 @@ async fn step_with_audit_log_records_approval_events() {
     }
 }
 
+/// #358 — When `audit_log` is `None`, the inner handler is called exactly once.
+/// This pins the no-audit code path: `run_step` must not wrap the handler or
+/// call it more than once when no audit log is configured.
+#[tokio::test]
+async fn step_without_audit_log_calls_handler_exactly_once() {
+    use crate::ast::{ApprovalDef, ApprovalKind, Span as AstSpan};
+    use crate::runtime::approval::{ApprovalHandler, ApprovalStatus};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingHandler(Arc<AtomicUsize>);
+
+    #[async_trait::async_trait]
+    impl ApprovalHandler for CountingHandler {
+        async fn request_approval(
+            &self,
+            _step: &str,
+            _output: &str,
+            _approval: &crate::ast::ApprovalDef,
+        ) -> ApprovalStatus {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            ApprovalStatus::Approved
+        }
+    }
+
+    let call_count = Arc::new(AtomicUsize::new(0));
+    let handler: Arc<dyn ApprovalHandler> = Arc::new(CountingHandler(Arc::clone(&call_count)));
+
+    let file = parse_file(r#"agent writer { model: openai }"#);
+    let workflow = WorkflowDef {
+        name: "no_audit_workflow".to_string(),
+        trigger: "start".to_string(),
+        stages: vec![],
+        steps: vec![crate::ast::StepDef {
+            name: "gated_step".to_string(),
+            agent: "writer".to_string(),
+            goal: None,
+            input: None,
+            output_constraints: vec![],
+            depends_on: vec![],
+            when: None,
+            on_failure: None,
+            send_to: None,
+            fallback: None,
+            for_each: None,
+            typed_input: None,
+            typed_outputs: vec![],
+            escalate: None,
+            approval: Some(ApprovalDef {
+                kind: ApprovalKind::Approve,
+                channel: "cli".to_string(),
+                destination: String::new(),
+                timeout: None,
+                mode: None,
+                span: AstSpan::new(0, 1),
+            }),
+            span: AstSpan::new(0, 1),
+        }],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("done"));
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: Some(handler),
+        audit_log: None, // no audit log — no AuditingApprovalHandler wrapping
+    };
+
+    run_workflow(&workflow, &ctx)
+        .await
+        .expect("workflow should succeed");
+
+    // The handler must be called exactly once — not zero times (skipped) or
+    // twice (double-delegation bug).
+    assert_eq!(
+        call_count.load(Ordering::Relaxed),
+        1,
+        "inner handler must be called exactly once when audit_log is None"
+    );
+}
+
 // --- #303 DAG depends_on Tests ---
 
 fn make_step(name: &str, agent: &str, depends_on: Vec<&str>) -> StepDef {

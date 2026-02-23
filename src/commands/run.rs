@@ -1,6 +1,10 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+// This function is inherently sequential setup code (parse → validate →
+// build provider → attach engine extensions → dispatch). Extracting it
+// further would require artificial helpers with awkward return types.
+#[allow(clippy::too_many_lines)]
 pub fn run_agent(
     path: &std::path::Path,
     message: Option<&str>,
@@ -59,17 +63,13 @@ pub fn run_agent(
         }
     };
 
-    // Build permission registry from agent capabilities.
     let registry = rein::runtime::permissions::ToolRegistry::from_agent(agent);
-
-    // Build run config.
     let config = rein::runtime::engine::RunConfig {
         system_prompt: None,
         max_turns: 10,
         budget_cents: agent.budget.as_ref().map_or(0, |b| b.amount),
     };
 
-    // Build engine with enforcement.
     let executor = rein::runtime::executor::NoopExecutor;
     let mut engine = rein::runtime::engine::AgentEngine::new(
         provider.as_ref(),
@@ -80,19 +80,16 @@ pub fn run_agent(
     )
     .with_stream(Box::new(rein::runtime::engine::StdoutStream));
 
-    // Attach guardrails if defined.
     if let Some(ref guardrails_def) = agent.guardrails {
         let guardrail_engine = rein::runtime::guardrails::GuardrailEngine::from_def(guardrails_def);
         engine = engine.with_guardrails(guardrail_engine);
     }
 
-    // Attach circuit breaker if defined.
     if let Some(cb_def) = file.circuit_breakers.first() {
         let cb = rein::runtime::circuit_breaker::CircuitBreaker::from_def(cb_def);
         engine = engine.with_circuit_breaker(cb);
     }
 
-    // Resolve and inject secrets if defined.
     if !file.secrets.is_empty() {
         match resolve_secrets(&file.secrets) {
             Ok(map) => engine = engine.with_secrets(map),
@@ -104,7 +101,7 @@ pub fn run_agent(
     if let Some(policy_def) = file.policies.first() {
         let policy = rein::runtime::policy::PolicyEngine::from_def(policy_def);
         eprintln!(
-            "Policy: starting at tier '{}' ({} tiers defined)",
+            "Policy: tier '{}' ({} total)",
             policy.current_tier(),
             policy.tier_count()
         );
@@ -135,9 +132,7 @@ pub fn run_agent(
         );
     }
 
-    // `--audit-log` is only supported for workflow runs. Warn so operators know
-    // the flag had no effect rather than silently discarding it.
-    // TODO(#377): replace with tracing::warn! once `tracing` is in Cargo.toml.
+    // `--audit-log` only applies to workflow runs. TODO(#377): tracing::warn!
     if audit_log.is_some() {
         eprintln!("warn: --audit-log has no effect for single-agent runs (workflows only)");
     }
@@ -168,7 +163,7 @@ fn run_workflow_mode(
         Err(e) => {
             // TODO(#377): replace with tracing::warn! once `tracing` is in Cargo.toml.
             eprintln!(
-                "warn: could not open audit log '{}': {e} — \
+                "warn: could not initialize audit log '{}': {e} — \
                  approval audit will be skipped for this run",
                 p.display()
             );
