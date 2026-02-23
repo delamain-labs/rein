@@ -466,7 +466,9 @@ pub async fn run_steps(
                 let fallback_name = step
                     .fallback
                     .as_ref()
-                    .map_or_else(|| "unknown".to_string(), |f| f.name.clone());
+                    .expect("run_step: fallback_used is only true when step.fallback is Some")
+                    .name
+                    .clone();
                 evts.push(super::RunEvent::StepFallback {
                     step: step.name.clone(),
                     fallback_step: fallback_name,
@@ -545,7 +547,9 @@ async fn run_step_for_each(
             let fallback_name = step
                 .fallback
                 .as_ref()
-                .map_or_else(|| "unknown".to_string(), |f| f.name.clone());
+                .expect("run_step_for_each: fallback_used is only true when step.fallback is Some (empty items path)")
+                .name
+                .clone();
             evts.push(super::RunEvent::StepFallback {
                 step: step.name.clone(),
                 fallback_step: fallback_name,
@@ -576,7 +580,9 @@ async fn run_step_for_each(
             let fallback_name = step
                 .fallback
                 .as_ref()
-                .map_or_else(|| "unknown".to_string(), |f| f.name.clone());
+                .expect("run_step_for_each: fallback_used is only true when step.fallback is Some (iteration path)")
+                .name
+                .clone();
             events.push(super::RunEvent::StepFallback {
                 step: step.name.clone(),
                 fallback_step: fallback_name,
@@ -611,6 +617,11 @@ async fn run_step_for_each(
 /// if any condition is not met or the output cannot be parsed as JSON.
 fn auto_resolve_matches(output: &str, ar: &crate::ast::AutoResolveBlock) -> Option<String> {
     use crate::ast::{AutoResolveCondition, CompareOp};
+
+    // An empty conditions block must never trigger resolution.
+    if ar.conditions.is_empty() {
+        return None;
+    }
 
     let json: serde_json::Value = serde_json::from_str(output).ok()?;
 

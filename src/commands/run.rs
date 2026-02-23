@@ -168,6 +168,12 @@ fn run_workflow_mode(
                 result.stage_results.len()
             );
             eprintln!("Final output: {}", result.final_output);
+            if !result.events.is_empty() {
+                eprintln!(
+                    "{}",
+                    rein::runtime::RunTrace::summarize_events(&result.events)
+                );
+            }
             eprintln!("Duration: {duration:.2?}");
             0
         }
