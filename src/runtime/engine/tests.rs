@@ -913,7 +913,9 @@ async fn stage_timeout_fires_when_provider_hangs() {
     struct HangingProvider;
     #[async_trait::async_trait]
     impl crate::runtime::provider::Provider for HangingProvider {
-        fn name(&self) -> &'static str { "hanging" }
+        fn name(&self) -> &'static str {
+            "hanging"
+        }
         async fn chat(
             &self,
             _messages: &[Message],

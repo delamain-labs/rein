@@ -255,18 +255,15 @@ impl<'a> AgentEngine<'a> {
 
             let chat_future = self.provider.chat(&state.messages, &self.tool_defs);
             let chat_result = if let Some(secs) = self.config.stage_timeout_secs {
-                tokio::time::timeout(
-                    std::time::Duration::from_secs(secs),
-                    chat_future,
-                )
-                .await
-                .map_err(|_elapsed| {
-                    state.events.push(super::RunEvent::StageTimeout {
-                        turn,
-                        timeout_secs: secs,
-                    });
-                    RunError::Timeout
-                })?
+                tokio::time::timeout(std::time::Duration::from_secs(secs), chat_future)
+                    .await
+                    .map_err(|_elapsed| {
+                        state.events.push(super::RunEvent::StageTimeout {
+                            turn,
+                            timeout_secs: secs,
+                        });
+                        RunError::Timeout
+                    })?
             } else {
                 chat_future.await
             };
