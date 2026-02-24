@@ -32,7 +32,13 @@ The `editors/vscode/` directory contains a first-party extension with syntax hig
    ```bash
    cp -r editors/vscode ~/.vscode/extensions/rein-lang
    ```
-   Or open the `editors/vscode/` folder in VS Code and run **"Install Extension from VSIX"** if you've built it.
+   Or build and install from source:
+   ```bash
+   cd editors/vscode
+   npm install
+   npm run compile
+   # Then reload VS Code — the extension loads from the directory above.
+   ```
 
 3. Open a `.rein` file — syntax highlighting and diagnostics activate automatically.
 
@@ -108,7 +114,7 @@ parser_config.rein = {
   install_info = {
     url = "https://github.com/delamain-labs/rein",
     files = { "tree-sitter-rein/src/parser.c" },
-    branch = "master",
+    branch = "main",
   },
   filetype = "rein",
 }

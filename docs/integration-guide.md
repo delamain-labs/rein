@@ -105,74 +105,29 @@ rein serve agents/assistant.rein --port 4000
 
 ### Endpoints
 
-#### `POST /run`
-
-Run the agent defined in the loaded policy file.
-
-**Request:**
-```json
-{
-  "message": "Your prompt here"
-}
-```
-
-**Response (success):**
-```json
-{
-  "output": "Agent response text",
-  "cost_cents": 12,
-  "tokens": 450,
-  "events": [...]
-}
-```
-
-**Response (error):**
-```json
-{
-  "error": "budget exceeded",
-  "code": "budget_exceeded"
-}
-```
-
-**Status codes:**
-- `200` — Success
-- `400` — Bad request (missing `message` field)
-- `422` — Policy violation or permission denied
-- `500` — Provider error or infra failure
-
 #### `GET /health`
 
 Returns `200 OK` with body `{"status": "ok"}` when the server is running.
 
-### Python client example
+#### `GET /api/v1/agents`
 
-```python
-import httpx
+Returns a JSON array of agents defined in the loaded `.rein` file.
 
-client = httpx.Client(base_url="http://localhost:4000")
+#### `GET /api/v1/workflows`
 
-response = client.post("/run", json={"message": "Summarize this"})
-response.raise_for_status()
-print(response.json()["output"])
-```
+Returns a JSON array of workflows defined in the loaded `.rein` file.
 
-### Node.js client example
+#### `GET /api/v1/types`
 
-```javascript
-const response = await fetch('http://localhost:4000/run', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ message: 'Summarize this' }),
-});
+Returns metadata about supported block types and field names.
 
-if (!response.ok) {
-  const err = await response.json();
-  throw new Error(`rein error: ${err.error}`);
-}
+#### `GET /api/v1/audit`
 
-const data = await response.json();
-console.log(data.output);
-```
+Returns the audit log entries recorded during the server's lifetime.
+
+> **Note:** `rein serve` exposes a read-only inspection API over the loaded file.
+> Agent execution (`rein run`) is a CLI-only operation — there is no `POST /run`
+> HTTP endpoint. Use the subprocess approach above to invoke agents from other services.
 
 ---
 
