@@ -129,7 +129,9 @@ impl AuditLog {
             // Probe writability via a temp file in the same directory without
             // creating or touching the target file. The temp file is created and
             // immediately removed so it leaves no side effect.
-            let probe = parent.join(".rein-audit-probe");
+            // Use generate_id() suffix to avoid collisions when multiple processes
+            // or parallel test threads create audit logs in the same directory.
+            let probe = parent.join(format!(".rein-audit-probe-{}", Self::generate_id()));
             fs::File::create(&probe)?;
             fs::remove_file(&probe)?;
         }

@@ -352,14 +352,19 @@ impl ApprovalHandler for AuditingApprovalHandler {
         requested.step = Some(step_name.to_string());
         requested.workflow = self.workflow_name.clone();
         requested.agent = self.agent_name.clone();
-        let output_preview = if agent_output.len() > OUTPUT_PREVIEW_LIMIT {
-            format!("{}… (truncated)", &agent_output[..OUTPUT_PREVIEW_LIMIT])
+        // floor_char_boundary ensures the slice ends on a valid UTF-8 boundary
+        // even when the input contains multibyte characters.
+        let cut = agent_output.floor_char_boundary(OUTPUT_PREVIEW_LIMIT);
+        let truncated = agent_output.len() > OUTPUT_PREVIEW_LIMIT;
+        let output_preview = if truncated {
+            format!("{}… (truncated)", &agent_output[..cut])
         } else {
             agent_output.to_string()
         };
         let mut req_meta = serde_json::json!({
             "channel": approval.channel,
             "agent_output": output_preview,
+            "agent_output_truncated": truncated,
         });
         if let Some(ref t) = approval.timeout {
             req_meta["timeout"] = serde_json::Value::String(t.clone());
