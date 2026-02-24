@@ -804,12 +804,8 @@ pub(crate) async fn run_steps(
     };
 
     for (index, step) in ordered.into_iter().enumerate() {
-        if let Some(outcome) = handle_skip_guard(step, &mut state) {
-            match outcome {
-                StepOutcome::Continue => continue,
-                StepOutcome::AutoResolved => break,
-                StepOutcome::HardError(_) => unreachable!("skip-guard never returns HardError"),
-            }
+        if handle_skip_guard(step, &mut state) {
+            continue;
         }
 
         match execute_step_in_dag(step, index, &trigger_input, workflow, ctx, &mut state).await {
@@ -830,14 +826,17 @@ pub(crate) async fn run_steps(
 
 /// Apply cascade-skip logic for a step whose dependency is blocked.
 ///
-/// Returns `Some(StepOutcome::Continue)` when the step was skipped (caller
-/// should `continue` the loop), or `None` when the step has no blocked
-/// dependency and should proceed to execution.
-fn handle_skip_guard(step: &crate::ast::StepDef, state: &mut StepLoopState) -> Option<StepOutcome> {
-    let failed_dep = step
+/// Returns `true` when the step was skipped (caller should `continue` the
+/// loop), or `false` when the step has no blocked dependency and should
+/// proceed to execution.
+fn handle_skip_guard(step: &crate::ast::StepDef, state: &mut StepLoopState) -> bool {
+    let Some(failed_dep) = step
         .depends_on
         .iter()
-        .find(|dep| state.blocked_steps.contains(*dep))?;
+        .find(|dep| state.blocked_steps.contains(*dep))
+    else {
+        return false;
+    };
 
     let reason = format!("dependency '{failed_dep}' failed");
     state.events.push(super::RunEvent::StepSkipped {
@@ -866,7 +865,7 @@ fn handle_skip_guard(step: &crate::ast::StepDef, state: &mut StepLoopState) -> O
     });
     // Also mark this step as blocked so its own dependents are skipped.
     state.blocked_steps.insert(step.name.clone());
-    Some(StepOutcome::Continue)
+    true
 }
 
 /// Execute one step in the DAG loop body.
