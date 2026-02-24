@@ -546,6 +546,7 @@ pub struct TraceStats {
     ///
     /// A non-zero value indicates the agent hit the `stage_timeout_secs` limit
     /// at least once during the run; useful for alerting on timeout rate.
+    #[serde(default)]
     pub timeout_count: u64,
 }
 
