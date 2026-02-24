@@ -63,6 +63,15 @@ fn print_summary(traces: &[StructuredTrace]) {
         .expect("failed to write cost summary to stdout");
 }
 
+/// Accumulated per-agent statistics for the cost summary.
+#[derive(Default)]
+struct AgentAccum {
+    cost_cents: u64,
+    tokens: u64,
+    runs: u64,
+    timeouts: u64,
+}
+
 /// Write the cost summary to `out`.
 ///
 /// Extracted from `print_summary` so unit tests can capture output without
@@ -77,17 +86,15 @@ fn print_summary_to(traces: &[StructuredTrace], out: &mut impl Write) -> io::Res
     let total_duration: u64 = traces.iter().map(|t| t.stats.duration_ms).sum();
     let total_timeouts: u64 = traces.iter().map(|t| t.stats.timeout_count).sum();
 
-    // Per-agent breakdown: (cost_cents, tokens, runs, timeouts)
-    let mut agent_costs: std::collections::HashMap<String, (u64, u64, u64, u64)> =
+    // Per-agent breakdown
+    let mut agent_costs: std::collections::HashMap<String, AgentAccum> =
         std::collections::HashMap::new();
     for trace in traces {
-        let entry = agent_costs
-            .entry(trace.agent.clone())
-            .or_insert((0, 0, 0, 0));
-        entry.0 += trace.stats.total_cost_cents;
-        entry.1 += trace.stats.total_tokens;
-        entry.2 += 1;
-        entry.3 += trace.stats.timeout_count;
+        let entry = agent_costs.entry(trace.agent.clone()).or_default();
+        entry.cost_cents += trace.stats.total_cost_cents;
+        entry.tokens += trace.stats.total_tokens;
+        entry.runs += 1;
+        entry.timeouts += trace.stats.timeout_count;
     }
 
     writeln!(out, "Cost Summary")?;
@@ -118,21 +125,26 @@ fn print_summary_to(traces: &[StructuredTrace], out: &mut impl Write) -> io::Res
         writeln!(out, "Per Agent")?;
         writeln!(out, "---------")?;
         let mut agents: Vec<_> = agent_costs.into_iter().collect();
-        agents.sort_by(|a, b| b.1.0.cmp(&a.1.0));
-        for (agent, (cost, tokens, runs, timeouts)) in agents {
-            if timeouts > 0 {
+        agents.sort_by(|a, b| b.1.cost_cents.cmp(&a.1.cost_cents));
+        for (agent, accum) in agents {
+            if accum.timeouts > 0 {
                 writeln!(
                     out,
                     "  {agent}: ${}.{:02} ({tokens} tokens, {runs} runs, {timeouts} timeouts)",
-                    cost / 100,
-                    cost % 100
+                    accum.cost_cents / 100,
+                    accum.cost_cents % 100,
+                    tokens = accum.tokens,
+                    runs = accum.runs,
+                    timeouts = accum.timeouts
                 )?;
             } else {
                 writeln!(
                     out,
                     "  {agent}: ${}.{:02} ({tokens} tokens, {runs} runs)",
-                    cost / 100,
-                    cost % 100
+                    accum.cost_cents / 100,
+                    accum.cost_cents % 100,
+                    tokens = accum.tokens,
+                    runs = accum.runs
                 )?;
             }
         }
@@ -271,16 +283,47 @@ mod tests {
         print_summary_to(&[t1, t2], &mut buf).unwrap();
         let output = String::from_utf8(buf).unwrap();
 
-        let agent_a_line = output.lines().find(|l| l.contains("agent_a")).unwrap_or("");
+        let agent_a_line = output
+            .lines()
+            .find(|l| l.contains("agent_a"))
+            .expect("agent_a line must appear in per-agent breakdown");
         assert!(
             agent_a_line.contains("2 timeouts"),
             "per-agent line for agent_a must include timeout count when non-zero; got:\n{output}"
         );
 
-        let agent_b_line = output.lines().find(|l| l.contains("agent_b")).unwrap_or("");
+        let agent_b_line = output
+            .lines()
+            .find(|l| l.contains("agent_b"))
+            .expect("agent_b line must appear in per-agent breakdown");
         assert!(
             !agent_b_line.contains("timeouts"),
             "per-agent line for agent_b must NOT include timeout count when zero; got:\n{output}"
+        );
+    }
+
+    /// #518: Per-agent timeout count must be summed across multiple traces for
+    /// the same agent (each trace contribution is aggregated, not overwritten).
+    #[test]
+    fn print_summary_per_agent_aggregates_timeouts_across_traces() {
+        // Two traces for the same agent, each with a non-zero timeout_count.
+        let mut t1 = make_trace("bot", 200, 1000);
+        t1.stats.timeout_count = 2;
+        let mut t2 = make_trace("bot", 300, 1500);
+        t2.stats.timeout_count = 3;
+        // A second agent with no timeouts — keeps per-agent section active.
+        let t3 = make_trace("helper", 100, 500);
+        let mut buf = Vec::new();
+        print_summary_to(&[t1, t2, t3], &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+
+        let bot_line = output
+            .lines()
+            .find(|l| l.contains("bot"))
+            .expect("bot line must appear in per-agent breakdown");
+        assert!(
+            bot_line.contains("5 timeouts"),
+            "per-agent line for bot must show summed timeout count (2+3=5); got:\n{output}"
         );
     }
 
