@@ -92,6 +92,10 @@ enum Command {
         /// Abort the entire run if it exceeds this many seconds (wall clock)
         #[arg(long)]
         run_timeout: Option<u64>,
+        /// Reject any vault: secret source that falls back to a VAULT_* env var.
+        /// Use this in production to enforce that real Vault is configured.
+        #[arg(long)]
+        strict_secrets: bool,
     },
     /// Run scenario and eval blocks in a .rein file
     ///
@@ -157,6 +161,7 @@ async fn main() {
             audit_log,
             stage_timeout,
             run_timeout,
+            strict_secrets,
         } => {
             let exit_code = commands::run::run_agent(
                 &file,
@@ -167,6 +172,7 @@ async fn main() {
                 audit_log.as_deref(),
                 stage_timeout,
                 run_timeout,
+                strict_secrets,
             );
             process::exit(exit_code);
         }
