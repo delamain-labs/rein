@@ -1009,10 +1009,10 @@ async fn no_timeout_when_stage_timeout_secs_is_none() {
 }
 
 // #355: stage_timeout_secs = 0 is treated as no timeout (same as None).
-// A zero-second duration would fire immediately before any I/O, so it is
-// filtered out in call_provider_with_timeout to prevent a footgun.
+// #391: stage_timeout_secs=0 is rejected early with ConfigError — a zero-second
+// timeout would fire before any I/O, giving a confusing failure.
 #[tokio::test]
-async fn zero_stage_timeout_treated_as_no_timeout() {
+async fn zero_stage_timeout_returns_config_error() {
     let agent = make_agent(vec![], vec![], None);
     let registry = ToolRegistry::from_agent(&agent);
     let executor = MockExecutor::new();
@@ -1030,11 +1030,10 @@ async fn zero_stage_timeout_treated_as_no_timeout() {
         },
     );
 
-    let result = engine.run("hello").await;
+    let err = engine.run("hello").await.unwrap_err();
     assert!(
-        result.is_ok(),
-        "stage_timeout_secs=0 should not block the run: {:?}",
-        result
+        matches!(err, RunError::ConfigError),
+        "stage_timeout_secs=0 must return ConfigError; got: {err:?}"
     );
 }
 
