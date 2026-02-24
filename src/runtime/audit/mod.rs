@@ -101,6 +101,26 @@ pub enum AuditKind {
     Custom(String),
 }
 
+/// An abstraction over the audit append operation.
+///
+/// Implementors write audit entries to their backing store (file, database,
+/// in-memory buffer for tests, etc.). `AuditingApprovalHandler<S: AuditSink>`
+/// is parameterized over this trait so callers can supply any implementation
+/// without file I/O or `tempfile` dependencies in unit tests. (#418)
+pub trait AuditSink: Send + Sync {
+    /// Append a single audit entry to the backing store.
+    ///
+    /// # Errors
+    /// Returns `AuditError` if the entry cannot be serialized or written.
+    fn append(&self, entry: &AuditEntry) -> Result<(), AuditError>;
+}
+
+impl AuditSink for AuditLog {
+    fn append(&self, entry: &AuditEntry) -> Result<(), AuditError> {
+        self.append(entry)
+    }
+}
+
 /// Persistent audit log backed by JSON-lines files.
 ///
 /// Writes are serialized via an internal `Mutex<Option<BufWriter<File>>>` so

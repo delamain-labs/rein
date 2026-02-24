@@ -1615,3 +1615,51 @@ async fn auditing_handler_with_context_sets_workflow_and_agent() {
         "with_context must set agent_name"
     );
 }
+
+// --- #418: AuditSink trait ---
+
+/// #418: AuditingApprovalHandler must accept any AuditSink, not just AuditLog.
+/// An in-memory sink lets tests verify audit output without file I/O or tempfiles.
+#[tokio::test]
+async fn auditing_handler_accepts_in_memory_audit_sink() {
+    use crate::runtime::audit::{AuditEntry, AuditError, AuditSink};
+    use std::sync::Mutex;
+
+    // In-memory sink for tests — no file I/O needed.
+    struct InMemoryAuditSink {
+        entries: Mutex<Vec<AuditEntry>>,
+    }
+    impl InMemoryAuditSink {
+        fn new() -> Self {
+            Self {
+                entries: Mutex::new(vec![]),
+            }
+        }
+        fn drain(&self) -> Vec<AuditEntry> {
+            self.entries.lock().unwrap().clone()
+        }
+    }
+    impl AuditSink for InMemoryAuditSink {
+        fn append(&self, entry: &AuditEntry) -> Result<(), AuditError> {
+            self.entries.lock().unwrap().push(entry.clone());
+            Ok(())
+        }
+    }
+
+    let sink = Arc::new(InMemoryAuditSink::new());
+    let handler = AuditingApprovalHandler::new(Arc::new(AutoApproveHandler), Arc::clone(&sink));
+    let approval = make_approval();
+    let status = handler
+        .request_approval("deploy", "Agent output", &approval)
+        .await;
+    assert_eq!(status, ApprovalStatus::Approved);
+
+    let entries = sink.drain();
+    assert_eq!(
+        entries.len(),
+        2,
+        "in-memory sink must capture ApprovalRequested + ApprovalResolved without file I/O"
+    );
+    assert_eq!(entries[0].kind, AuditKind::ApprovalRequested);
+    assert_eq!(entries[1].kind, AuditKind::ApprovalResolved);
+}
