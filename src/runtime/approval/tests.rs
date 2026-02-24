@@ -929,6 +929,109 @@ async fn resolve_handler_webhook_with_audit_log_emits_audit_entries_on_2xx() {
     assert_eq!(entries[1].metadata["decision"], "approved");
 }
 
+/// #525: When the webhook endpoint returns 4xx, resolve_approval_handler("webhook")
+/// wrapped in AuditingApprovalHandler must record decision = "rejected" in the
+/// ApprovalResolved audit entry.
+#[tokio::test]
+async fn resolve_handler_webhook_with_audit_log_records_rejected_on_4xx() {
+    use crate::runtime::audit::{AuditKind, AuditLog};
+    use std::sync::Arc;
+    use tempfile::TempDir;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/approval"))
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&server)
+        .await;
+
+    let tmp = TempDir::new().unwrap();
+    let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
+
+    let url = format!("{}/approval", server.uri());
+    let approval = make_approval_for_channel("webhook", &url);
+    let inner = resolve_approval_handler(&approval);
+    let handler = AuditingApprovalHandler::new(Arc::from(inner), Arc::clone(&log));
+
+    let status = handler
+        .request_approval("deploy", "Agent output here", &approval)
+        .await;
+
+    assert!(
+        matches!(status, ApprovalStatus::Rejected { .. }),
+        "resolved webhook handler must reject on 4xx; got {status:?}"
+    );
+
+    let entries = log.read_all().unwrap();
+    assert_eq!(
+        entries.len(),
+        2,
+        "expected ApprovalRequested + ApprovalResolved; got {} entries",
+        entries.len()
+    );
+    assert_eq!(entries[0].kind, AuditKind::ApprovalRequested);
+    assert_eq!(
+        entries[0].step.as_deref(),
+        Some("deploy"),
+        "step must be set on ApprovalRequested"
+    );
+    assert_eq!(entries[1].kind, AuditKind::ApprovalResolved);
+    assert_eq!(
+        entries[1].step.as_deref(),
+        Some("deploy"),
+        "step must be set on ApprovalResolved"
+    );
+    assert_eq!(
+        entries[1].metadata["decision"], "rejected",
+        "decision must be 'rejected' when webhook returns 4xx"
+    );
+}
+
+/// #525: When the webhook endpoint returns 5xx, AuditingApprovalHandler must
+/// also record decision = "rejected" (fail-closed contract — non-2xx is never approval).
+#[tokio::test]
+async fn resolve_handler_webhook_with_audit_log_records_rejected_on_5xx() {
+    use crate::runtime::audit::{AuditKind, AuditLog};
+    use std::sync::Arc;
+    use tempfile::TempDir;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/approval"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+
+    let tmp = TempDir::new().unwrap();
+    let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
+
+    let url = format!("{}/approval", server.uri());
+    let approval = make_approval_for_channel("webhook", &url);
+    let inner = resolve_approval_handler(&approval);
+    let handler = AuditingApprovalHandler::new(Arc::from(inner), Arc::clone(&log));
+
+    let status = handler
+        .request_approval("deploy", "Agent output here", &approval)
+        .await;
+
+    assert!(
+        matches!(status, ApprovalStatus::Rejected { .. }),
+        "resolved webhook handler must reject on 5xx; got {status:?}"
+    );
+
+    let entries = log.read_all().unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[1].kind, AuditKind::ApprovalResolved);
+    assert_eq!(
+        entries[1].metadata["decision"], "rejected",
+        "decision must be 'rejected' when webhook returns 5xx"
+    );
+}
+
 /// #511: When approval_handler is None and channel is "slack", resolve_approval_handler
 /// must return a SlackApprovalHandler that, when wrapped by AuditingApprovalHandler,
 /// emits ApprovalRequested + ApprovalResolved audit entries (slack auto-approves on success).
