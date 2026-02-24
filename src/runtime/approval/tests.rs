@@ -506,7 +506,7 @@ async fn approval_requested_truncates_long_agent_output() {
     assert_eq!(entries[0].kind, AuditKind::ApprovalRequested);
     let recorded = entries[0].metadata["agent_output"].as_str().unwrap();
     // The maximum recorded length is AGENT_OUTPUT_PREVIEW_LIMIT bytes + TRUNCATION_MARKER.
-    // Both constants are on AuditingApprovalHandler so they stay in sync with production.
+    // Both constants are module-level in approval/mod.rs so they stay in sync with production.
     let max_expected = AGENT_OUTPUT_PREVIEW_LIMIT
         + TRUNCATION_MARKER.len();
     assert!(

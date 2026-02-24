@@ -389,7 +389,9 @@ impl ApprovalHandler for AuditingApprovalHandler {
         // Truncate agent_output to AGENT_OUTPUT_PREVIEW_LIMIT bytes to avoid unbounded audit
         // log growth. floor_char_boundary (inside truncate_agent_output) ensures the slice
         // ends on a valid UTF-8 boundary even when the input contains multibyte characters.
-        // `truncated` is derived from the Cow variant — Owned means a cut was made (#519).
+        // INVARIANT: truncate_agent_output returns Cow::Owned only when a cut was made.
+        // If that function is ever changed to return Owned for other reasons (e.g. normalization),
+        // this bool would silently lie to compliance consumers — update the derivation then.
         let output_preview = truncate_agent_output(agent_output);
         let truncated = matches!(output_preview, Cow::Owned(_));
         let mut req_meta = serde_json::json!({

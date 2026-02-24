@@ -30,6 +30,21 @@ grouped by type: **Breaking**, **Added**, **Changed**, **Fixed**, **Removed**.
   that relied on any failure producing exit `1` should check for non-zero exit
   with `[ $? -ne 0 ]` or test for `$? -ge 1`.
 
+- **`AGENT_OUTPUT_PREVIEW_LIMIT` and `TRUNCATION_MARKER` moved to module level** (PR #521)
+
+  Previously these were associated constants on `AuditingApprovalHandler`:
+  ```
+  rein::runtime::approval::AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT
+  rein::runtime::approval::AuditingApprovalHandler::TRUNCATION_MARKER
+  ```
+  They are now module-level `pub const` items:
+  ```
+  rein::runtime::approval::AGENT_OUTPUT_PREVIEW_LIMIT
+  rein::runtime::approval::TRUNCATION_MARKER
+  ```
+  **Migration:** Update any reference to the old associated-constant path. The
+  values are unchanged.
+
 - **`RunError::BudgetExceeded` wire format changed** (PR #479)
 
   Previously serialized as the bare string `"budget_exceeded"`. Now serializes
