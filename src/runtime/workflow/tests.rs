@@ -2251,6 +2251,123 @@ async fn run_steps_emits_step_started_and_completed() {
     );
 }
 
+/// #403: StepStarted must precede StepCompleted in event ordering.
+#[tokio::test]
+async fn step_started_precedes_step_completed_in_event_order() {
+    let file = parse_file("agent worker { model: openai }");
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    provider.push_response(simple_response("done"));
+
+    let step = make_step("do_work", "worker", vec![]);
+    let workflow = WorkflowDef {
+        name: "wf".to_string(),
+        trigger: "go".to_string(),
+        stages: vec![],
+        steps: vec![step],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let (_, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
+
+    let started_pos = events
+        .iter()
+        .position(|e| matches!(e, crate::runtime::RunEvent::StepStarted { step, .. } if step == "do_work"))
+        .expect("StepStarted must be emitted");
+    let completed_pos = events
+        .iter()
+        .position(
+            |e| matches!(e, crate::runtime::RunEvent::StepCompleted { step } if step == "do_work"),
+        )
+        .expect("StepCompleted must be emitted");
+
+    assert!(
+        started_pos < completed_pos,
+        "StepStarted (pos {started_pos}) must precede StepCompleted (pos {completed_pos})"
+    );
+}
+
+/// #404: Two-step workflow must emit StepStarted with index 0 then index 1 in order.
+#[tokio::test]
+async fn multi_step_step_started_index_sequence() {
+    let file = parse_file("agent worker { model: openai }");
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    provider.push_response(simple_response("step-a done"));
+    provider.push_response(simple_response("step-b done"));
+
+    let step_a = make_step("step_a", "worker", vec![]);
+    let step_b = make_step("step_b", "worker", vec![]);
+    let workflow = WorkflowDef {
+        name: "wf".to_string(),
+        trigger: "go".to_string(),
+        stages: vec![],
+        steps: vec![step_a, step_b],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let (_, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
+
+    let started_events: Vec<_> = events
+        .iter()
+        .filter_map(|e| {
+            if let crate::runtime::RunEvent::StepStarted { step, index } = e {
+                Some((step.clone(), *index))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    assert_eq!(
+        started_events.len(),
+        2,
+        "expected 2 StepStarted events; got: {started_events:?}"
+    );
+    assert_eq!(
+        started_events[0],
+        ("step_a".to_string(), 0),
+        "first step must be index 0"
+    );
+    assert_eq!(
+        started_events[1],
+        ("step_b".to_string(), 1),
+        "second step must be index 1"
+    );
+}
+
 /// Tests that `run_steps` returns partial success when a step's agent is not
 /// found. Under the partial-success model, `AgentNotFound` is a soft error:
 /// `run_steps` returns `Ok` with a `StepFailed` event in the trace rather
