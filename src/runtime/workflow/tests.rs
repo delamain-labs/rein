@@ -1382,6 +1382,124 @@ async fn step_with_audit_log_records_approval_events() {
     }
 }
 
+/// #433 — Audit entries emitted inside `for_each` iterations must carry the
+/// correct `workflow` field. Without the fix, entries created during per-item
+/// `run_step` calls would omit the workflow name because the `WorkflowContext`
+/// was not propagated correctly through the iteration loop.
+#[tokio::test]
+async fn for_each_step_audit_entries_carry_workflow_name() {
+    use crate::ast::{ApprovalDef, ApprovalKind, Span as AstSpan};
+    use crate::runtime::approval::AutoApproveHandler;
+    use crate::runtime::audit::{AuditKind, AuditLog};
+    use std::sync::Arc;
+
+    let tmp = tempfile::NamedTempFile::new().expect("temp file");
+    let log = Arc::new(AuditLog::new(tmp.path()).expect("AuditLog::new"));
+
+    let file = parse_file(r#"agent processor { model: openai }"#);
+
+    // Build a workflow with a single `for_each` step that has an approval gate.
+    // The step iterates over the "tickets" array in the JSON trigger input.
+    let workflow = WorkflowDef {
+        name: "triage_pipeline".to_string(),
+        trigger: r#"{"tickets":["T-1","T-2"]}"#.to_string(),
+        stages: vec![],
+        steps: vec![crate::ast::StepDef {
+            name: "process_ticket".to_string(),
+            agent: "processor".to_string(),
+            goal: Some("Process each ticket".to_string()),
+            input: None,
+            output_constraints: vec![],
+            depends_on: vec![],
+            when: None,
+            on_failure: None,
+            send_to: None,
+            fallback: None,
+            for_each: Some("tickets".to_string()),
+            typed_input: None,
+            typed_outputs: vec![],
+            escalate: None,
+            approval: Some(ApprovalDef {
+                kind: ApprovalKind::Approve,
+                channel: "cli".to_string(),
+                destination: "#ops".to_string(),
+                timeout: None,
+                mode: None,
+                span: AstSpan::new(0, 1),
+            }),
+            span: AstSpan::new(0, 1),
+        }],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+
+    let provider = MockProvider::new();
+    // One LLM response per iteration (2 items).
+    provider.push_response(simple_response("processed T-1"));
+    provider.push_response(simple_response("processed T-2"));
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: Some(Arc::new(AutoApproveHandler)),
+        audit_log: Some(Arc::clone(&log)),
+        workflow_name: Some("triage_pipeline".to_string()),
+    };
+
+    let (results, _events) = run_steps(&workflow, &ctx)
+        .await
+        .expect("run_steps must succeed");
+    assert_eq!(results.len(), 1, "one step result expected");
+
+    // Two iterations → 2 ApprovalRequested + 2 ApprovalResolved = 4 entries.
+    let entries = log.read_all().expect("read audit log");
+    assert_eq!(
+        entries.len(),
+        4,
+        "expected 4 audit entries (2 per iteration × 2 iterations); got: {entries:#?}"
+    );
+
+    // Every entry must carry both the workflow name and the step name.
+    for entry in &entries {
+        assert_eq!(
+            entry.workflow.as_deref(),
+            Some("triage_pipeline"),
+            "audit entry {kind:?} must have workflow='triage_pipeline'; got {:?}",
+            entry.workflow,
+            kind = entry.kind
+        );
+        assert_eq!(
+            entry.step.as_deref(),
+            Some("process_ticket"),
+            "audit entry {kind:?} must have step='process_ticket'; got {:?}",
+            entry.step,
+            kind = entry.kind
+        );
+    }
+
+    // Sanity: both ApprovalRequested and ApprovalResolved kinds must be present.
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.kind == AuditKind::ApprovalRequested),
+        "ApprovalRequested entries must be present"
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.kind == AuditKind::ApprovalResolved),
+        "ApprovalResolved entries must be present"
+    );
+}
+
 /// #358 — When `audit_log` is `Some` but `workflow_name` is `None`, the audit
 /// entries must have `workflow == None`, not `workflow == Some("")`. An empty
 /// string in the `workflow` field would cause compliance consumers to treat
