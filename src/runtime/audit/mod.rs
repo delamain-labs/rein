@@ -175,7 +175,7 @@ impl AuditLog {
         // immediately removed so it leaves no side effect.
         // Use generate_id() suffix to avoid collisions when multiple processes
         // or parallel test threads create audit logs in the same directory.
-        let probe = probe_dir.join(format!(".rein-audit-probe-{}", Self::generate_id().0));
+        let probe = probe_dir.join(format!(".rein-audit-probe-{}", generate_id().0));
         fs::File::create(&probe)?;
         // Cleanup is best-effort: writability is already confirmed by the
         // successful create above. If remove_file fails (e.g. the file was
@@ -250,31 +250,35 @@ impl AuditLog {
     pub fn path(&self) -> &Path {
         &self.path
     }
+}
 
-    /// Generate a unique event ID.
-    ///
-    /// Returns `(id, is_clock_reliable)` where `is_clock_reliable` is `false`
-    /// when the system clock is set before the Unix epoch (e.g. RTC not set,
-    /// certain CI containers). In that case the hex timestamp prefix in `id`
-    /// will be `0` rather than a real timestamp; IDs remain unique because the
-    /// atomic sequence counter still increments.
-    ///
-    /// Compliance consumers that parse the prefix for time ordering should
-    /// treat `audit-0-N` IDs (or any entry with `is_clock_reliable: false`)
-    /// as having unknown wall-clock time.
-    pub fn generate_id() -> (String, bool) {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let clock_result = SystemTime::now().duration_since(UNIX_EPOCH);
-        let is_clock_reliable = clock_result.is_ok();
-        let nanos = clock_result.unwrap_or_default().as_nanos();
-        let seq = ID_COUNTER.fetch_add(1, Ordering::Relaxed);
-        (format!("audit-{nanos:x}-{seq}"), is_clock_reliable)
-    }
+/// Generate a unique audit event ID.
+///
+/// Returns `(id, is_clock_reliable)` where `is_clock_reliable` is `false`
+/// when the system clock is set before the Unix epoch (e.g. RTC not set,
+/// certain CI containers). In that case the hex timestamp prefix in `id`
+/// will be `0` rather than a real timestamp; IDs remain unique because the
+/// atomic sequence counter still increments.
+///
+/// Compliance consumers that parse the prefix for time ordering should
+/// treat `audit-0-N` IDs (or any entry with `is_clock_reliable: false`)
+/// as having unknown wall-clock time.
+///
+/// This is a module-level function rather than an `AuditLog` method because
+/// it has no dependency on `AuditLog` state — it reads only the process-global
+/// `ID_COUNTER` and the system clock.
+pub(crate) fn generate_id() -> (String, bool) {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let clock_result = SystemTime::now().duration_since(UNIX_EPOCH);
+    let is_clock_reliable = clock_result.is_ok();
+    let nanos = clock_result.unwrap_or_default().as_nanos();
+    let seq = ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    (format!("audit-{nanos:x}-{seq}"), is_clock_reliable)
 }
 
 /// Convenience builder for audit entries.
 pub fn entry(kind: AuditKind, description: impl Into<String>) -> AuditEntry {
-    let (id, is_clock_reliable) = AuditLog::generate_id();
+    let (id, is_clock_reliable) = generate_id();
     AuditEntry {
         id,
         timestamp: Utc::now(),

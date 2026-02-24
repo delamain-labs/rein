@@ -108,11 +108,27 @@ fn serialization_roundtrip() {
     assert_eq!(parsed.metadata["version"], "2.0");
 }
 
+// --- #529: generate_id extracted to module-level ---
+
+#[test]
+fn module_level_generate_id_produces_unique_ids() {
+    let (id1, _) = generate_id();
+    let (id2, _) = generate_id();
+    assert_ne!(
+        id1, id2,
+        "successive generate_id() calls must produce distinct IDs"
+    );
+    assert!(
+        id1.starts_with("audit-"),
+        "generated ID must have audit- prefix"
+    );
+}
+
 // --- #497 is_clock_reliable sentinel ---
 
 #[test]
 fn generate_id_returns_reliable_true_under_normal_conditions() {
-    let (_id, reliable) = AuditLog::generate_id();
+    let (_id, reliable) = generate_id();
     assert!(
         reliable,
         "system clock is expected to be post-epoch in the test environment"
@@ -169,7 +185,7 @@ fn new_with_bare_filename_succeeds() {
     //
     // We don't want to litter cwd with a real log file, so we use a
     // uniquely-named path and verify it doesn't get created (lazy init).
-    let (id, _) = AuditLog::generate_id();
+    let (id, _) = generate_id();
     let name = format!(".rein-test-bare-{id}.jsonl");
     let log = AuditLog::new(&name);
     // Cleanup probe remnants (if any) — best effort.
