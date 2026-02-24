@@ -1442,3 +1442,138 @@ async fn non_slack_audit_entry_omits_notification_status() {
         resolved.metadata
     );
 }
+
+// --- #507: REIN_TEST_APPROVAL_HANDLER env var ---
+
+/// RAII guard that removes a process environment variable when it is dropped,
+/// even if the test panics. All `#[serial]` env-var tests use this to prevent
+/// a panic between `set_var` and `remove_var` from leaving the variable set
+/// for subsequent tests in the serial group.
+struct EnvGuard {
+    key: &'static str,
+}
+
+impl EnvGuard {
+    fn set(key: &'static str, value: &str) -> Self {
+        // SAFETY: the env mutation is scoped to a single test binary entry
+        // point serialised by #[serial]. Callers use `flavor = "current_thread"`
+        // to eliminate worker threads spawned by Tokio, so no concurrent thread
+        // is reading the variable when set_var runs.
+        unsafe { std::env::set_var(key, value) };
+        Self { key }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        // SAFETY: the env mutation is scoped to a single test binary entry
+        // point serialised by #[serial]. Tests use `flavor = "current_thread"`
+        // (see below) to eliminate worker threads spawned by Tokio, so no
+        // concurrent thread is reading the variable when set_var/remove_var run.
+        unsafe { std::env::remove_var(self.key) };
+    }
+}
+
+/// #507: When REIN_TEST_APPROVAL_HANDLER=auto_approve, resolve_approval_handler
+/// must return an AutoApproveHandler regardless of the channel type, so tests can
+/// exercise the production resolve path without blocking on stdin.
+///
+/// `#[serial]` serialises execution with other env-var-mutating tests to prevent
+/// data races on the process environment. `flavor = "current_thread"` is required
+/// alongside `#[serial]` so Tokio does not spawn additional worker threads that
+/// could read the env var concurrently — `#[serial]` only serialises test entry
+/// points, not threads spawned by the runtime.
+#[tokio::test(flavor = "current_thread")]
+#[serial_test::serial]
+async fn rein_test_approval_handler_auto_approve_overrides_cli() {
+    let _guard = EnvGuard::set("REIN_TEST_APPROVAL_HANDLER", "auto_approve");
+    let approval = make_approval_for_channel("cli", "");
+    let handler = resolve_approval_handler(&approval);
+    let status = handler.request_approval("step", "output", &approval).await;
+    assert_eq!(
+        status,
+        ApprovalStatus::Approved,
+        "REIN_TEST_APPROVAL_HANDLER=auto_approve must return Approved"
+    );
+}
+
+/// #507: When REIN_TEST_APPROVAL_HANDLER=auto_reject, resolve_approval_handler
+/// must return an AutoRejectHandler regardless of the channel type.
+#[tokio::test(flavor = "current_thread")]
+#[serial_test::serial]
+async fn rein_test_approval_handler_auto_reject_overrides_cli() {
+    let _guard = EnvGuard::set("REIN_TEST_APPROVAL_HANDLER", "auto_reject");
+    let approval = make_approval_for_channel("cli", "");
+    let handler = resolve_approval_handler(&approval);
+    let status = handler.request_approval("step", "output", &approval).await;
+    // Check the exact reason from AutoRejectHandler::new("test rejection") to
+    // confirm the override routed to AutoRejectHandler and not to CliApprovalHandler
+    // (which returns "Failed to read input" on EOF or "Human reviewer rejected").
+    assert_eq!(
+        status,
+        ApprovalStatus::Rejected {
+            reason: "test rejection".to_string()
+        },
+        "REIN_TEST_APPROVAL_HANDLER=auto_reject must return AutoRejectHandler reason; got {status:?}"
+    );
+}
+
+/// #507: Unknown values for REIN_TEST_APPROVAL_HANDLER must be ignored so a typo
+/// cannot silently auto-approve production workflows. We verify this by using a
+/// `webhook` channel backed by a mock server that returns 500 —
+/// `WebhookApprovalHandler` returns `Rejected { reason: "webhook returned 500 Internal
+/// Server Error" }` on non-2xx (reqwest `StatusCode::Display` includes the reason
+/// phrase), whereas `AutoApproveHandler` would return `Approved` and
+/// `AutoRejectHandler` would return `Rejected { reason: "test rejection" }`.
+/// Receiving a Rejected status whose reason contains "500" confirms both:
+///   (a) the env var override was NOT applied (no auto_approve), and
+///   (b) the normal webhook path was reached (not auto_reject).
+#[tokio::test(flavor = "current_thread")]
+#[serial_test::serial]
+async fn rein_test_approval_handler_unknown_value_is_ignored() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/hook"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+
+    let _guard = EnvGuard::set("REIN_TEST_APPROVAL_HANDLER", "unknown_value");
+    let url = format!("{}/hook", server.uri());
+    let approval = make_approval_for_channel("webhook", &url);
+    let handler = resolve_approval_handler(&approval);
+    let status = handler.request_approval("step", "output", &approval).await;
+
+    // Strengthened: check the reason contains "500" (webhook path) rather than
+    // merely asserting Rejected{..}, which AutoRejectHandler would also satisfy.
+    assert!(
+        matches!(status, ApprovalStatus::Rejected { ref reason } if reason.contains("500")),
+        "unknown REIN_TEST_APPROVAL_HANDLER value must not trigger auto_approve or auto_reject; \
+         expected Rejected with webhook 500 reason, got {status:?}"
+    );
+}
+
+// --- #508: CliApprovalHandler spawn_blocking ---
+
+/// #508: CliApprovalHandler must not block the Tokio executor thread.
+/// Verify that request_approval resolves within a short deadline even when
+/// stdin immediately returns EOF (as in CI). Previously the synchronous
+/// read_line blocked the executor; with spawn_blocking it runs on a separate
+/// thread and the async runtime remains responsive.
+#[tokio::test]
+async fn cli_approval_handler_does_not_block_executor_on_eof_stdin() {
+    let handler = CliApprovalHandler;
+    let approval = make_approval_for_channel("cli", "");
+    // In CI stdin is EOF; the handler must resolve promptly without hanging.
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        handler.request_approval("step", "output", &approval).await
+    })
+    .await;
+    assert!(
+        result.is_ok(),
+        "CliApprovalHandler must resolve within 5s on EOF stdin (executor must not be blocked)"
+    );
+}
