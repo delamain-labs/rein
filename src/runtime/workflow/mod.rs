@@ -860,8 +860,24 @@ pub(crate) async fn run_steps(
     };
 
     for (index, step) in ordered.into_iter().enumerate() {
-        if handle_skip_guard(step, &mut state) {
-            continue;
+        match handle_skip_guard(step, &mut state) {
+            SkipGuardResult::Proceed => {}
+            SkipGuardResult::Skipped => continue,
+            SkipGuardResult::RunFallback => {
+                // #456: run fallback directly (primary already blocked).
+                match run_fallback_on_skip(step, &trigger_input, ctx, &mut state).await {
+                    StepOutcome::Continue => {}
+                    StepOutcome::AutoResolved => break,
+                    StepOutcome::HardError(e) => {
+                        state.push_event(super::RunEvent::WorkflowAborted {
+                            error_kind: e.kind_str().to_string(),
+                            reason: e.to_string(),
+                        });
+                        return Err((e, state.events));
+                    }
+                }
+                continue;
+            }
         }
         if handle_when_guard(step, &mut state) {
             continue;
@@ -883,19 +899,117 @@ pub(crate) async fn run_steps(
     Ok((state.results, state.events, state.event_timestamps_ms))
 }
 
+/// Execute the fallback step for a step whose dependency-chain was blocked.
+///
+/// Called by `run_steps` when `handle_skip_guard` returns `RunFallback`.
+/// The primary step is skipped entirely; only `step.fallback` is executed.
+///
+/// Returns `StepOutcome::Continue` on both success and soft failure (the
+/// caller is responsible for checking `blocked_steps` to determine cascade
+/// behaviour). Returns `StepOutcome::HardError` on hard failure.
+async fn run_fallback_on_skip(
+    step: &crate::ast::StepDef,
+    trigger_input: &str,
+    ctx: &WorkflowContext<'_>,
+    state: &mut StepLoopState,
+) -> StepOutcome {
+    let fallback = step
+        .fallback
+        .as_ref()
+        .expect("run_fallback_on_skip only called when step.fallback.is_some()");
+
+    let input = if step.depends_on.is_empty() {
+        trigger_input.to_string()
+    } else {
+        step.depends_on
+            .iter()
+            .filter_map(|dep| state.outputs.get(dep))
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    match run_step(fallback, &input, ctx).await {
+        Ok(result) => {
+            // Fallback succeeded — record the step as Executed.
+            // Do NOT insert into blocked_steps so dependents still run.
+            state.push_event(super::RunEvent::StepFallback {
+                step: step.name.clone(),
+                fallback_step: fallback.name.clone(),
+            });
+            state
+                .outputs
+                .insert(step.name.clone(), result.output.clone());
+            state.results.push(StageResult {
+                stage_name: step.name.clone(),
+                agent_name: fallback.agent.clone(),
+                output: result.output,
+                cost_cents: result.cost_cents,
+                tokens: result.tokens,
+                status: StageResultStatus::Executed,
+            });
+            state.push_event(super::RunEvent::StepCompleted {
+                step: step.name.clone(),
+            });
+            StepOutcome::Continue
+        }
+        Err(e) if e.is_hard_error() => StepOutcome::HardError(e),
+        Err(e) => {
+            // Fallback also failed (soft) — mark step as Failed and
+            // cascade-block its dependents.
+            let error_kind = e.to_step_error_kind();
+            let reason = e.to_string();
+            state.blocked_steps.insert(step.name.clone());
+            state.outputs.insert(step.name.clone(), String::new());
+            state.push_event(super::RunEvent::StepFailed {
+                step: step.name.clone(),
+                reason,
+                error_kind,
+            });
+            state.results.push(StageResult {
+                stage_name: step.name.clone(),
+                agent_name: step.agent.clone(),
+                output: String::new(),
+                cost_cents: 0,
+                tokens: 0,
+                status: StageResultStatus::Failed,
+            });
+            StepOutcome::Continue
+        }
+    }
+}
+
+/// Outcome of the skip-guard check. Controls what `run_steps` does next.
+enum SkipGuardResult {
+    /// No blocked dependency — proceed to normal execution.
+    Proceed,
+    /// Blocked dependency, no fallback — step has been skipped and recorded.
+    Skipped,
+    /// Blocked dependency, fallback defined — caller must run the fallback step.
+    RunFallback,
+}
+
 /// Apply cascade-skip logic for a step whose dependency is blocked.
 ///
-/// Returns `true` when the step was skipped (caller should `continue` the
-/// loop), or `false` when the step has no blocked dependency and should
-/// proceed to execution.
-fn handle_skip_guard(step: &crate::ast::StepDef, state: &mut StepLoopState) -> bool {
+/// - `Proceed` when the step has no blocked dependency (should execute normally).
+/// - `Skipped` when the step is blocked and has no fallback — the step is
+///   recorded as `Skipped` and added to `blocked_steps`.
+/// - `RunFallback` when the step is blocked but has a fallback — the caller
+///   must attempt `step.fallback` before deciding whether to skip or fail.
+fn handle_skip_guard(step: &crate::ast::StepDef, state: &mut StepLoopState) -> SkipGuardResult {
     let Some(failed_dep) = step
         .depends_on
         .iter()
         .find(|dep| state.blocked_steps.contains(*dep))
     else {
-        return false;
+        return SkipGuardResult::Proceed;
     };
+
+    // #456: if a fallback is defined, hand control back to the caller so
+    // it can attempt the fallback before deciding to skip or fail.
+    if step.fallback.is_some() {
+        return SkipGuardResult::RunFallback;
+    }
 
     let reason = format!("dependency '{failed_dep}' failed");
     state.push_event(super::RunEvent::StepSkipped {
@@ -924,7 +1038,7 @@ fn handle_skip_guard(step: &crate::ast::StepDef, state: &mut StepLoopState) -> b
     });
     // Also mark this step as blocked so its own dependents are skipped.
     state.blocked_steps.insert(step.name.clone());
-    true
+    SkipGuardResult::Skipped
 }
 
 /// Check the `when:` guard on a step against the current step outputs.
