@@ -169,6 +169,7 @@ pub fn run_agent(
 
 // TODO(#440): extract RunOptions struct to reduce parameter count.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)]
 fn run_workflow_mode(
     workflow: &rein::ast::WorkflowDef,
     file: &rein::ast::ReinFile,
@@ -209,6 +210,23 @@ fn run_workflow_mode(
     } else {
         None
     };
+
+    // #411: Pre-wrap the injected approval_handler with AuditingApprovalHandler
+    // before assembling WorkflowContext, so run_step receives an already-wrapped
+    // handler and stays unaware of auditing logic.
+    let approval_handler: Option<Arc<dyn rein::runtime::approval::ApprovalHandler>> =
+        match (approval_handler, &audit_log) {
+            (Some(h), Some(log)) => Some(Arc::new(
+                rein::runtime::approval::AuditingApprovalHandler::with_context(
+                    h,
+                    Arc::clone(log),
+                    Some(workflow.name.as_str()),
+                    None::<&str>,
+                ),
+            )),
+            (h, _) => h,
+        };
+
     let ctx = rein::runtime::workflow::WorkflowContext {
         file,
         provider,
