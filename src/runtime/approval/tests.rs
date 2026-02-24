@@ -876,11 +876,12 @@ async fn resolve_handler_webhook_with_audit_log_emits_audit_entries_on_2xx() {
     use crate::runtime::audit::{AuditKind, AuditLog};
     use std::sync::Arc;
     use tempfile::TempDir;
-    use wiremock::matchers::method;
+    use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     let server = MockServer::start().await;
     Mock::given(method("POST"))
+        .and(path("/approval"))
         .respond_with(ResponseTemplate::new(200))
         .mount(&server)
         .await;
@@ -889,7 +890,8 @@ async fn resolve_handler_webhook_with_audit_log_emits_audit_entries_on_2xx() {
     let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
 
     // Resolve webhook handler the same way run_step does when approval_handler is None.
-    let approval = make_approval_for_channel("webhook", &server.uri());
+    let url = format!("{}/approval", server.uri());
+    let approval = make_approval_for_channel("webhook", &url);
     let inner = resolve_approval_handler(&approval);
     let handler = AuditingApprovalHandler::new(Arc::from(inner), Arc::clone(&log));
 
@@ -911,7 +913,9 @@ async fn resolve_handler_webhook_with_audit_log_emits_audit_entries_on_2xx() {
         entries.len()
     );
     assert_eq!(entries[0].kind, AuditKind::ApprovalRequested);
+    assert_eq!(entries[0].step.as_deref(), Some("deploy"), "step must be set on ApprovalRequested");
     assert_eq!(entries[1].kind, AuditKind::ApprovalResolved);
+    assert_eq!(entries[1].step.as_deref(), Some("deploy"), "step must be set on ApprovalResolved");
     assert_eq!(entries[1].metadata["decision"], "approved");
 }
 
@@ -923,11 +927,12 @@ async fn resolve_handler_slack_with_audit_log_emits_audit_entries_on_2xx() {
     use crate::runtime::audit::{AuditKind, AuditLog};
     use std::sync::Arc;
     use tempfile::TempDir;
-    use wiremock::matchers::method;
+    use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     let server = MockServer::start().await;
     Mock::given(method("POST"))
+        .and(path("/slack"))
         .respond_with(ResponseTemplate::new(200))
         .mount(&server)
         .await;
@@ -935,7 +940,8 @@ async fn resolve_handler_slack_with_audit_log_emits_audit_entries_on_2xx() {
     let tmp = TempDir::new().unwrap();
     let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
 
-    let approval = make_approval_for_channel("slack", &server.uri());
+    let url = format!("{}/slack", server.uri());
+    let approval = make_approval_for_channel("slack", &url);
     let inner = resolve_approval_handler(&approval);
     let handler = AuditingApprovalHandler::new(Arc::from(inner), Arc::clone(&log));
 
@@ -957,6 +963,8 @@ async fn resolve_handler_slack_with_audit_log_emits_audit_entries_on_2xx() {
         entries.len()
     );
     assert_eq!(entries[0].kind, AuditKind::ApprovalRequested);
+    assert_eq!(entries[0].step.as_deref(), Some("notify"), "step must be set on ApprovalRequested");
     assert_eq!(entries[1].kind, AuditKind::ApprovalResolved);
+    assert_eq!(entries[1].step.as_deref(), Some("notify"), "step must be set on ApprovalResolved");
     assert_eq!(entries[1].metadata["decision"], "approved");
 }
