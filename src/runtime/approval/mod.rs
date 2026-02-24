@@ -574,10 +574,9 @@ impl ApprovalHandler for AuditingApprovalHandler {
         if original_status != decision {
             meta["original_status"] = serde_json::Value::String(original_status.to_string());
         }
-        // Merge handler-specific notification metadata (e.g. Slack notification
-        // outcome) into the ApprovalResolved entry so compliance consumers can
-        // distinguish a successful notification from an HTTP/network failure.
-        // Only Slack overrides notification_metadata(); all other handlers return None.
+        // Merge any handler-specific metadata (e.g. Slack notification outcome)
+        // into the ApprovalResolved entry. Handlers that do not override
+        // notification_metadata() return None and nothing is added.
         if let Some(extra) = self.inner.notification_metadata()
             && let (Some(meta_obj), Some(extra_obj)) = (meta.as_object_mut(), extra.as_object())
         {
