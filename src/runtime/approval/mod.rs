@@ -171,7 +171,11 @@ pub fn parse_timeout(s: &str) -> Option<u64> {
 /// Returns a borrowed `Cow` (no allocation) when the output is within the limit;
 /// returns an owned `Cow` (one allocation) only when truncation is required.
 /// Callers can detect truncation via `matches!(result, Cow::Owned(_))`.
-fn truncate_agent_output(output: &str) -> Cow<'_, str> {
+///
+/// Exposed as `pub(crate)` so that integration tests and other modules within
+/// the crate can construct the same truncated fixtures as the production
+/// handlers without duplicating the truncation logic.
+pub(crate) fn truncate_agent_output(output: &str) -> Cow<'_, str> {
     if output.len() > AGENT_OUTPUT_PREVIEW_LIMIT {
         let cut = output.floor_char_boundary(AGENT_OUTPUT_PREVIEW_LIMIT);
         Cow::Owned(format!("{}{}", &output[..cut], TRUNCATION_MARKER))

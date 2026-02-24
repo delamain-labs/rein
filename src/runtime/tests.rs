@@ -1001,3 +1001,13 @@ fn to_structured_timeout_count_does_not_interfere_with_other_counters() {
         "one ToolCallAttempt must produce tool_calls = 1"
     );
 }
+
+// --- #523: truncate_agent_output is pub(crate) ---
+
+#[test]
+fn truncate_agent_output_is_accessible_from_runtime_module() {
+    use crate::runtime::approval::truncate_agent_output;
+    let short = "hello";
+    let result = truncate_agent_output(short);
+    assert_eq!(&*result, short, "short output must be returned unchanged");
+}
