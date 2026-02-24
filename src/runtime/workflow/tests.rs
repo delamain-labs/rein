@@ -1562,6 +1562,112 @@ async fn step_without_audit_log_calls_handler_exactly_once() {
     );
 }
 
+/// #474 — When `approval_handler` is `None` and `audit_log` is `Some`, `run_step`
+/// must call `resolve_approval_handler` (not panic or skip auditing), wrap the
+/// resolved handler in `AuditingApprovalHandler`, and write audit entries.
+///
+/// This is the production path for users who pass `--audit-log` without injecting
+/// a handler — they rely entirely on `resolve_approval_handler` + the wrapping logic.
+/// Previous tests always set `approval_handler: Some(AutoApproveHandler)`, leaving
+/// the `Arc::from(Box<dyn ApprovalHandler>)` conversion branch uncovered by CI.
+#[tokio::test]
+async fn step_with_audit_log_and_no_injected_handler_uses_resolved_handler() {
+    use crate::ast::{ApprovalDef, ApprovalKind, Span as AstSpan};
+    use crate::runtime::audit::{AuditKind, AuditLog};
+    use std::sync::Arc;
+
+    let tmp = tempfile::NamedTempFile::new().expect("temp file");
+    let log = Arc::new(AuditLog::new(tmp.path()).expect("AuditLog::new"));
+
+    let file = parse_file(r#"agent writer { model: openai }"#);
+    let workflow = WorkflowDef {
+        name: "no_handler_wf".to_string(),
+        trigger: "start".to_string(),
+        stages: vec![],
+        steps: vec![crate::ast::StepDef {
+            name: "gated".to_string(),
+            agent: "writer".to_string(),
+            goal: None,
+            input: None,
+            output_constraints: vec![],
+            depends_on: vec![],
+            when: None,
+            on_failure: None,
+            send_to: None,
+            fallback: None,
+            for_each: None,
+            typed_input: None,
+            typed_outputs: vec![],
+            escalate: None,
+            approval: Some(ApprovalDef {
+                kind: ApprovalKind::Approve,
+                // "cli" routes through resolve_approval_handler → CliApprovalHandler,
+                // which auto-approves in test environments.
+                channel: "cli".to_string(),
+                destination: "".to_string(),
+                timeout: None,
+                mode: None,
+                span: AstSpan::new(0, 1),
+            }),
+            span: AstSpan::new(0, 1),
+        }],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("resolved output"));
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        // No injected handler — must fall through to resolve_approval_handler.
+        approval_handler: None,
+        audit_log: Some(Arc::clone(&log)),
+        workflow_name: Some("no_handler_wf".to_string()),
+    };
+
+    // The resolved CliApprovalHandler reads stdin; in a non-interactive test,
+    // stdin is empty so it rejects. That is expected — the goal of this test is
+    // not to verify approval outcome but to confirm:
+    //   (a) no panic from the Arc::from(Box<dyn ApprovalHandler>) conversion,
+    //   (b) AuditingApprovalHandler wraps the resolved handler and writes entries.
+    let _ = run_workflow(&workflow, &ctx).await;
+
+    // Both audit entries must be present even on rejection: AuditingApprovalHandler
+    // writes ApprovalRequested before delegating and ApprovalResolved after.
+    let entries = log.read_all().expect("read audit log");
+    assert_eq!(
+        entries.len(),
+        2,
+        "expected ApprovalRequested + ApprovalResolved; got: {entries:#?}"
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.kind == AuditKind::ApprovalRequested),
+        "missing ApprovalRequested entry"
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.kind == AuditKind::ApprovalResolved),
+        "missing ApprovalResolved entry"
+    );
+    for entry in &entries {
+        assert_eq!(entry.workflow.as_deref(), Some("no_handler_wf"));
+        assert_eq!(entry.step.as_deref(), Some("gated"));
+    }
+}
+
 // --- #303 DAG depends_on Tests ---
 
 fn make_step(name: &str, agent: &str, depends_on: Vec<&str>) -> StepDef {
