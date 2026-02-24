@@ -87,6 +87,7 @@ fn print_summary(traces: &[StructuredTrace]) {
     println!("LLM calls:    {total_llm_calls}");
     println!("Tool calls:   {total_tool_calls} ({total_denied} denied)");
     if total_timeouts > 0 {
+        // "Timeouts" counts StageTimeout events (stage-level execution timeouts).
         println!("Timeouts:     {total_timeouts}");
     }
     println!(
@@ -181,5 +182,22 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let code = run_cost(&[tmp.path().to_path_buf()]);
         assert_eq!(code, 1);
+    }
+
+    /// #510: run_cost must succeed (exit 0) when traces include StageTimeout events.
+    /// Exercises the `total_timeouts > 0` branch in `print_summary`.
+    #[test]
+    fn test_run_cost_with_timeouts_exits_zero() {
+        let tmp = TempDir::new().unwrap();
+        let mut trace = make_trace("bot", 50, 200);
+        trace.stats.timeout_count = 3;
+        std::fs::write(
+            tmp.path().join("run.json"),
+            serde_json::to_string(&trace).unwrap(),
+        )
+        .unwrap();
+
+        let code = run_cost(&[tmp.path().to_path_buf()]);
+        assert_eq!(code, 0, "run_cost must succeed even when traces contain timeouts");
     }
 }
