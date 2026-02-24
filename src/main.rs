@@ -86,6 +86,9 @@ enum Command {
         /// Write approval audit events to a JSONL file at the given path
         #[arg(long)]
         audit_log: Option<std::path::PathBuf>,
+        /// Abort any single LLM call that takes longer than this many seconds
+        #[arg(long)]
+        stage_timeout: Option<u64>,
     },
     /// Run scenario and eval blocks in a .rein file
     ///
@@ -149,6 +152,7 @@ async fn main() {
             demo,
             otel,
             audit_log,
+            stage_timeout,
         } => {
             let exit_code = commands::run::run_agent(
                 &file,
@@ -157,6 +161,7 @@ async fn main() {
                 demo,
                 otel,
                 audit_log.as_deref(),
+                stage_timeout,
             );
             process::exit(exit_code);
         }

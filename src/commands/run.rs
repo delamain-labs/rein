@@ -15,6 +15,7 @@ pub fn run_agent(
     demo: bool,
     otel: bool,
     audit_log: Option<&std::path::Path>,
+    stage_timeout_secs: Option<u64>,
 ) -> i32 {
     let filename = path.to_string_lossy();
 
@@ -74,7 +75,7 @@ pub fn run_agent(
         system_prompt: None,
         max_turns: 10,
         budget_cents: agent.budget.as_ref().map_or(0, |b| b.amount),
-        stage_timeout_secs: None,
+        stage_timeout_secs,
     };
 
     // Build engine with enforcement.
@@ -154,6 +155,7 @@ pub fn run_agent(
             &executor,
             budget_cents,
             audit_log,
+            stage_timeout_secs,
         );
     }
 
@@ -167,6 +169,7 @@ fn run_workflow_mode(
     executor: &dyn rein::runtime::executor::ToolExecutor,
     budget_cents: u64,
     audit_log_path: Option<&std::path::Path>,
+    stage_timeout_secs: Option<u64>,
 ) -> i32 {
     // Only inject a global handler when env-var overrides are active (CI/testing).
     // In normal runs `approval_handler` is `None` so each step resolves its own
@@ -176,7 +179,7 @@ fn run_workflow_mode(
         system_prompt: None,
         max_turns: 10,
         budget_cents,
-        stage_timeout_secs: None,
+        stage_timeout_secs,
     };
     // Construct an AuditLog if the caller requested one via --audit-log.
     // Failure is fatal: an operator who explicitly passes --audit-log expects
@@ -616,6 +619,7 @@ mod tests {
             true, // demo mode — no API key needed
             false,
             Some(audit_path.path()),
+            None,
         );
         assert_eq!(
             code, 1,

@@ -264,3 +264,28 @@ fn eval_scenario_filter_unknown_exits_zero() {
         "expected exit 0 when named scenario not found"
     );
 }
+
+// ── #406: --stage-timeout CLI flag ────────────────────────────────────────────
+
+#[test]
+fn run_stage_timeout_flag_accepted() {
+    // Verify that --stage-timeout is a recognised flag (not an "unexpected argument")
+    // by running with --demo (mock provider, no API key) + --dry-run so no LLM call.
+    let out = Command::new(rein_bin())
+        .args([
+            "run",
+            "--demo",
+            "--dry-run",
+            "--stage-timeout",
+            "30",
+            example("basic.rein").to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to spawn rein");
+    assert_ne!(
+        out.status.code(),
+        Some(2),
+        "--stage-timeout should not produce a clap parse error (exit 2); stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
