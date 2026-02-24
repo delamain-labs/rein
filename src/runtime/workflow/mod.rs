@@ -543,7 +543,7 @@ pub fn resolve_dag(
 /// Execute a single step definition, running its referenced agent with the
 /// step's goal as additional context.
 ///
-/// `ctx.workflow_name` is passed to `AuditingApprovalHandler::with_workflow` so
+/// `ctx.workflow_name` is passed to `AuditingApprovalHandler::with_context` so
 /// audit entries record the workflow they belong to for compliance queries.
 ///
 /// # Errors
@@ -566,20 +566,14 @@ pub async fn run_step(
             ))
         };
         let status = if let Some(log) = &ctx.audit_log {
-            let mut auditing = crate::runtime::approval::AuditingApprovalHandler::new(
+            crate::runtime::approval::AuditingApprovalHandler::with_context(
                 Arc::clone(&base),
                 Arc::clone(log),
+                ctx.workflow_name.as_deref(),
+                Some(step.agent.as_str()),
             )
-            .with_agent(step.agent.clone());
-            // Only set workflow when the name is known. An empty string would
-            // incorrectly populate AuditEntry.workflow as Some("") rather than None,
-            // causing compliance queries against workflow names to return false positives.
-            if let Some(name) = &ctx.workflow_name {
-                auditing = auditing.with_workflow(name.clone());
-            }
-            auditing
-                .request_approval(&step.name, input, approval_def)
-                .await
+            .request_approval(&step.name, input, approval_def)
+            .await
         } else {
             base.request_approval(&step.name, input, approval_def).await
         };

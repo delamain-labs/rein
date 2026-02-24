@@ -1577,3 +1577,41 @@ async fn cli_approval_handler_does_not_block_executor_on_eof_stdin() {
         "CliApprovalHandler must resolve within 5s on EOF stdin (executor must not be blocked)"
     );
 }
+
+// #432: AuditingApprovalHandler direct constructor with workflow + agent context
+#[tokio::test]
+async fn auditing_handler_with_context_sets_workflow_and_agent() {
+    use crate::runtime::audit::{AuditLog, AuditKind};
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
+
+    // with_context should wire workflow_name and agent_name without requiring
+    // the caller to chain .with_workflow().with_agent() builder calls.
+    let handler = AuditingApprovalHandler::with_context(
+        Arc::new(AutoApproveHandler),
+        Arc::clone(&log),
+        Some("deploy-workflow"),
+        Some("deploy-bot"),
+    );
+    let approval = make_approval_for_channel("cli", "");
+    handler.request_approval("step", "output", &approval).await;
+
+    let entries = log.read_all().unwrap();
+    let requested = entries
+        .iter()
+        .find(|e| e.kind == AuditKind::ApprovalRequested)
+        .expect("ApprovalRequested entry must exist");
+    assert_eq!(
+        requested.workflow.as_deref(),
+        Some("deploy-workflow"),
+        "with_context must set workflow_name"
+    );
+    assert_eq!(
+        requested.agent.as_deref(),
+        Some("deploy-bot"),
+        "with_context must set agent_name"
+    );
+}
