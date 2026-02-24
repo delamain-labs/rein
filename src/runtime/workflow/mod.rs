@@ -775,7 +775,7 @@ fn apply_step_result(
 /// Callers that propagate the error without inspecting partial events can use
 /// `.map_err(|(e, _)| e)?` to recover the original `WorkflowError`.
 #[allow(clippy::too_many_lines)]
-pub async fn run_steps(
+pub(crate) async fn run_steps(
     workflow: &WorkflowDef,
     ctx: &WorkflowContext<'_>,
 ) -> Result<(Vec<StageResult>, Vec<super::RunEvent>), (WorkflowError, Vec<super::RunEvent>)> {
@@ -1127,22 +1127,26 @@ fn auto_resolve_matches(output: &str, ar: &crate::ast::AutoResolveBlock) -> Opti
 /// If the workflow has step blocks, those are executed after stages.
 ///
 /// # Errors
-/// Returns `WorkflowError` if execution fails.
+/// Returns `(WorkflowError, Vec<RunEvent>)` on failure. The event vec carries
+/// any events (including `WorkflowAborted`) that were emitted before the abort
+/// so OTEL consumers can observe the hard-error cause.
 pub async fn run_workflow(
     workflow: &WorkflowDef,
     ctx: &WorkflowContext<'_>,
-) -> Result<WorkflowResult, WorkflowError> {
+) -> Result<WorkflowResult, (WorkflowError, Vec<super::RunEvent>)> {
     let mut result = match workflow.mode {
-        ExecutionMode::Sequential => run_sequential(workflow, ctx).await?,
-        ExecutionMode::Parallel => run_parallel(workflow, ctx).await?,
+        ExecutionMode::Sequential => run_sequential(workflow, ctx)
+            .await
+            .map_err(|e| (e, vec![]))?,
+        ExecutionMode::Parallel => run_parallel(workflow, ctx).await.map_err(|e| (e, vec![]))?,
     };
 
     // Execute step blocks if present
     if !workflow.steps.is_empty() {
-        // run_steps carries partial events alongside the error on hard abort;
-        // discard the partial events here since run_workflow propagates the
-        // WorkflowError to the engine which handles OTEL via apply_otel_export.
-        let (step_results, step_events) = run_steps(workflow, ctx).await.map_err(|(e, _)| e)?;
+        // On hard abort, run_steps returns the partial events (including
+        // WorkflowAborted) alongside the error so callers can pass them to
+        // OTEL consumers or display them to the user.
+        let (step_results, step_events) = run_steps(workflow, ctx).await?;
         for sr in step_results {
             result.total_cost_cents += sr.cost_cents;
             result.total_tokens += sr.tokens;

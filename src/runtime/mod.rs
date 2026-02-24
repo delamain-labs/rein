@@ -540,7 +540,9 @@ fn summarize_event(event: &RunEvent, lines: &mut Vec<String>, turn: &mut usize) 
         RunEvent::StepSkipped { step, reason, .. } => {
             lines.push(format!("  ⏭ step '{step}' skipped: {reason}"));
         }
-        RunEvent::WorkflowAborted { error_kind, reason } => {
+        RunEvent::WorkflowAborted {
+            error_kind, reason, ..
+        } => {
             lines.push(format!("  ✗ workflow aborted [{error_kind}]: {reason}"));
         }
     }

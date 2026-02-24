@@ -277,7 +277,7 @@ fn run_workflow_mode(
             // Exit 2: hard abort — see Err arm below.
             i32::from(failed_count > 0 || skipped_count > 0)
         }
-        Err(e) => {
+        Err((e, _partial_events)) => {
             eprintln!("Workflow failed: {e}");
             // Exit 2: hard abort (policy rejection, cyclic deps, infra failure).
             // Distinct from exit 1 (partial success) so shell consumers can

@@ -1221,7 +1221,7 @@ async fn step_with_auto_reject_returns_error() {
 
     let result = run_workflow(&workflow, &ctx).await;
     assert!(result.is_err());
-    let err = result.unwrap_err().to_string();
+    let err = result.unwrap_err().0.to_string();
     assert!(
         err.contains("rejected"),
         "error should mention rejection: {err}"
@@ -1773,7 +1773,7 @@ async fn step_with_audit_log_and_no_injected_handler_uses_resolved_handler() {
     // CliApprovalHandler rejects on EOF stdin; assert the specific error so a
     // failure here (e.g., AgentNotFound before approval) surfaces clearly.
     assert!(
-        matches!(result, Err(WorkflowError::ApprovalRejected { .. })),
+        matches!(result, Err((WorkflowError::ApprovalRejected { .. }, _))),
         "expected ApprovalRejected from CliApprovalHandler on empty stdin; got: {result:?}"
     );
 
@@ -3126,7 +3126,7 @@ async fn cyclic_dependency_is_hard_error() {
         workflow_name: None,
     };
 
-    let (err, _partial_events) = run_steps(&workflow, &ctx)
+    let (err, partial_events) = run_steps(&workflow, &ctx)
         .await
         .expect_err("cyclic dependency must return Err");
 
@@ -3140,6 +3140,12 @@ async fn cyclic_dependency_is_hard_error() {
     assert!(
         err.is_hard_error(),
         "CyclicDependency must be classified as a hard error"
+    );
+    assert!(
+        partial_events
+            .iter()
+            .any(|e| matches!(e, crate::runtime::RunEvent::WorkflowAborted { .. })),
+        "WorkflowAborted event must be emitted when resolve_dag fails; events: {partial_events:?}"
     );
 }
 
