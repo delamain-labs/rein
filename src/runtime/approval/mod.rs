@@ -35,7 +35,29 @@ pub enum ApprovalStatus {
     Rejected { reason: String },
     /// Timed out waiting for approval.
     TimedOut,
-    /// Approval is pending (async flow).
+    /// Approval is pending (async flow — the handler deferred a decision).
+    ///
+    /// ## Audit-trail semantics
+    ///
+    /// `AuditingApprovalHandler` maps this variant to `decision: "timed_out"` in
+    /// the `ApprovalResolved` audit entry. This is intentional: the workflow
+    /// engine raises `WorkflowError::ApprovalPending` for any non-resolved
+    /// status, so from a compliance perspective the step did not complete within
+    /// its approval gate — identical to a genuine time-out.
+    ///
+    /// To allow operators to distinguish a handler that returned `Pending` (e.g.
+    /// a misconfigured async handler) from a genuine `TimedOut`, the audit entry
+    /// also includes `original_status: "pending"` **only** when this variant is
+    /// returned. Compliance consumers must not rely on `original_status` for
+    /// normal flow; it is a diagnostic field.
+    ///
+    /// ## Future work
+    ///
+    /// If a "resume" path is added for deferred decisions (e.g. a callback
+    /// that resolves a `Pending` step after the fact), this mapping must be
+    /// revisited: `Pending` would need its own `decision` value, and
+    /// `WorkflowError::ApprovalPending` would need to park the workflow rather
+    /// than terminate it.
     Pending,
 }
 
