@@ -438,14 +438,16 @@ fn event_to_span_data(event: &super::RunEvent) -> (String, Vec<OtelAttribute>) {
             step,
             blocked_dependency,
             reason,
-        } => (
-            "rein.step.skipped".to_string(),
-            vec![
+        } => {
+            let mut attrs = vec![
                 attr_str("rein.step.name", step),
-                attr_str("rein.step.blocked_dependency", blocked_dependency),
                 attr_str("rein.step.reason", reason),
-            ],
-        ),
+            ];
+            if let Some(dep) = blocked_dependency {
+                attrs.push(attr_str("rein.step.blocked_dependency", dep));
+            }
+            ("rein.step.skipped".to_string(), attrs)
+        }
         RunEvent::StepFailed {
             step,
             reason,

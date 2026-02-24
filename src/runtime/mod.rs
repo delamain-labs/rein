@@ -161,16 +161,19 @@ pub enum RunEvent {
     RunTimeout {
         timeout_secs: u64,
     },
-    /// A step was skipped because one or more of its declared dependencies failed.
+    /// A step was skipped because one or more of its declared dependencies failed,
+    /// or because its `when:` guard condition evaluated to false.
     StepSkipped {
         /// Name of the step that was skipped.
         step: String,
-        /// Name of the immediate dependency that blocked this step. May itself be a
-        /// skipped step rather than a directly failed step (transitive chains).
-        /// Use the `StepFailed` event to find the root-cause step.
+        /// Name of the immediate dependency that blocked this step (dependency-failure
+        /// skips only). `None` when the step was skipped by a `when:` guard condition.
+        /// May itself be a skipped step rather than a directly failed step (transitive
+        /// chains). Use the `StepFailed` event to find the root-cause step.
         /// Enables structured OTEL queries via `rein.step.blocked_dependency`.
-        blocked_dependency: String,
-        /// Human-readable reason (e.g. "dependency '`step_a`' failed").
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        blocked_dependency: Option<String>,
+        /// Human-readable reason (e.g. "dependency '`step_a`' failed" or "when: condition false").
         reason: String,
     },
     /// A workflow step failed during execution (soft failure — workflow continues).

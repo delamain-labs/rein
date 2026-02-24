@@ -29,7 +29,7 @@ mod condition;
 pub mod persistence;
 mod resumable;
 
-use condition::condition_matches;
+use condition::{condition_matches, when_expr_matches};
 pub use resumable::run_sequential_resumable;
 
 #[cfg(test)]
@@ -854,6 +854,9 @@ pub(crate) async fn run_steps(
         if handle_skip_guard(step, &mut state) {
             continue;
         }
+        if handle_when_guard(step, &mut state) {
+            continue;
+        }
 
         match execute_step_in_dag(step, index, &trigger_input, workflow, ctx, &mut state).await {
             StepOutcome::Continue => {}
@@ -888,7 +891,7 @@ fn handle_skip_guard(step: &crate::ast::StepDef, state: &mut StepLoopState) -> b
     let reason = format!("dependency '{failed_dep}' failed");
     state.push_event(super::RunEvent::StepSkipped {
         step: step.name.clone(),
-        blocked_dependency: failed_dep.clone(),
+        blocked_dependency: Some(failed_dep.clone()),
         reason,
     });
     // Insert an empty output so the step appears in `outputs` for
@@ -912,6 +915,43 @@ fn handle_skip_guard(step: &crate::ast::StepDef, state: &mut StepLoopState) -> b
     });
     // Also mark this step as blocked so its own dependents are skipped.
     state.blocked_steps.insert(step.name.clone());
+    true
+}
+
+/// Check the `when:` guard on a step against the current step outputs.
+///
+/// Returns `true` when the step was skipped because the guard evaluated to
+/// `false` (caller should `continue` the loop), or `false` when the guard is
+/// absent or evaluates to `true` and the step should proceed.
+///
+/// Unlike `handle_skip_guard`, a when:-skipped step does NOT cascade-block its
+/// dependents — dependent steps should still execute with empty prior output.
+fn handle_when_guard(step: &crate::ast::StepDef, state: &mut StepLoopState) -> bool {
+    let Some(ref expr) = step.when else {
+        return false;
+    };
+
+    if when_expr_matches(expr, &state.outputs) {
+        // Condition satisfied — step should run.
+        return false;
+    }
+
+    // Condition false → skip without cascade-blocking dependents.
+    state.push_event(super::RunEvent::StepSkipped {
+        step: step.name.clone(),
+        blocked_dependency: None,
+        reason: "when: condition false".to_string(),
+    });
+    state.outputs.insert(step.name.clone(), String::new());
+    state.results.push(StageResult {
+        stage_name: step.name.clone(),
+        agent_name: step.agent.clone(),
+        output: String::new(),
+        cost_cents: 0,
+        tokens: 0,
+        status: StageResultStatus::Skipped,
+    });
+    // Do NOT insert into blocked_steps — dependents should still run.
     true
 }
 
