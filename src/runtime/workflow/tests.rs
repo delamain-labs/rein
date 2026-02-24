@@ -3739,47 +3739,6 @@ fn make_gated_step_workflow(
     (workflow, file)
 }
 
-/// #506: When a step's approval gate is rejected, run_steps must emit a
-/// WorkflowAborted event as part of the returned partial events on error, so
-/// OTEL consumers can distinguish hard-abort causes.
-///
-/// The return type carries `(WorkflowError, Vec<RunEvent>)` on hard abort.
-/// The events vec includes WorkflowAborted with error_kind="approval_rejected".
-#[tokio::test]
-async fn run_steps_emits_workflow_aborted_on_approval_rejected() {
-    use crate::runtime::RunEvent;
-    use crate::runtime::approval::AutoRejectHandler;
-    use std::sync::Arc;
-
-    let (workflow, file) = make_gated_step_workflow("abort_test");
-    let provider = MockProvider::new();
-    let executor = MockExecutor::new();
-    let ctx = WorkflowContext {
-        file: &file,
-        provider: &provider,
-        executor: &executor,
-        tool_defs: &[],
-        config: &RunConfig::default(),
-        approval_handler: Some(Arc::new(AutoRejectHandler::new("test rejection"))),
-        audit_log: None,
-        workflow_name: None,
-    };
-
-    let result = run_steps(&workflow, &ctx).await;
-    assert!(
-        result.is_err(),
-        "ApprovalRejected is a hard error — run_steps must return Err"
-    );
-
-    let (_err, partial_events) = result.unwrap_err();
-    assert!(
-        partial_events
-            .iter()
-            .any(|e| matches!(e, RunEvent::WorkflowAborted { .. })),
-        "WorkflowAborted event must be emitted on hard abort; events: {partial_events:?}"
-    );
-}
-
 /// #506: The WorkflowAborted event must carry error_kind="approval_rejected"
 /// and a non-empty reason so OTEL dashboards can distinguish abort causes
 /// without parsing the human-readable reason string.
