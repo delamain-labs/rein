@@ -87,7 +87,7 @@ fn print_summary(traces: &[StructuredTrace]) {
     println!("LLM calls:    {total_llm_calls}");
     println!("Tool calls:   {total_tool_calls} ({total_denied} denied)");
     if total_timeouts > 0 {
-        println!("Stage timeouts: {total_timeouts}");
+        println!("Timeouts:     {total_timeouts}");
     }
     println!(
         "Total time:   {}.{:01}s",
