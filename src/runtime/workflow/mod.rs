@@ -376,7 +376,7 @@ pub(super) fn resolve_next_stage<'a>(
 pub async fn run_sequential(
     workflow: &WorkflowDef,
     ctx: &WorkflowContext<'_>,
-) -> Result<WorkflowResult, WorkflowError> {
+) -> Result<WorkflowResult, (WorkflowError, Vec<super::RunEvent>)> {
     let mut stage_results = Vec::new();
     let mut all_events: Vec<super::RunEvent> = Vec::new();
     let mut all_timestamps: Vec<u64> = Vec::new();
@@ -387,11 +387,13 @@ pub async fn run_sequential(
 
     while let Some(stage) = current_stage {
         if !visited.insert(&*stage.name) {
-            return Err(WorkflowError::CircularRoute(stage.name.clone()));
+            return Err((WorkflowError::CircularRoute(stage.name.clone()), all_events));
         }
 
         let (result, stage_events, stage_timestamps) =
-            run_stage(&stage.name, &stage.agent, &current_input, ctx).await?;
+            run_stage(&stage.name, &stage.agent, &current_input, ctx)
+                .await
+                .map_err(|e| (e, all_events.clone()))?;
 
         current_input.clone_from(&result.output);
         let output = result.output.clone();
@@ -399,7 +401,8 @@ pub async fn run_sequential(
         all_events.extend(stage_events);
         all_timestamps.extend(stage_timestamps);
 
-        current_stage = resolve_next_stage(workflow, stage, &output)?;
+        current_stage = resolve_next_stage(workflow, stage, &output)
+            .map_err(|e| (e, all_events.clone()))?;
     }
 
     let final_output = stage_results
@@ -423,11 +426,14 @@ pub async fn run_sequential(
 /// error short-circuits and returns immediately.
 ///
 /// # Errors
-/// Returns `WorkflowError` if an agent is missing or any stage fails.
+/// Returns `(WorkflowError, Vec<RunEvent>)` if an agent is missing or any
+/// stage fails. Because `try_join_all` short-circuits on the first failure,
+/// the partial-events vec is always empty for parallel aborts (no stages can
+/// be guaranteed to have completed before the failing one is cancelled).
 pub async fn run_parallel(
     workflow: &WorkflowDef,
     ctx: &WorkflowContext<'_>,
-) -> Result<WorkflowResult, WorkflowError> {
+) -> Result<WorkflowResult, (WorkflowError, Vec<super::RunEvent>)> {
     use futures::future::try_join_all;
 
     let trigger_input = format!("Trigger: {}", workflow.trigger);
@@ -438,7 +444,8 @@ pub async fn run_parallel(
             .iter()
             .map(|stage| run_stage(&stage.name, &stage.agent, &trigger_input, ctx)),
     )
-    .await?;
+    .await
+    .map_err(|e| (e, Vec::new()))?;
 
     let mut stage_results = Vec::with_capacity(outcomes.len());
     let mut all_events: Vec<super::RunEvent> = Vec::new();
@@ -1135,19 +1142,23 @@ pub async fn run_workflow(
     ctx: &WorkflowContext<'_>,
 ) -> Result<WorkflowResult, (WorkflowError, Vec<super::RunEvent>)> {
     let mut result = match workflow.mode {
-        ExecutionMode::Sequential => run_sequential(workflow, ctx).await.map_err(|e| {
+        ExecutionMode::Sequential => run_sequential(workflow, ctx).await.map_err(|(e, partial)| {
             let aborted = super::RunEvent::WorkflowAborted {
                 error_kind: e.kind_str().to_string(),
                 reason: e.to_string(),
             };
-            (e, vec![aborted])
+            let mut events = partial;
+            events.push(aborted);
+            (e, events)
         })?,
-        ExecutionMode::Parallel => run_parallel(workflow, ctx).await.map_err(|e| {
+        ExecutionMode::Parallel => run_parallel(workflow, ctx).await.map_err(|(e, partial)| {
             let aborted = super::RunEvent::WorkflowAborted {
                 error_kind: e.kind_str().to_string(),
                 reason: e.to_string(),
             };
-            (e, vec![aborted])
+            let mut events = partial;
+            events.push(aborted);
+            (e, events)
         })?,
     };
 

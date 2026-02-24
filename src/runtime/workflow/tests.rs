@@ -181,7 +181,7 @@ async fn unknown_agent_returns_error() {
 
     provider.push_response(simple_response("ok"));
 
-    let err = run_sequential(&workflow, &ctx).await.unwrap_err();
+    let (err, _) = run_sequential(&workflow, &ctx).await.unwrap_err();
 
     assert!(err.to_string().contains("nonexistent"), "err: {err}");
 }
@@ -205,7 +205,7 @@ async fn stage_failure_returns_error() {
 
     provider.push_error("provider down");
 
-    let err = run_sequential(&workflow, &ctx).await.unwrap_err();
+    let (err, _) = run_sequential(&workflow, &ctx).await.unwrap_err();
 
     assert!(matches!(err, WorkflowError::StageFailed { .. }));
 }
@@ -270,7 +270,7 @@ async fn parallel_unknown_agent_errors() {
     // Queue response for agent "a" so it doesn't fail first
     provider.push_response(simple_response("ok"));
 
-    let err = run_parallel(&workflow, &ctx).await.unwrap_err();
+    let (err, _) = run_parallel(&workflow, &ctx).await.unwrap_err();
 
     assert!(err.to_string().contains("missing"), "err: {err}");
 }
@@ -947,7 +947,7 @@ async fn conditional_route_to_nonexistent_stage_errors() {
     };
     provider.push_response(simple_response("priority: high"));
 
-    let err = run_sequential(&workflow, &ctx).await.unwrap_err();
+    let (err, _) = run_sequential(&workflow, &ctx).await.unwrap_err();
 
     assert!(
         matches!(err, WorkflowError::StageNotFound(ref name) if name == "nonexistent"),
@@ -1017,7 +1017,7 @@ async fn circular_route_returns_error() {
     provider.push_response(simple_response("go: yes"));
     provider.push_response(simple_response("go: yes"));
 
-    let err = run_sequential(&workflow, &ctx).await.unwrap_err();
+    let (err, _) = run_sequential(&workflow, &ctx).await.unwrap_err();
 
     assert!(
         matches!(err, WorkflowError::CircularRoute(ref name) if name == "a"),
@@ -3488,7 +3488,7 @@ async fn stage_timeout_in_workflow_is_hard_error() {
         result.is_err(),
         "expected error from timed-out stage; got Ok"
     );
-    let err = result.unwrap_err();
+    let (err, _) = result.unwrap_err();
 
     // Must be a hard error: StageTimedOut, NOT StageFailed.
     assert!(
@@ -4008,5 +4008,92 @@ async fn run_workflow_mixed_abort_includes_stage_events() {
             .any(|e| matches!(e, RunEvent::WorkflowAborted { .. })),
         "partial_events must include WorkflowAborted from the step hard-abort; \
          got: {partial_events:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// #549: run_sequential/run_parallel — partial events preserved on hard abort
+// ---------------------------------------------------------------------------
+
+/// #549: When run_sequential fails mid-run (second stage missing), events from
+/// the first stage (LlmCall) must appear in the run_workflow error vec.
+#[tokio::test]
+async fn run_sequential_abort_includes_prior_stage_events() {
+    use crate::runtime::RunEvent;
+
+    // Stage "a" exists and will succeed; stage "b" does not exist — triggers
+    // WorkflowError::AgentNotFound after stage "a" has already emitted events.
+    let file = parse_file("agent a { model: openai }");
+    let workflow = make_workflow("pipe", "go", &["a", "b"]);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+    provider.push_response(simple_response("stage_a_output"));
+
+    let (_err, partial_events) = run_workflow(&workflow, &ctx)
+        .await
+        .expect_err("missing agent b must cause run_workflow to return Err");
+
+    assert!(
+        partial_events
+            .iter()
+            .any(|e| matches!(e, RunEvent::LlmCall { .. })),
+        "partial_events must include LlmCall events from the completed stage a; \
+         got: {partial_events:?}"
+    );
+    assert!(
+        partial_events
+            .iter()
+            .any(|e| matches!(e, RunEvent::WorkflowAborted { .. })),
+        "partial_events must include WorkflowAborted; got: {partial_events:?}"
+    );
+}
+
+/// #549: When run_parallel fails (one agent missing), the error vec is returned
+/// with at least a WorkflowAborted event, matching the same error-shape contract
+/// as run_sequential.
+#[tokio::test]
+async fn run_parallel_abort_includes_workflow_aborted_event() {
+    use crate::runtime::RunEvent;
+
+    // Only agent "a" exists; agent "b" does not. Parallel mode — try_join_all
+    // short-circuits on first failure so we cannot guarantee LlmCall events
+    // from the successful stage, but WorkflowAborted must always be present.
+    let file = parse_file("agent a { model: openai }");
+    let mut workflow = make_workflow("pipe", "go", &["a", "b"]);
+    workflow.mode = ExecutionMode::Parallel;
+
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+    provider.push_response(simple_response("a_output"));
+
+    let (_err, partial_events) = run_workflow(&workflow, &ctx)
+        .await
+        .expect_err("missing agent b must cause run_workflow to return Err");
+
+    assert!(
+        partial_events
+            .iter()
+            .any(|e| matches!(e, RunEvent::WorkflowAborted { .. })),
+        "partial_events must include WorkflowAborted; got: {partial_events:?}"
     );
 }
