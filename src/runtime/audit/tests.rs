@@ -244,3 +244,22 @@ fn query_by_approval_requested_kind() {
     let resolved = log.query_by_kind(&AuditKind::ApprovalResolved).unwrap();
     assert_eq!(resolved.len(), 1);
 }
+
+// #446: Each append must be durably written — visible to read_all immediately
+// after the call returns. This catches BufWriter implementations that buffer
+// without flushing: if flush is omitted, entries are lost on process exit.
+#[test]
+fn append_is_durable_within_single_log_instance() {
+    let (_tmp, log) = test_log();
+    for i in 0u32..10 {
+        log.append(&entry(AuditKind::WorkflowStart, &format!("event {i}")))
+            .unwrap();
+        let all = log.read_all().unwrap();
+        assert_eq!(
+            all.len(),
+            (i + 1) as usize,
+            "entry {i} must be readable immediately after append; got {} entries",
+            all.len()
+        );
+    }
+}

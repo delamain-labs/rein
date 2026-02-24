@@ -6,7 +6,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -103,12 +103,15 @@ pub enum AuditKind {
 
 /// Persistent audit log backed by JSON-lines files.
 ///
-/// Writes are serialized via an internal `Mutex<()>` so concurrent calls from
-/// parallel workflow steps produce well-formed JSONL with no interleaved lines.
+/// Writes are serialized via an internal `Mutex<Option<BufWriter<File>>>` so
+/// concurrent calls from parallel workflow steps produce well-formed JSONL with
+/// no interleaved lines. The file is held open after the first `append` to
+/// avoid a per-call `open` syscall.
 pub struct AuditLog {
     path: PathBuf,
-    /// Guards `append` so concurrent parallel-step writes do not interleave.
-    write_lock: Mutex<()>,
+    /// Guards `append` and holds the open writer. `None` until the first
+    /// `append` call (lazy creation preserves the lazy-file contract of `new`).
+    writer: Mutex<Option<BufWriter<fs::File>>>,
 }
 
 /// Error type for audit operations.
@@ -186,28 +189,37 @@ impl AuditLog {
         let _ = fs::remove_file(&probe);
         Ok(Self {
             path,
-            write_lock: Mutex::new(()),
+            writer: Mutex::new(None),
         })
     }
 
     /// Append an entry to the audit log (append-only).
     ///
-    /// Acquires `write_lock` before opening the file so concurrent calls from
-    /// parallel workflow steps do not interleave partial JSONL lines.
+    /// Acquires the writer lock before writing so concurrent calls from
+    /// parallel workflow steps do not interleave partial JSONL lines. The
+    /// underlying file is opened on the first append and held open for all
+    /// subsequent calls to avoid a per-call `open` syscall.
     pub fn append(&self, entry: &AuditEntry) -> Result<(), AuditError> {
-        // Recover from lock poison: the guard holds `()` so a poisoned lock
-        // carries no invalid state. Panicking here would abort the approval
-        // flow and violate the fail-open-on-write contract.
-        let _guard = self
-            .write_lock
+        // Recover from lock poison: the guard holds the BufWriter state, but
+        // a poisoned lock carries no invalid file data — the file is
+        // append-only so the worst case is a missing line, not corruption.
+        let mut guard = self
+            .writer
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)?;
+        if guard.is_none() {
+            let file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.path)?;
+            *guard = Some(BufWriter::new(file));
+        }
+        let writer = guard.as_mut().expect("just initialised above");
         let line = serde_json::to_string(entry)?;
-        writeln!(file, "{line}")?;
+        writeln!(writer, "{line}")?;
+        // Flush after every entry so data is durable: a BufWriter with an
+        // un-flushed buffer would silently lose entries on process exit.
+        writer.flush()?;
         Ok(())
     }
 
