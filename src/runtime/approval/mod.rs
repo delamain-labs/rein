@@ -463,6 +463,29 @@ impl AuditingApprovalHandler {
         }
     }
 
+    /// Construct the handler with workflow and agent context in one call.
+    ///
+    /// Equivalent to `Self::new(inner, log).with_workflow(wf).with_agent(agent)`
+    /// but avoids the builder chain for single-shot construction.
+    ///
+    /// `None` values leave the corresponding audit field absent; non-empty
+    /// strings are stored as-is (empty strings behave like `None` — they are
+    /// discarded to match the invariant enforced by `with_workflow`/`with_agent`).
+    #[must_use]
+    pub fn with_context(
+        inner: Arc<dyn ApprovalHandler>,
+        log: Arc<AuditLog>,
+        workflow_name: Option<impl Into<String>>,
+        agent_name: Option<impl Into<String>>,
+    ) -> Self {
+        Self {
+            inner,
+            log,
+            workflow_name: workflow_name.map(Into::into).filter(|s: &String| !s.is_empty()),
+            agent_name: agent_name.map(Into::into).filter(|s: &String| !s.is_empty()),
+        }
+    }
+
     /// Attach a workflow name to every audit entry emitted by this handler.
     ///
     /// Empty strings are silently ignored; the workflow field will remain `None`.
