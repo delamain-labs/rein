@@ -151,6 +151,40 @@ fn parse_agent_no_model() {
 // ── Capabilities ──────────────────────────────────────────────────────────
 
 #[test]
+fn parse_can_list_comma_separated() {
+    let src = "agent foo { can [zendesk.read_ticket, zendesk.reply_ticket] }";
+    let f = parse_ok(src);
+    let a = &f.agents[0];
+    assert_eq!(a.can.len(), 2);
+    assert_eq!(a.can[0].action, "read_ticket");
+    assert_eq!(a.can[1].action, "reply_ticket");
+}
+
+#[test]
+fn parse_can_list_comma_with_spaces() {
+    let src = "agent foo { can [ zendesk.read_ticket , zendesk.reply_ticket ] }";
+    let f = parse_ok(src);
+    assert_eq!(f.agents[0].can.len(), 2);
+}
+
+#[test]
+fn parse_can_list_trailing_comma() {
+    // Trailing comma is accepted (consistent with JSON5 / Rust array literals)
+    let src = "agent foo { can [zendesk.read_ticket, zendesk.reply_ticket,] }";
+    let f = parse_ok(src);
+    assert_eq!(f.agents[0].can.len(), 2);
+}
+
+#[test]
+fn parse_cannot_list_comma_separated() {
+    let src = "agent foo { cannot [zendesk.delete_ticket, zendesk.admin] }";
+    let f = parse_ok(src);
+    assert_eq!(f.agents[0].cannot.len(), 2);
+    assert_eq!(f.agents[0].cannot[0].action, "delete_ticket");
+    assert_eq!(f.agents[0].cannot[1].action, "admin");
+}
+
+#[test]
 fn parse_can_list() {
     let src = r#"
 agent foo {

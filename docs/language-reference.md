@@ -176,14 +176,18 @@ agent support_bot {
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `model` | value expr | Yes | AI model or provider name |
-| `can [...]` | capability list | No | Allowed actions (bracket list, newline-separated) |
-| `cannot [...]` | capability list | No | Denied actions (bracket list, newline-separated) |
+| `can [...]` | capability list | No | Allowed actions (bracket list, comma or newline-separated) |
+| `cannot [...]` | capability list | No | Denied actions (bracket list, comma or newline-separated) |
 | `budget` | budget expr | No | Spending limit |
 | `guardrails` | block | No | Safety guardrails |
 
-**Capability syntax:** Capabilities use `namespace.action` format with newline-separated bracket lists (no commas):
+**Capability syntax:** Capabilities use `namespace.action` format. Both comma-separated and newline-separated styles are accepted:
 
 ```rein
+# comma-separated (concise, consistent with metrics: [...])
+can [search.web, files.read, stripe.refund up to $50]
+
+# newline-separated (multi-line, existing files continue to work)
 can [
     search.web
     files.read
@@ -865,7 +869,7 @@ Exit codes:
 | Thing you want | Correct syntax | Common mistake |
 |---------------|---------------|----------------|
 | Provider API key | `key: env("...")` | `api_key: env("...")` |
-| Capability list | `can [\n  a.b\n  c.d\n]` | `can: a, b, c` (no commas, use brackets) |
+| Capability list | `can [a.b, c.d]` or `can [\n  a.b\n  c.d\n]` | `can: a, b, c` (must use brackets) |
 | Secrets block | `secrets { ... }` | `secret { ... }` (must be plural) |
 | Workflow trigger | `trigger: event_name` | `trigger: schedule("...")` (use `schedule` block) |
 | Step ordering | `when: condition` | `depends_on: step_name` (not supported) |

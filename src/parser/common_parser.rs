@@ -212,6 +212,10 @@ impl Parser {
                         self.current_span(),
                     ));
                 }
+                TokenKind::Comma => {
+                    // skip optional comma between capabilities (e.g. `can [a.b, c.d]`)
+                    self.advance();
+                }
                 _ => caps.push(self.parse_capability()?),
             }
         }
