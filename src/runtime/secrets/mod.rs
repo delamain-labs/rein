@@ -107,7 +107,7 @@ impl SecretResolver {
 /// Non-alphanumeric characters are replaced with `_`; the result is uppercased
 /// and prefixed with `VAULT_`. Used both at resolution time and in error messages
 /// so the two sites cannot diverge.
-pub(crate) fn vault_env_key(path: &str) -> String {
+pub fn vault_env_key(path: &str) -> String {
     format!(
         "VAULT_{}",
         path.chars()

@@ -216,6 +216,19 @@ pub enum RunEvent {
         #[serde(default = "default_error_kind")]
         error_kind: StepErrorKind,
     },
+    /// A vault-sourced secret fell back to a `VAULT_*` environment variable
+    /// because the real Vault was not configured.
+    ///
+    /// Emitted before the run starts (during secret resolution). Appears at the
+    /// head of the trace so operators can identify degraded secret sourcing.
+    SecretFallback {
+        /// Name of the secret binding (as declared in the `secrets { }` block).
+        binding: String,
+        /// Vault path that was requested (e.g. `"secret/prod/db"`).
+        vault_path: String,
+        /// The `VAULT_*` env var that was used as a fallback.
+        fallback_env_var: String,
+    },
     /// A workflow was hard-aborted by a policy-enforcement or infrastructure
     /// error. Emitted on any hard abort — by `run_steps` before returning a
     /// hard error, and synthesized by `run_workflow` for stage-level failures.
@@ -623,6 +636,16 @@ fn summarize_event(event: &RunEvent, lines: &mut Vec<String>, turn: &mut usize) 
         }
         RunEvent::StepSkipped { step, reason, .. } => {
             lines.push(format!("  ⏭ step '{step}' skipped: {reason}"));
+        }
+        RunEvent::SecretFallback {
+            binding,
+            vault_path,
+            fallback_env_var,
+        } => {
+            lines.push(format!(
+                "  ⚠ secret: binding '{binding}' used env var fallback '{fallback_env_var}' \
+                 (vault path '{vault_path}' not configured)"
+            ));
         }
         RunEvent::WorkflowAborted {
             error_kind, reason, ..

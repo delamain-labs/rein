@@ -296,6 +296,67 @@ fn step_failed_otel_span_includes_error_kind_attribute() {
     );
 }
 
+// --- #384: SecretFallback OTEL span ---
+
+/// #384: SecretFallback event must export as "rein.secret.fallback" span with
+/// binding, vault_path, and fallback_env_var attributes so OTEL dashboards can
+/// detect and alert on vault fallback occurrences.
+#[test]
+fn secret_fallback_event_produces_otel_span() {
+    use crate::runtime::RunEvent;
+    use crate::runtime::RunTrace;
+
+    let events = vec![RunEvent::SecretFallback {
+        binding: "db_pass".to_string(),
+        vault_path: "secret/prod/db".to_string(),
+        fallback_env_var: "VAULT_SECRET_PROD_DB".to_string(),
+    }];
+    let trace = RunTrace::from_events(events);
+    let structured = trace.to_structured(
+        "test_agent",
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T00:00:01Z",
+        1000,
+    );
+    let resource_spans = to_otlp(&structured);
+    let spans = &resource_spans.scope_spans[0].spans;
+
+    let fallback_span = spans
+        .iter()
+        .find(|s| s.name == "rein.secret.fallback")
+        .expect("must have a rein.secret.fallback span");
+
+    let binding_attr = fallback_span
+        .attributes
+        .iter()
+        .find(|a| a.key == "rein.secret.binding")
+        .expect("must have rein.secret.binding attribute");
+    assert_eq!(
+        binding_attr.value.string_value.as_deref(),
+        Some("db_pass")
+    );
+
+    let vault_attr = fallback_span
+        .attributes
+        .iter()
+        .find(|a| a.key == "rein.secret.vault_path")
+        .expect("must have rein.secret.vault_path attribute");
+    assert_eq!(
+        vault_attr.value.string_value.as_deref(),
+        Some("secret/prod/db")
+    );
+
+    let env_attr = fallback_span
+        .attributes
+        .iter()
+        .find(|a| a.key == "rein.secret.fallback_env_var")
+        .expect("must have rein.secret.fallback_env_var attribute");
+    assert_eq!(
+        env_attr.value.string_value.as_deref(),
+        Some("VAULT_SECRET_PROD_DB")
+    );
+}
+
 // Normal (non-partial) trace must NOT have rein.run.partial attribute.
 #[test]
 fn non_partial_trace_has_no_partial_attribute() {

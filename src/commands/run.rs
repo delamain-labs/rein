@@ -105,10 +105,15 @@ pub fn run_agent(
         engine = engine.with_circuit_breaker(cb);
     }
 
-    // Resolve and inject secrets if defined.
+    // Resolve and inject secrets if defined. Collect any vault-fallback events
+    // so they can be prepended to the run trace for structured tracing / OTEL.
+    let mut secret_fallback_events: Vec<rein::runtime::RunEvent> = Vec::new();
     if !file.secrets.is_empty() {
         match resolve_secrets(&file.secrets) {
-            Ok(map) => engine = engine.with_secrets(map),
+            Ok((map, events)) => {
+                engine = engine.with_secrets(map);
+                secret_fallback_events = events;
+            }
             Err(code) => return code,
         }
     }
@@ -161,10 +166,11 @@ pub fn run_agent(
             audit_log,
             stage_timeout_secs,
             run_timeout_secs,
+            secret_fallback_events,
         );
     }
 
-    run_engine(&engine, user_message)
+    run_engine(&engine, user_message, secret_fallback_events)
 }
 
 // TODO(#440): extract RunOptions struct to reduce parameter count.
@@ -179,6 +185,7 @@ fn run_workflow_mode(
     audit_log_path: Option<&std::path::Path>,
     stage_timeout_secs: Option<u64>,
     run_timeout_secs: Option<u64>,
+    pre_events: Vec<rein::runtime::RunEvent>,
 ) -> i32 {
     // Only inject a global handler when env-var overrides are active (CI/testing).
     // In normal runs `approval_handler` is `None` so each step resolves its own
@@ -294,10 +301,14 @@ fn run_workflow_mode(
             } else {
                 eprintln!("Final output: {}", result.final_output);
             }
-            if !result.events.is_empty() {
+            // Prepend secret-fallback events so they appear at the head of the
+            // workflow trace, before the first step event.
+            let mut display_events = pre_events;
+            display_events.extend(result.events.iter().cloned());
+            if !display_events.is_empty() {
                 eprintln!(
                     "{}",
-                    rein::runtime::RunTrace::summarize_events(&result.events)
+                    rein::runtime::RunTrace::summarize_events(&display_events)
                 );
             }
             eprintln!("Duration: {duration:.2?}");
@@ -309,13 +320,16 @@ fn run_workflow_mode(
         }
         Err((e, partial_events)) => {
             eprintln!("Workflow failed: {e}");
-            // Emit any partial events (e.g. WorkflowAborted) to stderr so the
-            // operator can see the abort cause. (OTEL export is not wired to
-            // the workflow path; these events do not reach an OTEL sink here.)
-            if !partial_events.is_empty() {
+            // Emit pre-events (e.g. SecretFallback) followed by any partial
+            // events (e.g. WorkflowAborted) to stderr so the operator can see
+            // the abort cause. (OTEL export is not wired to the workflow path;
+            // these events do not reach an OTEL sink here.)
+            let mut display_events = pre_events;
+            display_events.extend(partial_events.iter().cloned());
+            if !display_events.is_empty() {
                 eprintln!(
                     "{}",
-                    rein::runtime::RunTrace::summarize_events(&partial_events)
+                    rein::runtime::RunTrace::summarize_events(&display_events)
                 );
             }
             // Exit 2: hard abort (policy rejection, cyclic deps, infra failure).
@@ -327,7 +341,11 @@ fn run_workflow_mode(
     }
 }
 
-fn run_engine(engine: &rein::runtime::engine::AgentEngine<'_>, user_message: &str) -> i32 {
+fn run_engine(
+    engine: &rein::runtime::engine::AgentEngine<'_>,
+    user_message: &str,
+    pre_events: Vec<rein::runtime::RunEvent>,
+) -> i32 {
     let start = Instant::now();
     let result = super::provider::block_on(engine.run(user_message));
 
@@ -336,7 +354,13 @@ fn run_engine(engine: &rein::runtime::engine::AgentEngine<'_>, user_message: &st
             let duration = start.elapsed();
             eprintln!();
             eprintln!("--- Run complete ---");
-            eprintln!("{}", run_result.trace.summary());
+            // Prepend secret-fallback events so they appear at the head of the
+            // trace summary, before the first LLM call.
+            let mut all_events = pre_events;
+            all_events.extend(run_result.trace.events.iter().cloned());
+            if !all_events.is_empty() {
+                eprintln!("{}", rein::runtime::RunTrace::summarize_events(&all_events));
+            }
             eprintln!("Duration: {duration:.2?}");
             0
         }
@@ -391,20 +415,38 @@ fn resolve_otel_mode(
 /// Fails fast on the first unresolvable binding — subsequent bindings are not
 /// checked. This is intentional to keep startup errors actionable one at a time.
 ///
-/// Returns a flat `HashMap<name, value>` or a CLI-friendly error code.
+/// Returns a flat `HashMap<name, value>` paired with any `SecretFallback` events
+/// (one per vault-sourced binding that fell back to a `VAULT_*` env var).
+/// Callers should prepend the returned events to the run trace for structured
+/// tracing and OTEL export.
 fn resolve_secrets(
     defs: &[rein::ast::SecretsDef],
-) -> Result<std::collections::HashMap<String, String>, i32> {
+) -> Result<(std::collections::HashMap<String, String>, Vec<rein::runtime::RunEvent>), i32> {
+    use rein::ast::SecretSource;
     use rein::runtime::secrets::{SecretError, SecretResolver};
     let mut map = std::collections::HashMap::new();
+    let mut fallback_events: Vec<rein::runtime::RunEvent> = Vec::new();
     for def in defs {
         let secret_resolver = SecretResolver::from_def(def);
         match secret_resolver.resolve_all() {
             Ok(resolved) => {
-                for (name, secret) in resolved {
-                    if let Some(ref warn) = secret.warning {
-                        eprintln!("warning: {warn}");
+                for (name, secret) in &resolved {
+                    // The warning is only set for vault→env fallbacks.
+                    // Find the vault path for this binding to build a structured event.
+                    if secret.warning.is_some()
+                        && let Some(binding_def) =
+                            def.bindings.iter().find(|b| b.name == *name)
+                        && let SecretSource::Vault { path } = &binding_def.source
+                    {
+                        let env_key = rein::runtime::secrets::vault_env_key(path);
+                        fallback_events.push(rein::runtime::RunEvent::SecretFallback {
+                            binding: name.clone(),
+                            vault_path: path.clone(),
+                            fallback_env_var: env_key,
+                        });
                     }
+                }
+                for (name, secret) in resolved {
                     map.insert(name, secret.value);
                 }
             }
@@ -435,7 +477,7 @@ fn resolve_secrets(
             }
         }
     }
-    Ok(map)
+    Ok((map, fallback_events))
 }
 
 /// Return a global approval handler override when an env-var is set, or `None`
