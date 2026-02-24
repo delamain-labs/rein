@@ -2693,7 +2693,7 @@ async fn independent_step_runs_even_if_sibling_fails() {
     // step_b (bot) runs successfully
     provider.push_response(simple_response("step_b_output"));
 
-    let (results, _events) = run_steps(&workflow, &ctx)
+    let (results, events) = run_steps(&workflow, &ctx)
         .await
         .expect("run_steps must not abort when only independent step fails");
 
@@ -2706,6 +2706,13 @@ async fn independent_step_runs_even_if_sibling_fails() {
         step_a_result.status,
         StageResultStatus::Failed,
         "failed step must have status Failed; results: {results:?}"
+    );
+    // A StepFailed event must be emitted — this is the trigger condition for the scenario.
+    assert!(
+        events.iter().any(
+            |e| matches!(e, crate::runtime::RunEvent::StepFailed { step, .. } if step == "step_a")
+        ),
+        "expected StepFailed event for step_a; events: {events:?}"
     );
     // step_b should have produced output
     let step_b_result = results

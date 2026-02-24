@@ -305,9 +305,14 @@ impl AuditingApprovalHandler {
     }
 
     /// Attach a workflow name to every audit entry emitted by this handler.
+    ///
+    /// Empty strings are silently ignored; the workflow field will remain `None`.
     #[must_use]
     pub fn with_workflow(mut self, name: impl Into<String>) -> Self {
-        self.workflow_name = Some(name.into());
+        let name = name.into();
+        if !name.is_empty() {
+            self.workflow_name = Some(name);
+        }
         self
     }
 
@@ -393,8 +398,8 @@ impl ApprovalHandler for AuditingApprovalHandler {
         };
         // Capture the rejection reason if present so the audit record can
         // reconstruct _why_ an approval was rejected (not just that it was).
-        let rejection_reason = match &status {
-            ApprovalStatus::Rejected { reason } => Some(reason.as_str()),
+        let rejection_reason: Option<String> = match &status {
+            ApprovalStatus::Rejected { reason } => Some(reason.clone()),
             _ => None,
         };
 
@@ -414,7 +419,7 @@ impl ApprovalHandler for AuditingApprovalHandler {
         // Only include "reason" for rejected decisions; omitting the key for
         // approved/timed-out outcomes avoids a noisy `null` in audit records.
         if let Some(r) = rejection_reason {
-            meta["reason"] = serde_json::Value::String(r.to_string());
+            meta["reason"] = serde_json::Value::String(r);
         }
         // Include "original_status" only when it diverges from "decision" —
         // i.e., when the handler returned Pending but the compliance field
