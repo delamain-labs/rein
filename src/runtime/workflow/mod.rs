@@ -243,6 +243,11 @@ pub(super) fn build_result(
     events: Vec<super::RunEvent>,
     event_timestamps_ms: Vec<u64>,
 ) -> WorkflowResult {
+    debug_assert_eq!(
+        events.len(),
+        event_timestamps_ms.len(),
+        "event_timestamps_ms must be parallel to events (one entry per event)"
+    );
     let total_cost = stage_results.iter().map(|r| r.cost_cents).sum();
     let total_tokens = stage_results.iter().map(|r| r.tokens).sum();
     WorkflowResult {

@@ -254,7 +254,9 @@ async fn full_pipeline_trace_summary_is_readable() {
 // ── Workflow integration tests ───────────────────────────────────────────
 
 use rein::ast::{ExecutionMode, RouteRule, Span, Stage, WorkflowDef};
-use rein::runtime::workflow::{WorkflowContext, run_parallel, run_sequential};
+use rein::runtime::workflow::{
+    WorkflowContext, run_parallel, run_sequential, run_sequential_resumable,
+};
 
 fn make_workflow(name: &str, trigger: &str, agents: &[&str]) -> WorkflowDef {
     WorkflowDef {
@@ -352,4 +354,52 @@ async fn integration_parallel_workflow() {
     assert_eq!(result.stage_results.len(), 2);
     assert!(result.final_output.contains("Sentiment"));
     assert!(result.final_output.contains("Summary"));
+
+    // #388: event_timestamps_ms must be parallel to events for parallel workflows too.
+    assert_eq!(
+        result.event_timestamps_ms.len(),
+        result.events.len(),
+        "event_timestamps_ms must have one entry per event"
+    );
+}
+
+#[tokio::test]
+async fn integration_resumable_workflow_timestamps_parallel() {
+    let source = r#"
+        agent classifier { model: openai can [ zendesk.classify ] }
+        agent responder { model: openai can [ zendesk.reply_ticket ] }
+    "#;
+    let file = rein::parser::parse(source).expect("parse");
+    let workflow = make_workflow("pipe", "ticket_123", &["classifier", "responder"]);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    provider.push_response(simple_response("Category: billing."));
+    provider.push_response(simple_response("Resolved your billing issue."));
+
+    let state_path = std::env::temp_dir().join("rein_test_resumable_timestamps.json");
+    let _ = std::fs::remove_file(&state_path); // start clean
+
+    let result = run_sequential_resumable(&workflow, &ctx, &state_path)
+        .await
+        .expect("ok");
+
+    assert_eq!(result.stage_results.len(), 2);
+
+    // #388: event_timestamps_ms must be parallel to events for resumable workflows.
+    assert_eq!(
+        result.event_timestamps_ms.len(),
+        result.events.len(),
+        "event_timestamps_ms must have one entry per event in resumable path"
+    );
 }
