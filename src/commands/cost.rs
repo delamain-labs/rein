@@ -77,20 +77,20 @@ fn print_summary(traces: &[StructuredTrace]) {
 
     println!("Cost Summary");
     println!("============");
-    println!("Runs:         {}", traces.len());
+    println!("Runs:           {}", traces.len());
     println!(
-        "Total cost:   ${}.{:02}",
+        "Total cost:     ${}.{:02}",
         total_cost / 100,
         total_cost % 100
     );
-    println!("Total tokens: {total_tokens}");
-    println!("LLM calls:    {total_llm_calls}");
-    println!("Tool calls:   {total_tool_calls} ({total_denied} denied)");
+    println!("Total tokens:   {total_tokens}");
+    println!("LLM calls:      {total_llm_calls}");
+    println!("Tool calls:     {total_tool_calls} ({total_denied} denied)");
     if total_timeouts > 0 {
         println!("Stage timeouts: {total_timeouts}");
     }
     println!(
-        "Total time:   {}.{:01}s",
+        "Total time:     {}.{:01}s",
         total_duration / 1000,
         (total_duration % 1000) / 100
     );
