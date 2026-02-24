@@ -27,8 +27,8 @@ grouped by type: **Breaking**, **Added**, **Changed**, **Fixed**, **Removed**.
 
   **Migration:** Shell scripts or CI pipelines that treated exit `1` as "hard
   failure" must now also handle exit `2` for fatal workflow errors. Scripts
-  that relied on any failure producing exit `1` should switch to `exit $? -ne 0`
-  or explicitly test for `$? -ge 1`.
+  that relied on any failure producing exit `1` should check for non-zero exit
+  with `[ $? -ne 0 ]` or test for `$? -ge 1`.
 
 - **`RunError::BudgetExceeded` wire format changed** (PR #479)
 
