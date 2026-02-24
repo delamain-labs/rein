@@ -186,8 +186,8 @@ pub enum RunEvent {
         error_kind: String,
     },
     /// A workflow was hard-aborted by a policy-enforcement or infrastructure
-    /// error. Emitted by `run_steps` before returning a hard error so that
-    /// OTEL consumers can attribute the abort to a specific cause.
+    /// error. Emitted on any hard abort — by `run_steps` before returning a
+    /// hard error, and synthesized by `run_workflow` for stage-level failures.
     ///
     /// Hard aborts include: approval rejected/timed-out/pending, cyclic
     /// dependencies, circular routes, missing route targets, and persistence

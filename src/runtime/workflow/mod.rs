@@ -768,9 +768,9 @@ fn apply_step_result(
 ///
 /// On hard error: `Err((error, partial_events))`. The `partial_events` vec
 /// includes a `RunEvent::WorkflowAborted` entry that carries the
-/// `error_kind` and `reason` from the abort, enabling OTEL consumers to
-/// attribute the abort to a specific cause. It also includes any step events
-/// that were collected before the abort (e.g. `StepStarted`).
+/// `error_kind` and `reason` from the abort, enabling callers (e.g. the
+/// stderr display in `run_workflow_mode`) to surface the abort cause. It
+/// also includes any step events collected before the abort (e.g. `StepStarted`).
 ///
 /// Callers that propagate the error without inspecting partial events can use
 /// `.map_err(|(e, _)| e)?` to recover the original `WorkflowError`.
@@ -1153,10 +1153,17 @@ pub async fn run_workflow(
 
     // Execute step blocks if present
     if !workflow.steps.is_empty() {
-        // On hard abort, run_steps returns the partial events (including
-        // WorkflowAborted) alongside the error so callers can pass them to
-        // OTEL consumers or display them to the user.
-        let (step_results, step_events) = run_steps(workflow, ctx).await?;
+        // On hard abort, merge stage events already in result.events with the
+        // step-phase partial events (including WorkflowAborted) so callers
+        // receive full context of both what ran and why it aborted.
+        let (step_results, step_events) = match run_steps(workflow, ctx).await {
+            Ok(ok) => ok,
+            Err((e, step_partial)) => {
+                let mut merged = std::mem::take(&mut result.events);
+                merged.extend(step_partial);
+                return Err((e, merged));
+            }
+        };
         for sr in step_results {
             result.total_cost_cents += sr.cost_cents;
             result.total_tokens += sr.tokens;

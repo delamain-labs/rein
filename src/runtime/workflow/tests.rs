@@ -3947,3 +3947,107 @@ async fn run_workflow_emits_workflow_aborted_on_stage_hard_error() {
         "WorkflowAborted must be emitted for stage-based hard errors; events: {partial_events:?}"
     );
 }
+
+/// #506: In a mixed workflow (stages + steps), when stages succeed but
+/// run_steps hard-aborts, the partial_events returned by run_workflow must
+/// include BOTH the stage events (from the successful stages) AND the
+/// WorkflowAborted event — not just the step-phase partial events.
+#[tokio::test]
+async fn run_workflow_mixed_abort_includes_stage_events() {
+    use crate::ast::{ApprovalDef, ApprovalKind, Span as AstSpan};
+    use crate::runtime::RunEvent;
+    use crate::runtime::approval::AutoRejectHandler;
+    use std::sync::Arc;
+
+    // One stage (sequential, succeeds) + one step with approval (hard-aborts).
+    let file = parse_file(
+        r#"
+        agent writer { model: openai }
+    "#,
+    );
+
+    let stage = Stage {
+        name: "draft".to_string(),
+        agent: "writer".to_string(),
+        route: RouteRule::Next,
+        span: Span::new(0, 1),
+    };
+
+    let step = StepDef {
+        name: "gated".to_string(),
+        agent: "writer".to_string(),
+        goal: None,
+        input: None,
+        output_constraints: vec![],
+        depends_on: vec![],
+        when: None,
+        on_failure: None,
+        send_to: None,
+        fallback: None,
+        for_each: None,
+        typed_input: None,
+        typed_outputs: vec![],
+        escalate: None,
+        approval: Some(ApprovalDef {
+            kind: ApprovalKind::Approve,
+            channel: "cli".to_string(),
+            destination: "#ops".to_string(),
+            timeout: None,
+            mode: None,
+            span: AstSpan::new(0, 1),
+        }),
+        span: AstSpan::new(0, 1),
+    };
+
+    let workflow = WorkflowDef {
+        name: "mixed".to_string(),
+        trigger: "start".to_string(),
+        stages: vec![stage],
+        steps: vec![step],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: Some(Arc::new(AutoRejectHandler::new("test rejection"))),
+        audit_log: None,
+        workflow_name: None,
+    };
+    // Stage consumes one response; step approval is handled by AutoRejectHandler.
+    provider.push_response(simple_response("stage output"));
+
+    let (_err, partial_events) = run_workflow(&workflow, &ctx)
+        .await
+        .expect_err("ApprovalRejected must cause run_workflow to return Err");
+
+    // Stage events (e.g. LlmCall from the draft stage) must be present.
+    let has_stage_events = partial_events
+        .iter()
+        .any(|e| matches!(e, RunEvent::LlmCall { .. }));
+    assert!(
+        has_stage_events,
+        "partial_events must include stage events (LlmCall) from the successful stage; \
+         got: {partial_events:?}"
+    );
+
+    // WorkflowAborted must also be present.
+    assert!(
+        partial_events
+            .iter()
+            .any(|e| matches!(e, RunEvent::WorkflowAborted { .. })),
+        "partial_events must include WorkflowAborted from the step hard-abort; \
+         got: {partial_events:?}"
+    );
+}
