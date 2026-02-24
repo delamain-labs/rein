@@ -462,8 +462,10 @@ fn summarize_event(event: &RunEvent, lines: &mut Vec<String>, turn: &mut usize) 
             lines.push(format!("  ✗ step '{step}' failed: {reason}"));
         }
         RunEvent::StageTimeout { turn, timeout_secs } => {
-            // Display as 1-indexed (turn + 1) to match the LlmCall summarizer
-            // convention which increments before printing. (#423)
+            // StageTimeout.turn is 0-indexed in the event struct (raw loop counter).
+            // Add 1 for the human-readable display so "first LLM call timed out"
+            // shows as "turn 1" rather than "turn 0", consistent with all other
+            // 1-indexed turn references in human-facing summarize_event output. (#423)
             let display_turn = turn + 1;
             lines.push(format!(
                 "  ✗ turn {display_turn} timed out after {timeout_secs}s"
