@@ -864,7 +864,7 @@ fn stage_timeout_summary_uses_one_based_turn_number() {
     );
 }
 
-// #452: Deserializing legacy JSON (without `error_kind`) must produce "unknown"
+// #452: Deserializing legacy JSON (without `error_kind`) must produce Unknown
 // rather than a missing-field error. This guards the backward-compat promise
 // documented in the CHANGELOG.
 #[test]
@@ -877,8 +877,9 @@ fn step_failed_deserializes_error_kind_default_to_unknown() {
         panic!("expected StepFailed variant");
     };
     assert_eq!(
-        error_kind, "unknown",
-        "missing error_kind key must default to \"unknown\""
+        error_kind,
+        StepErrorKind::Unknown,
+        "missing error_kind key must default to Unknown"
     );
 }
 
@@ -1010,4 +1011,39 @@ fn truncate_agent_output_is_accessible_from_runtime_module() {
     let short = "hello";
     let result = truncate_agent_output(short);
     assert_eq!(&*result, short, "short output must be returned unchanged");
+}
+
+// --- #505: StepErrorKind typed enum ---
+
+/// #505: StepErrorKind must be exported from the crate root and match exhaustively.
+#[test]
+fn step_error_kind_enum_is_exported() {
+    use crate::runtime::StepErrorKind;
+    // Verify the enum is pattern-matchable (compile-time exhaustiveness check).
+    let kind = StepErrorKind::AgentNotFound;
+    let s = serde_json::to_string(&kind).unwrap();
+    assert_eq!(s, "\"agent_not_found\"", "AgentNotFound must serialize to snake_case");
+}
+
+/// #505: StepFailed error_kind field must be StepErrorKind, not String.
+#[test]
+fn step_failed_event_uses_typed_error_kind() {
+    use crate::runtime::{RunEvent, StepErrorKind};
+    let event = RunEvent::StepFailed {
+        step: "deploy".to_string(),
+        reason: "agent not found".to_string(),
+        error_kind: StepErrorKind::AgentNotFound,
+    };
+    let RunEvent::StepFailed { error_kind, .. } = event else {
+        panic!("expected StepFailed");
+    };
+    assert_eq!(error_kind, StepErrorKind::AgentNotFound);
+}
+
+/// #505: StepErrorKind must deserialize unknown strings to Unknown via #[serde(other)].
+#[test]
+fn step_error_kind_deserializes_unknown_to_unknown() {
+    use crate::runtime::StepErrorKind;
+    let kind: StepErrorKind = serde_json::from_str("\"future_variant\"").unwrap();
+    assert_eq!(kind, StepErrorKind::Unknown, "unknown strings must map to Unknown");
 }

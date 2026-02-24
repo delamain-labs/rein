@@ -3306,7 +3306,7 @@ async fn for_each_partial_failure_discards_completed_iterations() {
         events.iter().any(|e| matches!(
             e,
             crate::runtime::RunEvent::StepFailed { step, error_kind, .. }
-            if step == "batch" && error_kind == "stage_failed"
+            if step == "batch" && *error_kind == crate::runtime::StepErrorKind::StageFailed
         )),
         "for_each failure must produce error_kind \"stage_failed\"; events: {events:?}"
     );
@@ -3632,8 +3632,9 @@ async fn step_failed_carries_error_kind_agent_not_found() {
         panic!("expected StepFailed variant");
     };
     assert_eq!(
-        error_kind, "agent_not_found",
-        "AgentNotFound error must produce error_kind=\"agent_not_found\""
+        *error_kind,
+        crate::runtime::StepErrorKind::AgentNotFound,
+        "AgentNotFound error must produce error_kind=AgentNotFound"
     );
 }
 
@@ -3686,8 +3687,9 @@ async fn step_failed_carries_error_kind_stage_failed() {
         panic!("expected StepFailed variant");
     };
     assert_eq!(
-        error_kind, "stage_failed",
-        "StageFailed error must produce error_kind=\"stage_failed\""
+        *error_kind,
+        crate::runtime::StepErrorKind::StageFailed,
+        "StageFailed error must produce error_kind=StageFailed"
     );
 }
 

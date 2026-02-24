@@ -265,7 +265,7 @@ fn step_failed_otel_span_includes_error_kind_attribute() {
     let events = vec![RunEvent::StepFailed {
         step: "deploy".to_string(),
         reason: "agent not found: bot".to_string(),
-        error_kind: "agent_not_found".to_string(),
+        error_kind: crate::runtime::StepErrorKind::AgentNotFound,
     }];
     let trace = RunTrace::from_events(events);
     let structured = trace.to_structured(

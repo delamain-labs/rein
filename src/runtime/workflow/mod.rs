@@ -248,6 +248,23 @@ impl WorkflowError {
             Self::CyclicDependency(_) => "cyclic_dependency",
         }
     }
+
+    /// Convert to the typed `StepErrorKind` enum for use in `RunEvent::StepFailed`.
+    #[must_use]
+    pub fn to_step_error_kind(&self) -> super::StepErrorKind {
+        match self {
+            Self::AgentNotFound(_) => super::StepErrorKind::AgentNotFound,
+            Self::StageFailed { .. } => super::StepErrorKind::StageFailed,
+            Self::StageTimedOut { .. } => super::StepErrorKind::StageTimedOut,
+            Self::StageNotFound(_) => super::StepErrorKind::StageNotFound,
+            Self::PersistenceFailure(_) => super::StepErrorKind::PersistenceFailure,
+            Self::CircularRoute(_) => super::StepErrorKind::CircularRoute,
+            Self::ApprovalRejected { .. } => super::StepErrorKind::ApprovalRejected,
+            Self::ApprovalTimedOut { .. } => super::StepErrorKind::ApprovalTimedOut,
+            Self::ApprovalPending { .. } => super::StepErrorKind::ApprovalPending,
+            Self::CyclicDependency(_) => super::StepErrorKind::CyclicDependency,
+        }
+    }
 }
 
 impl std::error::Error for WorkflowError {}
@@ -714,7 +731,7 @@ fn apply_step_result(
             if e.is_hard_error() {
                 return StepOutcome::HardError(e);
             }
-            let error_kind = e.kind_str().to_string();
+            let error_kind = e.to_step_error_kind();
             let reason = e.to_string();
             state.blocked_steps.insert(step.name.clone());
             // Insert an empty output so the step appears in `outputs` for
