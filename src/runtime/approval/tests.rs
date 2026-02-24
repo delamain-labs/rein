@@ -1455,7 +1455,10 @@ struct EnvGuard {
 
 impl EnvGuard {
     fn set(key: &'static str, value: &str) -> Self {
-        // SAFETY: serialised by #[serial] — no concurrent thread reads the env.
+        // SAFETY: the env mutation is scoped to a single test binary entry
+        // point serialised by #[serial]. Callers use `flavor = "current_thread"`
+        // to eliminate worker threads spawned by Tokio, so no concurrent thread
+        // is reading the variable when set_var runs.
         unsafe { std::env::set_var(key, value) };
         Self { key }
     }
@@ -1463,7 +1466,10 @@ impl EnvGuard {
 
 impl Drop for EnvGuard {
     fn drop(&mut self) {
-        // SAFETY: serialised by #[serial] — no concurrent thread reads the env.
+        // SAFETY: the env mutation is scoped to a single test binary entry
+        // point serialised by #[serial]. Tests use `flavor = "current_thread"`
+        // (see below) to eliminate worker threads spawned by Tokio, so no
+        // concurrent thread is reading the variable when set_var/remove_var run.
         unsafe { std::env::remove_var(self.key) };
     }
 }
@@ -1473,8 +1479,11 @@ impl Drop for EnvGuard {
 /// exercise the production resolve path without blocking on stdin.
 ///
 /// `#[serial]` serialises execution with other env-var-mutating tests to prevent
-/// data races on the process environment.
-#[tokio::test]
+/// data races on the process environment. `flavor = "current_thread"` is required
+/// alongside `#[serial]` so Tokio does not spawn additional worker threads that
+/// could read the env var concurrently — `#[serial]` only serialises test entry
+/// points, not threads spawned by the runtime.
+#[tokio::test(flavor = "current_thread")]
 #[serial_test::serial]
 async fn rein_test_approval_handler_auto_approve_overrides_cli() {
     let _guard = EnvGuard::set("REIN_TEST_APPROVAL_HANDLER", "auto_approve");
@@ -1490,16 +1499,22 @@ async fn rein_test_approval_handler_auto_approve_overrides_cli() {
 
 /// #507: When REIN_TEST_APPROVAL_HANDLER=auto_reject, resolve_approval_handler
 /// must return an AutoRejectHandler regardless of the channel type.
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 #[serial_test::serial]
 async fn rein_test_approval_handler_auto_reject_overrides_cli() {
     let _guard = EnvGuard::set("REIN_TEST_APPROVAL_HANDLER", "auto_reject");
     let approval = make_approval_for_channel("cli", "");
     let handler = resolve_approval_handler(&approval);
     let status = handler.request_approval("step", "output", &approval).await;
-    assert!(
-        matches!(status, ApprovalStatus::Rejected { .. }),
-        "REIN_TEST_APPROVAL_HANDLER=auto_reject must return Rejected; got {status:?}"
+    // Check the exact reason from AutoRejectHandler::new("test rejection") to
+    // confirm the override routed to AutoRejectHandler and not to CliApprovalHandler
+    // (which returns "Failed to read input" on EOF or "Human reviewer rejected").
+    assert_eq!(
+        status,
+        ApprovalStatus::Rejected {
+            reason: "test rejection".to_string()
+        },
+        "REIN_TEST_APPROVAL_HANDLER=auto_reject must return AutoRejectHandler reason; got {status:?}"
     );
 }
 
@@ -1513,7 +1528,7 @@ async fn rein_test_approval_handler_auto_reject_overrides_cli() {
 /// Receiving a Rejected status whose reason contains "500" confirms both:
 ///   (a) the env var override was NOT applied (no auto_approve), and
 ///   (b) the normal webhook path was reached (not auto_reject).
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 #[serial_test::serial]
 async fn rein_test_approval_handler_unknown_value_is_ignored() {
     use wiremock::matchers::{method, path};

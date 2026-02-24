@@ -89,6 +89,13 @@ impl ApprovalHandler for CliApprovalHandler {
 
         // Offload the blocking stdin read to a dedicated thread so the Tokio
         // executor thread is not blocked while waiting for human input.
+        //
+        // Known limitation: if the caller's Future is dropped (e.g. engine
+        // timeout or ctrl-C), the `.await` on the JoinHandle is cancelled but
+        // the blocking thread continues running until stdin produces a line or
+        // EOF. This is a Tokio design constraint — blocking threads cannot be
+        // interrupted. A workflow-level `ApprovalDef.timeout` can be used to
+        // bound the overall gate wait time at a higher layer (#508).
         let line = tokio::task::spawn_blocking(|| {
             let mut s = String::new();
             std::io::stdin().read_line(&mut s).map(|_| s)
@@ -644,6 +651,12 @@ pub fn resolve_approval_handler(approval: &ApprovalDef) -> Box<dyn ApprovalHandl
     // Allow hermetic test overrides without requiring callers to inject a handler.
     // Unknown values fall through to the normal channel dispatch so a typo cannot
     // silently auto-approve a production workflow.
+    //
+    // `#[cfg(test)]`: This block is excluded from production builds entirely —
+    // the env var has no effect in release binaries. This prevents the override
+    // from being used as a bypass vector in deployed systems even if the variable
+    // is accidentally set in the environment.
+    #[cfg(test)]
     match std::env::var("REIN_TEST_APPROVAL_HANDLER").as_deref() {
         Ok("auto_approve") => {
             eprintln!(
