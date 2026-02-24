@@ -143,6 +143,24 @@ pub fn parse_timeout(s: &str) -> Option<u64> {
     }
 }
 
+/// Return the byte index at which `output` should be cut, or `None` if no
+/// cut is needed.
+///
+/// The index is computed with [`str::floor_char_boundary`] so it always
+/// lands on a valid UTF-8 character boundary even when the limit falls
+/// inside a multibyte codepoint.
+///
+/// Both [`truncate_agent_output`] (which appends [`TRUNCATION_MARKER`]) and
+/// [`write_cli_prompt`] (which shows a standalone notice line) call this
+/// helper so the threshold logic has a single source of truth.
+fn byte_truncation_cut(output: &str) -> Option<usize> {
+    if output.len() > AGENT_OUTPUT_PREVIEW_LIMIT {
+        Some(output.floor_char_boundary(AGENT_OUTPUT_PREVIEW_LIMIT))
+    } else {
+        None
+    }
+}
+
 /// Truncate `output` to [`AGENT_OUTPUT_PREVIEW_LIMIT`] bytes, appending
 /// [`TRUNCATION_MARKER`] when a cut is made.
 ///
@@ -154,11 +172,9 @@ pub fn parse_timeout(s: &str) -> Option<u64> {
 /// the crate can construct the same truncated fixtures as the production
 /// handlers without duplicating the truncation logic.
 pub(crate) fn truncate_agent_output(output: &str) -> Cow<'_, str> {
-    if output.len() > AGENT_OUTPUT_PREVIEW_LIMIT {
-        let cut = output.floor_char_boundary(AGENT_OUTPUT_PREVIEW_LIMIT);
-        Cow::Owned(format!("{}{}", &output[..cut], TRUNCATION_MARKER))
-    } else {
-        Cow::Borrowed(output)
+    match byte_truncation_cut(output) {
+        Some(cut) => Cow::Owned(format!("{}{}", &output[..cut], TRUNCATION_MARKER)),
+        None => Cow::Borrowed(output),
     }
 }
 
@@ -195,23 +211,18 @@ pub(crate) fn write_cli_prompt(
     }
     writeln!(out, "╠══════════════════════════════════════════╣")?;
     writeln!(out, "║  Agent output:")?;
-    // Truncate for display without appending TRUNCATION_MARKER so the notice
-    // below is the single, explicit truncation signal rather than two overlapping
-    // ones ("… (truncated)" in content AND a separate notice line).
-    let truncated = agent_output.len() > AGENT_OUTPUT_PREVIEW_LIMIT;
-    let display = if truncated {
-        let cut = agent_output.floor_char_boundary(AGENT_OUTPUT_PREVIEW_LIMIT);
-        &agent_output[..cut]
-    } else {
-        agent_output
-    };
+    // Use byte_truncation_cut so the threshold is shared with truncate_agent_output.
+    // Display the raw slice without TRUNCATION_MARKER so the notice below is
+    // the sole truncation signal (no double-signal: see #522).
+    let cut = byte_truncation_cut(agent_output);
+    let display = cut.map_or(agent_output, |c| &agent_output[..c]);
     for line in display.lines() {
         writeln!(out, "║  {line}")?;
     }
     writeln!(out, "╚══════════════════════════════════════════╝")?;
     // Print the notice outside the box so it does not overflow the fixed-width
     // border (#522). This is the sole truncation signal in the CLI path.
-    if truncated {
+    if cut.is_some() {
         writeln!(
             out,
             "  [output truncated — {AGENT_OUTPUT_PREVIEW_LIMIT} bytes shown of {} total]",
