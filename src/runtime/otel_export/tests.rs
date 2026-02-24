@@ -187,10 +187,11 @@ fn otlp_root_span_has_stats() {
     assert_eq!(cost.value.int_value, Some(5));
 }
 
-// #425: rein.stage.turn in StageTimeout span must use i64::MAX as overflow sentinel,
-// consistent with rein.stage.timeout_secs — not -1 which is semantically undefined.
+// #425: rein.stage.turn in StageTimeout span must emit the raw turn value as an
+// integer attribute. The overflow sentinel is -1 (same convention as rein.step.index
+// — clearly out-of-domain since turns are non-negative).
 #[test]
-fn stage_timeout_turn_uses_imax_sentinel_not_minus_one() {
+fn stage_timeout_turn_otel_attribute_is_integer_value() {
     use crate::runtime::RunEvent;
     use crate::runtime::RunTrace;
 
@@ -219,14 +220,13 @@ fn stage_timeout_turn_uses_imax_sentinel_not_minus_one() {
         .find(|a| a.key == "rein.stage.turn")
         .expect("must have rein.stage.turn attribute");
 
-    // The value is 0 (valid), so just check it's not -1.
-    assert_ne!(
+    // turn 0 converts to i64 without overflow → attribute value must be 0.
+    assert_eq!(
         turn_attr.value.int_value,
-        Some(-1),
-        "rein.stage.turn must not use -1 as sentinel; got: {:?}",
+        Some(0),
+        "rein.stage.turn must equal the raw turn value; got: {:?}",
         turn_attr.value
     );
-    assert_eq!(turn_attr.value.int_value, Some(0));
 }
 
 // #430: export_partial must mark the root span with rein.run.partial = "true"

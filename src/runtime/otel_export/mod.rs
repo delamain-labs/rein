@@ -405,6 +405,9 @@ fn event_to_span_data(event: &super::RunEvent) -> (String, Vec<OtelAttribute>) {
             "rein.step.started".to_string(),
             vec![
                 attr_str("rein.step.name", step),
+                // -1 signals "index unknown / overflow" rather than i64::MAX,
+                // which would be indistinguishable from a legitimate large index.
+                // On 64-bit hosts usize→i64 conversion never actually overflows.
                 attr_int("rein.step.index", i64::try_from(*index).unwrap_or(-1)),
             ],
         ),
@@ -415,10 +418,14 @@ fn event_to_span_data(event: &super::RunEvent) -> (String, Vec<OtelAttribute>) {
         RunEvent::StageTimeout { turn, timeout_secs } => (
             "rein.stage.timeout".to_string(),
             vec![
-                attr_int("rein.stage.turn", i64::try_from(*turn).unwrap_or(i64::MAX)),
+                // -1 signals overflow (same convention as rein.step.index): both
+                // turn and timeout_secs are non-negative in domain, so -1 is
+                // clearly out-of-range and distinguishable from a legitimate value.
+                // On 64-bit hosts these conversions never actually overflow.
+                attr_int("rein.stage.turn", i64::try_from(*turn).unwrap_or(-1)),
                 attr_int(
                     "rein.stage.timeout_secs",
-                    i64::try_from(*timeout_secs).unwrap_or(i64::MAX),
+                    i64::try_from(*timeout_secs).unwrap_or(-1),
                 ),
             ],
         ),
