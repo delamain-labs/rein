@@ -265,7 +265,7 @@ async fn budget_exceeded_stops_run() {
     );
 
     let err = engine.run("Hi").await.unwrap_err();
-    assert!(matches!(err, RunError::BudgetExceeded));
+    assert!(matches!(err, RunError::BudgetExceeded { .. }));
 }
 
 #[tokio::test]
@@ -1131,7 +1131,7 @@ async fn stage_timeout_records_circuit_breaker_failure() {
     // Second run: circuit breaker is now open after the failure above.
     let result2 = engine.run("hello").await;
     assert!(
-        matches!(result2, Err(RunError::CircuitBreakerOpen)),
+        matches!(result2, Err(RunError::CircuitBreakerOpen { .. })),
         "second run should be blocked by open circuit breaker; got: {:?}",
         result2
     );
@@ -1222,9 +1222,33 @@ async fn budget_update_exceeded_reports_correct_spent_cents() {
     );
 
     let err = engine.run("hi").await.unwrap_err();
-    let RunError::BudgetExceeded = err else {
+    let RunError::BudgetExceeded { partial_trace } = err else {
         panic!("expected BudgetExceeded, got: {err:?}");
     };
+    // Verify the BudgetUpdate event in the partial trace carries the correct fields.
+    // spent_cents: 100_000 input + 50_000 output for gpt-4o = (100_000 * 250 + 50_000 * 1_000) / 1_000_000
+    //            = (25_000_000 + 50_000_000) / 1_000_000 = 75 cents (rounded up from fractional).
+    // limit_cents: 1 (the configured budget).
+    let budget_event = partial_trace
+        .events
+        .iter()
+        .find(|e| matches!(e, crate::runtime::RunEvent::BudgetUpdate { .. }))
+        .expect("BudgetUpdate event must be in partial trace");
+    let crate::runtime::RunEvent::BudgetUpdate {
+        spent_cents,
+        limit_cents,
+    } = budget_event
+    else {
+        unreachable!()
+    };
+    assert!(
+        *spent_cents > 1,
+        "spent_cents must exceed the 1-cent limit; got {spent_cents}"
+    );
+    assert_eq!(
+        *limit_cents, 1,
+        "limit_cents must match the configured budget"
+    );
 }
 
 // ── #389: CircuitBreakerTripped event must carry real failure count + threshold ──
@@ -1256,9 +1280,31 @@ async fn circuit_breaker_tripped_event_has_real_failures_and_threshold() {
     .with_circuit_breaker(cb);
 
     let result = engine.run("hello").await;
-    assert!(
-        matches!(result, Err(RunError::CircuitBreakerOpen)),
-        "expected CircuitBreakerOpen; got: {result:?}"
+    let RunError::CircuitBreakerOpen { partial_trace } = result.unwrap_err() else {
+        panic!("expected CircuitBreakerOpen");
+    };
+    // Verify the CircuitBreakerTripped event in the partial trace has the real values.
+    let tripped = partial_trace
+        .events
+        .iter()
+        .find(|e| matches!(e, crate::runtime::RunEvent::CircuitBreakerTripped { .. }))
+        .expect("CircuitBreakerTripped event must be in partial trace");
+    let crate::runtime::RunEvent::CircuitBreakerTripped {
+        name,
+        failures,
+        threshold,
+    } = tripped
+    else {
+        unreachable!()
+    };
+    assert_eq!(name, "test_cb");
+    assert_eq!(
+        *failures, 2,
+        "failures must equal the number of recorded failures"
+    );
+    assert_eq!(
+        *threshold, 2,
+        "threshold must equal the configured threshold"
     );
 }
 
@@ -1267,7 +1313,9 @@ async fn circuit_breaker_tripped_event_has_real_failures_and_threshold() {
 #[test]
 fn run_error_implements_std_error() {
     // Verify RunError can be used as dyn Error (compile-time check via trait object).
-    let err: &dyn std::error::Error = &RunError::BudgetExceeded;
+    let err: &dyn std::error::Error = &RunError::BudgetExceeded {
+        partial_trace: crate::runtime::RunTrace::from_events(vec![]),
+    };
     assert_eq!(err.to_string(), "budget exceeded");
 }
 

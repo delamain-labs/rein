@@ -524,11 +524,19 @@ pub struct TraceStats {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunError {
-    BudgetExceeded,
+    /// Budget exhausted. Contains events up to and including the final
+    /// `BudgetUpdate` event so callers can inspect exact spent/limit values.
+    BudgetExceeded {
+        partial_trace: RunTrace,
+    },
     PermissionDenied,
     ProviderError,
     ConfigError,
-    CircuitBreakerOpen,
+    /// Circuit breaker tripped. Contains events up to and including the
+    /// `CircuitBreakerTripped` event so callers can inspect failures/threshold.
+    CircuitBreakerOpen {
+        partial_trace: RunTrace,
+    },
     GuardrailBlocked,
     EvalFailed,
     /// Provider call exceeded `stage_timeout_secs`. Contains events emitted
@@ -546,11 +554,11 @@ pub enum RunError {
 impl std::fmt::Display for RunError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::BudgetExceeded => write!(f, "budget exceeded"),
+            Self::BudgetExceeded { .. } => write!(f, "budget exceeded"),
             Self::PermissionDenied => write!(f, "permission denied"),
             Self::ProviderError => write!(f, "provider error"),
             Self::ConfigError => write!(f, "configuration error"),
-            Self::CircuitBreakerOpen => write!(f, "circuit breaker open"),
+            Self::CircuitBreakerOpen { .. } => write!(f, "circuit breaker open"),
             Self::GuardrailBlocked => write!(f, "guardrail blocked"),
             Self::EvalFailed => write!(f, "eval failed"),
             Self::Timeout { .. } => write!(f, "provider timed out"),

@@ -452,10 +452,12 @@ fn run_trace_with_events_roundtrips() {
 
 #[test]
 fn run_error_budget_exceeded_roundtrips() {
-    let err = RunError::BudgetExceeded;
+    let err = RunError::BudgetExceeded {
+        partial_trace: RunTrace::from_events(vec![]),
+    };
     let json = serde_json::to_string(&err).expect("serialize");
     let back: RunError = serde_json::from_str(&json).expect("deserialize");
-    assert!(matches!(back, RunError::BudgetExceeded));
+    assert!(matches!(back, RunError::BudgetExceeded { .. }));
 }
 
 #[test]
@@ -485,9 +487,16 @@ fn run_error_config_error_roundtrips() {
 #[test]
 fn run_error_serializes_as_snake_case() {
     // Unit variants use #[serde(rename_all = "snake_case")] and serialize as
-    // bare strings, preserving the existing wire format.
-    let v: serde_json::Value = serde_json::to_value(RunError::BudgetExceeded).expect("serialize");
-    assert_eq!(v, "budget_exceeded");
+    // bare strings, preserving the existing wire format. Struct variants
+    // (`BudgetExceeded`, `CircuitBreakerOpen`, `Timeout`) serialize as objects.
+    let v: serde_json::Value = serde_json::to_value(RunError::BudgetExceeded {
+        partial_trace: RunTrace::from_events(vec![]),
+    })
+    .expect("serialize");
+    assert!(
+        v.get("budget_exceeded").is_some(),
+        "expected object key budget_exceeded; got: {v}"
+    );
 
     let v: serde_json::Value = serde_json::to_value(RunError::PermissionDenied).expect("serialize");
     assert_eq!(v, "permission_denied");

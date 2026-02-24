@@ -211,7 +211,7 @@ async fn full_pipeline_budget_exceeded() {
     );
 
     let err = engine.run("Hi").await.unwrap_err();
-    assert!(matches!(err, RunError::BudgetExceeded));
+    assert!(matches!(err, RunError::BudgetExceeded { .. }));
 }
 
 #[tokio::test]

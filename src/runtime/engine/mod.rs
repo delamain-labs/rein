@@ -280,7 +280,10 @@ impl<'a> AgentEngine<'a> {
                         failures: cb.failure_count(),
                         threshold: cb.threshold(),
                     });
-                    return Err(RunError::CircuitBreakerOpen);
+                    let partial = RunTrace::from_events(std::mem::take(&mut state.events));
+                    return Err(RunError::CircuitBreakerOpen {
+                        partial_trace: partial,
+                    });
                 }
             }
 
@@ -445,7 +448,10 @@ impl<'a> AgentEngine<'a> {
         match outcome {
             BudgetOutcome::Exceeded(event) => {
                 state.push(event);
-                return Err(RunError::BudgetExceeded);
+                let partial = RunTrace::from_events(std::mem::take(&mut state.events));
+                return Err(RunError::BudgetExceeded {
+                    partial_trace: partial,
+                });
             }
             BudgetOutcome::WithinLimit(event) => state.push(event),
             BudgetOutcome::NoBudget => {}
