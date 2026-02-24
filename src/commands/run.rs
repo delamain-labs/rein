@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use rein::runtime::workflow::StageResult;
+use rein::runtime::workflow::{RunOptions, StageResult};
 
 // This function is inherently sequential setup code (parse → validate →
 // build provider → attach engine extensions → dispatch). Extracting it
@@ -241,9 +241,7 @@ fn run_workflow_mode(
         executor,
         tool_defs: &[],
         config: &wf_config,
-        approval_handler,
-        audit_log,
-        workflow_name: Some(workflow.name.clone()),
+        options: RunOptions { approval_handler, audit_log, workflow_name: Some(workflow.name.clone()) },
     };
     let start = Instant::now();
     let wf_result =

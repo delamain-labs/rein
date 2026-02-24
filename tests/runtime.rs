@@ -6,6 +6,7 @@ use std::sync::Arc;
 use serde_json::json;
 
 use rein::runtime::approval::{AutoApproveHandler, AuditingApprovalHandler};
+use rein::runtime::workflow::RunOptions;
 use rein::runtime::audit::{AuditKind, AuditLog};
 use rein::runtime::engine::{AgentEngine, RunConfig};
 use rein::runtime::executor::MockExecutor;
@@ -302,9 +303,7 @@ async fn integration_sequential_workflow() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions { approval_handler: None, audit_log: None, workflow_name: None },
     };
 
     provider.push_response(simple_response("Category: billing. Priority: high."));
@@ -345,9 +344,7 @@ async fn integration_parallel_workflow() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions { approval_handler: None, audit_log: None, workflow_name: None },
     };
 
     provider.push_response(simple_response("Sentiment: positive"));
@@ -383,9 +380,7 @@ async fn integration_resumable_workflow_timestamps_parallel() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions { approval_handler: None, audit_log: None, workflow_name: None },
     };
 
     provider.push_response(simple_response("Category: billing."));
@@ -494,9 +489,7 @@ async fn audit_log_records_approval_requested_and_resolved() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: Some(approval_handler),
-        audit_log: Some(Arc::clone(&audit_log)),
-        workflow_name: Some("approval_workflow".to_string()),
+        options: RunOptions { approval_handler: Some(approval_handler), audit_log: Some(Arc::clone(&audit_log)), workflow_name: Some("approval_workflow".to_string()) },
     };
 
     rein::runtime::workflow::run_workflow(&workflow, &ctx)
@@ -630,9 +623,7 @@ async fn no_double_audit_wrapping_when_handler_pre_wrapped() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: Some(pre_wrapped),
-        audit_log: Some(Arc::clone(&audit_log)),
-        workflow_name: Some("approval_wf".to_string()),
+        options: RunOptions { approval_handler: Some(pre_wrapped), audit_log: Some(Arc::clone(&audit_log)), workflow_name: Some("approval_wf".to_string()) },
     };
 
     rein::runtime::workflow::run_workflow(&workflow, &ctx)
