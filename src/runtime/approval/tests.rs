@@ -349,6 +349,11 @@ async fn auditing_handler_records_channel_in_metadata() {
     handler.request_approval("notify", "out", &approval).await;
 
     let entries = log.read_all().unwrap();
+    assert_eq!(
+        entries.len(),
+        2,
+        "expected ApprovalRequested + ApprovalResolved"
+    );
     assert_eq!(entries[0].metadata["channel"], "slack");
     assert_eq!(entries[1].metadata["channel"], "slack");
 }
