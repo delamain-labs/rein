@@ -151,6 +151,93 @@ fn parse_agent_no_model() {
 // ── Capabilities ──────────────────────────────────────────────────────────
 
 #[test]
+fn parse_can_list_comma_separated() {
+    let src = "agent foo { can [zendesk.read_ticket, zendesk.reply_ticket] }";
+    let f = parse_ok(src);
+    let a = &f.agents[0];
+    assert_eq!(a.can.len(), 2);
+    assert_eq!(a.can[0].namespace, "zendesk");
+    assert_eq!(a.can[0].action, "read_ticket");
+    assert_eq!(a.can[1].namespace, "zendesk");
+    assert_eq!(a.can[1].action, "reply_ticket");
+}
+
+#[test]
+fn parse_can_list_comma_with_spaces() {
+    let src = "agent foo { can [ zendesk.read_ticket , zendesk.reply_ticket ] }";
+    let f = parse_ok(src);
+    assert_eq!(f.agents[0].can.len(), 2);
+}
+
+#[test]
+fn parse_can_list_trailing_comma() {
+    // Trailing comma is accepted (consistent with JSON5 / Rust array literals)
+    let src = "agent foo { can [zendesk.read_ticket, zendesk.reply_ticket,] }";
+    let f = parse_ok(src);
+    assert_eq!(f.agents[0].can.len(), 2);
+}
+
+#[test]
+fn parse_cannot_list_comma_separated() {
+    let src = "agent foo { cannot [zendesk.delete_ticket, zendesk.admin] }";
+    let f = parse_ok(src);
+    assert_eq!(f.agents[0].cannot.len(), 2);
+    assert_eq!(f.agents[0].cannot[0].action, "delete_ticket");
+    assert_eq!(f.agents[0].cannot[1].action, "admin");
+}
+
+#[test]
+fn parse_can_list_comma_with_monetary_constraint() {
+    // `up to $<amount>` constraint works when items are comma-separated
+    let src = "agent foo { can [stripe.refund up to $50, stripe.read] }";
+    let f = parse_ok(src);
+    let a = &f.agents[0];
+    assert_eq!(a.can.len(), 2);
+    assert_eq!(a.can[0].namespace, "stripe");
+    assert_eq!(a.can[0].action, "refund");
+    assert!(a.can[0].constraint.is_some());
+    assert_eq!(a.can[1].namespace, "stripe");
+    assert_eq!(a.can[1].action, "read");
+    assert!(a.can[1].constraint.is_none());
+}
+
+#[test]
+fn parse_can_list_mixed_newline_and_comma() {
+    // comma and newline separators can be mixed in a single list
+    let src = r#"agent foo { can [
+        zendesk.read_ticket, zendesk.reply_ticket
+        zendesk.close_ticket
+    ] }"#;
+    let f = parse_ok(src);
+    assert_eq!(f.agents[0].can.len(), 3);
+    assert_eq!(f.agents[0].can[0].action, "read_ticket");
+    assert_eq!(f.agents[0].can[1].action, "reply_ticket");
+    assert_eq!(f.agents[0].can[2].action, "close_ticket");
+}
+
+#[test]
+fn error_leading_comma_in_can_list() {
+    // A comma before the first item is not a valid capability start → parse error
+    let err = parse_err("agent foo { can [,zendesk.read] }");
+    assert!(
+        err.message.contains("identifier") || err.message.contains("Ident"),
+        "expected identifier error; got: {}",
+        err.message
+    );
+}
+
+#[test]
+fn error_double_comma_in_can_list() {
+    // Two consecutive commas between items → parse error
+    let err = parse_err("agent foo { can [zendesk.read,,zendesk.write] }");
+    assert!(
+        err.message.contains("identifier") || err.message.contains("Ident"),
+        "expected identifier error; got: {}",
+        err.message
+    );
+}
+
+#[test]
 fn parse_can_list() {
     let src = r#"
 agent foo {
