@@ -423,6 +423,155 @@ async fn auditing_handler_records_pending_decision() {
     );
 }
 
+// #462: with_workflow and with_agent must enforce the empty-string invariant
+// at the method boundary — callers cannot produce Some("") in audit records.
+#[tokio::test]
+async fn with_workflow_and_with_agent_ignore_empty_strings() {
+    use crate::runtime::audit::AuditLog;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
+
+    let handler = AuditingApprovalHandler::new(Arc::new(AutoApproveHandler), Arc::clone(&log))
+        .with_workflow("")
+        .with_agent("");
+    let approval = make_approval_for_channel("cli", "");
+    handler.request_approval("step", "out", &approval).await;
+
+    let entries = log.read_all().unwrap();
+    assert!(
+        entries[0].workflow.is_none(),
+        "empty with_workflow must leave workflow as None, got: {:?}",
+        entries[0].workflow
+    );
+    assert!(
+        entries[0].agent.is_none(),
+        "empty with_agent must leave agent as None, got: {:?}",
+        entries[0].agent
+    );
+}
+
+// #463: ApprovalRequested entry must include agent_output in metadata for compliance reconstruction.
+#[tokio::test]
+async fn approval_requested_includes_agent_output_in_metadata() {
+    use crate::runtime::audit::{AuditKind, AuditLog};
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
+
+    let handler = AuditingApprovalHandler::new(Arc::new(AutoApproveHandler), Arc::clone(&log));
+    let approval = make_approval_for_channel("cli", "");
+    handler
+        .request_approval("deploy", "Agent produced this output for review", &approval)
+        .await;
+
+    let entries = log.read_all().unwrap();
+    assert_eq!(entries[0].kind, AuditKind::ApprovalRequested);
+    assert!(
+        !entries[0].metadata["agent_output"].is_null(),
+        "ApprovalRequested must include agent_output field"
+    );
+    assert_eq!(
+        entries[0].metadata["agent_output"], "Agent produced this output for review",
+        "agent_output must match what was passed to request_approval"
+    );
+    assert_eq!(
+        entries[0].metadata["agent_output_truncated"], false,
+        "agent_output_truncated must be false when output is within limit"
+    );
+}
+
+// #463: Long agent_output must be truncated at 512 chars in the audit record.
+#[tokio::test]
+async fn approval_requested_truncates_long_agent_output() {
+    use crate::runtime::audit::{AuditKind, AuditLog};
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
+
+    let handler = AuditingApprovalHandler::new(Arc::new(AutoApproveHandler), Arc::clone(&log));
+    let long_output = "x".repeat(1000);
+    let approval = make_approval_for_channel("cli", "");
+    handler
+        .request_approval("deploy", &long_output, &approval)
+        .await;
+
+    let entries = log.read_all().unwrap();
+    assert_eq!(entries[0].kind, AuditKind::ApprovalRequested);
+    let recorded = entries[0].metadata["agent_output"].as_str().unwrap();
+    // The maximum recorded length is AGENT_OUTPUT_PREVIEW_LIMIT bytes + TRUNCATION_MARKER.
+    // Both constants are on AuditingApprovalHandler so they stay in sync with production.
+    let max_expected = AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT
+        + AuditingApprovalHandler::TRUNCATION_MARKER.len();
+    assert!(
+        recorded.len() <= max_expected,
+        "truncated output must be <= {} chars (limit + marker), got {}",
+        max_expected,
+        recorded.len()
+    );
+    assert!(
+        recorded.ends_with(AuditingApprovalHandler::TRUNCATION_MARKER),
+        "truncated output must end with TRUNCATION_MARKER, got: {recorded}"
+    );
+    assert_eq!(
+        entries[0].metadata["agent_output_truncated"], true,
+        "agent_output_truncated must be true when output exceeds limit"
+    );
+}
+
+/// #463: Truncation must not panic when byte 512 falls inside a multibyte character.
+/// Uses a string of ASCII + 4-byte emoji so the 512-byte boundary lands mid-codepoint.
+#[tokio::test]
+async fn approval_requested_truncates_multibyte_boundary_safely() {
+    use crate::runtime::audit::{AuditKind, AuditLog};
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
+
+    let handler = AuditingApprovalHandler::new(Arc::new(AutoApproveHandler), Arc::clone(&log));
+    let approval = make_approval_for_channel("cli", "");
+
+    // Build a string where byte 512 falls inside a 4-byte emoji (🦀 = U+1F980).
+    // 510 ASCII 'a' chars (510 bytes) + enough emoji to push well past 512 bytes.
+    let mut multibyte_output = "a".repeat(510);
+    multibyte_output.push_str(&"🦀".repeat(50)); // each 🦀 is 4 bytes
+    assert!(multibyte_output.len() > AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT);
+
+    handler
+        .request_approval("deploy", &multibyte_output, &approval)
+        .await;
+
+    let entries = log.read_all().unwrap();
+    assert_eq!(entries[0].kind, AuditKind::ApprovalRequested);
+    let recorded = entries[0].metadata["agent_output"].as_str().unwrap();
+    // Must be valid UTF-8 (guaranteed by the str type), within the bound, and end
+    // with the truncation marker.
+    let max_expected = AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT
+        + AuditingApprovalHandler::TRUNCATION_MARKER.len();
+    assert!(
+        recorded.len() <= max_expected,
+        "multibyte truncation must be <= {} bytes, got {}",
+        max_expected,
+        recorded.len()
+    );
+    assert!(
+        recorded.ends_with(AuditingApprovalHandler::TRUNCATION_MARKER),
+        "multibyte truncation must end with TRUNCATION_MARKER"
+    );
+    assert_eq!(
+        entries[0].metadata["agent_output_truncated"], true,
+        "agent_output_truncated must be true for multibyte truncation"
+    );
+}
+
 #[tokio::test]
 async fn auditing_handler_populates_workflow_and_agent_context() {
     use crate::runtime::audit::AuditLog;
