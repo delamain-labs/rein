@@ -460,30 +460,72 @@ pub async fn run_parallel(
     workflow: &WorkflowDef,
     ctx: &WorkflowContext<'_>,
 ) -> Result<WorkflowResult, (WorkflowError, Vec<super::RunEvent>)> {
-    use futures::future::try_join_all;
+    use futures::future::join_all;
 
     let trigger_input = format!("Trigger: {}", workflow.trigger);
 
-    let outcomes = try_join_all(
+    // #457: use join_all (not try_join_all) so all stages run to completion
+    // regardless of individual failures. Soft errors (AgentNotFound,
+    // StageFailed) are recorded as Failed stages; hard errors abort.
+    #[allow(clippy::type_complexity)]
+    let raw: Vec<Result<(StageResult, Vec<super::RunEvent>, Vec<u64>), WorkflowError>> = join_all(
         workflow
             .stages
             .iter()
             .map(|stage| run_stage(&stage.name, &stage.agent, &trigger_input, ctx)),
     )
-    .await
-    .map_err(|e| (e, Vec::new()))?;
+    .await;
 
-    let mut stage_results = Vec::with_capacity(outcomes.len());
+    let mut stage_results = Vec::with_capacity(raw.len());
     let mut all_events: Vec<super::RunEvent> = Vec::new();
     let mut all_timestamps: Vec<u64> = Vec::new();
-    for (result, stage_events, stage_timestamps) in outcomes {
-        stage_results.push(result);
-        all_events.extend(stage_events);
-        all_timestamps.extend(stage_timestamps);
+    let mut hard_error: Option<WorkflowError> = None;
+
+    // Zip results with stage definitions to recover the agent name on failure.
+    for (outcome, stage) in raw.into_iter().zip(workflow.stages.iter()) {
+        match outcome {
+            Ok((result, stage_events, stage_timestamps)) => {
+                stage_results.push(result);
+                all_events.extend(stage_events);
+                all_timestamps.extend(stage_timestamps);
+            }
+            Err(e) if e.is_hard_error() => {
+                // Surface the first hard error after collecting all results.
+                if hard_error.is_none() {
+                    hard_error = Some(e);
+                }
+            }
+            Err(e) => {
+                // Soft failure — record the stage as Failed and continue.
+                let error_kind = e.to_step_error_kind();
+                let reason = e.to_string();
+                all_events.push(super::RunEvent::StepFailed {
+                    step: stage.name.clone(),
+                    reason,
+                    error_kind,
+                });
+                stage_results.push(StageResult {
+                    stage_name: stage.name.clone(),
+                    agent_name: stage.agent.clone(),
+                    output: String::new(),
+                    cost_cents: 0,
+                    tokens: 0,
+                    status: StageResultStatus::Failed,
+                });
+                // Timestamps: StepFailed has no individual timestamp here; push
+                // a zero so events and event_timestamps_ms stay in sync.
+                all_timestamps.push(0);
+            }
+        }
+    }
+
+    if let Some(e) = hard_error {
+        return Err((e, all_events));
     }
 
     let final_output = stage_results
         .iter()
+        .filter(|r| r.status == StageResultStatus::Executed)
         .map(|r| format!("[{}]: {}", r.stage_name, r.output))
         .collect::<Vec<_>>()
         .join("\n");

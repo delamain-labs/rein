@@ -248,8 +248,10 @@ async fn parallel_workflow_runs_all_stages() {
     assert!(result.final_output.contains("output_b"));
 }
 
+// #457: unknown agent in parallel is a soft failure — the stage is recorded as
+// Failed, the workflow succeeds, and the other stage still executes.
 #[tokio::test]
-async fn parallel_unknown_agent_errors() {
+async fn parallel_unknown_agent_records_failed_stage() {
     let file = parse_file("agent a { model: openai }");
     let mut workflow = make_workflow("pipe", "event", &["a", "missing"]);
     workflow.mode = ExecutionMode::Parallel;
@@ -267,12 +269,79 @@ async fn parallel_unknown_agent_errors() {
         workflow_name: None,
     };
 
-    // Queue response for agent "a" so it doesn't fail first
+    // Queue response for agent "a" — it should still execute despite "missing" failing.
     provider.push_response(simple_response("ok"));
 
-    let (err, _) = run_parallel(&workflow, &ctx).await.unwrap_err();
+    let result = run_parallel(&workflow, &ctx)
+        .await
+        .expect("#457: unknown agent must be soft failure — run_parallel should succeed");
 
-    assert!(err.to_string().contains("missing"), "err: {err}");
+    // Stage "a" executed successfully.
+    let a = result.stage_results.iter().find(|r| r.stage_name == "a").unwrap();
+    assert_eq!(
+        a.status,
+        StageResultStatus::Executed,
+        "#457: stage 'a' must be Executed"
+    );
+
+    // Stage "missing" recorded as Failed.
+    let m = result
+        .stage_results
+        .iter()
+        .find(|r| r.stage_name == "missing")
+        .unwrap();
+    assert_eq!(
+        m.status,
+        StageResultStatus::Failed,
+        "#457: stage 'missing' must be Failed; got: {:?}",
+        m
+    );
+
+    // A StepFailed event must be emitted for the missing-agent stage.
+    assert!(
+        result.events.iter().any(|e| matches!(
+            e,
+            crate::runtime::RunEvent::StepFailed { step, .. } if step == "missing"
+        )),
+        "#457: StepFailed event must be emitted for the failing stage; events: {:?}",
+        result.events
+    );
+}
+
+// #457: when ALL parallel stages fail softly, run_parallel returns Ok with all
+// stages marked Failed and an empty final output.
+#[tokio::test]
+async fn parallel_all_stages_soft_fail_returns_ok() {
+    let file = parse_file("/* no agents */");
+    let mut workflow = make_workflow("pipe", "event", &["ghost_a", "ghost_b"]);
+    workflow.mode = ExecutionMode::Parallel;
+
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let result = run_parallel(&workflow, &ctx)
+        .await
+        .expect("#457: all-soft-fail parallel must return Ok");
+
+    assert_eq!(result.stage_results.len(), 2);
+    assert!(
+        result
+            .stage_results
+            .iter()
+            .all(|r| r.status == StageResultStatus::Failed),
+        "#457: all stages must be Failed; got: {:?}",
+        result.stage_results
+    );
 }
 
 // #351: run_parallel must produce results in stage-declaration order even when
@@ -4126,16 +4195,15 @@ async fn run_sequential_abort_includes_prior_stage_events() {
     );
 }
 
-/// #549: When run_parallel fails (one agent missing), the error vec is returned
-/// with at least a WorkflowAborted event, matching the same error-shape contract
-/// as run_sequential.
+/// #457/#549: A missing agent in parallel mode is a soft failure.
+/// run_workflow returns Ok (not Err), emits StepFailed for the missing stage,
+/// and does NOT emit WorkflowAborted.
 #[tokio::test]
-async fn run_parallel_abort_includes_workflow_aborted_event() {
+async fn run_parallel_soft_failure_does_not_abort_workflow() {
     use crate::runtime::RunEvent;
 
-    // Only agent "a" exists; agent "b" does not. Parallel mode — try_join_all
-    // short-circuits on first failure so we cannot guarantee LlmCall events
-    // from the successful stage, but WorkflowAborted must always be present.
+    // Only agent "a" exists; agent "b" does not. With partial-success, the
+    // workflow should succeed and record "b" as Failed.
     let file = parse_file("agent a { model: openai }");
     let mut workflow = make_workflow("pipe", "go", &["a", "b"]);
     workflow.mode = ExecutionMode::Parallel;
@@ -4154,15 +4222,28 @@ async fn run_parallel_abort_includes_workflow_aborted_event() {
     };
     provider.push_response(simple_response("a_output"));
 
-    let (_err, partial_events) = run_workflow(&workflow, &ctx)
+    let result = run_workflow(&workflow, &ctx)
         .await
-        .expect_err("missing agent b must cause run_workflow to return Err");
+        .expect("#457: missing agent in parallel must be soft failure — workflow should succeed");
 
+    // WorkflowAborted must NOT be present.
     assert!(
-        partial_events
+        !result
+            .events
             .iter()
             .any(|e| matches!(e, RunEvent::WorkflowAborted { .. })),
-        "partial_events must include WorkflowAborted; got: {partial_events:?}"
+        "#457: WorkflowAborted must NOT be emitted for soft parallel failure; events: {:?}",
+        result.events
+    );
+
+    // StepFailed must be present for the missing stage.
+    assert!(
+        result.events.iter().any(|e| matches!(
+            e,
+            RunEvent::StepFailed { step, .. } if step == "b"
+        )),
+        "#457: StepFailed must be emitted for missing stage 'b'; events: {:?}",
+        result.events
     );
 }
 
@@ -4651,5 +4732,136 @@ async fn for_each_all_iterations_fail_softly() {
         failed_count, 2,
         "#408: expected 2 ForEachIterationFailed events; got events: {:?}",
         events
+    );
+}
+
+// ── #456: fallback attempt when step is dependency-skipped ─────────────────────
+
+/// #456: When a step is about to be dependency-skipped but has a fallback
+/// defined, the fallback should execute instead of immediately skipping.
+/// If the fallback succeeds, the step result is Executed (not Skipped)
+/// and dependents are NOT cascade-blocked.
+#[tokio::test]
+async fn skip_guard_with_fallback_executes_fallback_on_skip() {
+    // step_a uses a ghost agent → AgentNotFound → fails
+    // step_b depends_on step_a, has fallback → fallback should run
+    // step_c depends_on step_b → must still execute (not cascade-blocked)
+    let file = parse_file(r#"
+        agent backup { model: openai }
+        agent follow { model: openai }
+    "#);
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("fallback output")); // step_b fallback
+    provider.push_response(simple_response("step_c output"));   // step_c
+    let executor = MockExecutor::new();
+
+    // step_a: ghost agent → will fail
+    let step_a = make_step("step_a", "ghost", vec![]);
+    // step_b: primary ghost, fallback=backup, depends_on step_a
+    let mut step_b = make_step_with_fallback("step_b", "ghost_b", "backup");
+    step_b.depends_on = vec!["step_a".to_string()];
+    // step_c: depends_on step_b
+    let step_c = make_step("step_c", "follow", vec!["step_b"]);
+
+    let workflow = make_when_step_workflow(
+        "fallback_wf",
+        vec![step_a, step_b, step_c],
+    );
+
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let result = run_workflow(&workflow, &ctx)
+        .await
+        .expect("workflow should succeed");
+
+    // step_b must be Executed (fallback ran), not Skipped.
+    let step_b_result = result.stage_results.iter().find(|r| r.stage_name == "step_b");
+    assert!(
+        matches!(
+            step_b_result,
+            Some(StageResult { status: StageResultStatus::Executed, .. })
+        ),
+        "#456: step_b must be Executed via fallback; got: {:?}",
+        step_b_result
+    );
+    assert_eq!(
+        step_b_result.map(|r| r.output.as_str()),
+        Some("fallback output"),
+        "#456: step_b output must be from fallback"
+    );
+
+    // step_c must execute (step_b succeeded via fallback → no cascade-block).
+    assert!(
+        result.events.iter().any(|e| {
+            matches!(e, crate::runtime::RunEvent::StepCompleted { step } if step == "step_c")
+        }),
+        "#456: step_c must execute after step_b fallback; events: {:?}",
+        result.events
+    );
+}
+
+/// #456: When a step is dependency-skipped, has a fallback, but the fallback
+/// also fails (soft error), the step should be marked as Failed (not Skipped)
+/// and dependents are cascade-blocked.
+#[tokio::test]
+async fn skip_guard_with_fallback_marks_failed_when_fallback_also_fails() {
+    // step_a: ghost → fails
+    // step_b: depends_on step_a, fallback=also_ghost → both fail
+    // step_c: depends_on step_b → must be cascade-skipped
+    let file = parse_file(r"/* no real agents */");
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    let step_a = make_step("step_a", "ghost_a", vec![]);
+    let mut step_b = make_step_with_fallback("step_b", "ghost_b", "also_ghost");
+    step_b.depends_on = vec!["step_a".to_string()];
+    let step_c = make_step("step_c", "ghost_c", vec!["step_b"]);
+
+    let workflow = make_when_step_workflow("wf", vec![step_a, step_b, step_c]);
+
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let result = run_workflow(&workflow, &ctx)
+        .await
+        .expect("workflow should succeed (soft failure)");
+
+    // step_b must be Failed (both primary and fallback failed).
+    let step_b_result = result.stage_results.iter().find(|r| r.stage_name == "step_b");
+    assert!(
+        matches!(
+            step_b_result,
+            Some(StageResult { status: StageResultStatus::Failed, .. })
+        ),
+        "#456: step_b must be Failed when fallback also fails; got: {:?}",
+        step_b_result
+    );
+
+    // step_c must be cascade-skipped (step_b is in blocked_steps).
+    let step_c_result = result.stage_results.iter().find(|r| r.stage_name == "step_c");
+    assert!(
+        matches!(
+            step_c_result,
+            Some(StageResult { status: StageResultStatus::Skipped, .. })
+        ),
+        "#456: step_c must be cascade-skipped after step_b fallback failure; got: {:?}",
+        step_c_result
     );
 }
