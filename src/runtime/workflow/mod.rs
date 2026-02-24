@@ -9,6 +9,7 @@ use crate::ast::{ExecutionMode, ReinFile, RouteRule, Stage, WorkflowDef};
 /// as the single, canonical predicate; inspect `status` directly only when you need
 /// to distinguish `Failed` from `Skipped`.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum StageResultStatus {
     /// The step ran to completion (agent produced a response).
     Executed,
