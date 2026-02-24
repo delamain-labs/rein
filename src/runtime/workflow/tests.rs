@@ -2666,6 +2666,52 @@ async fn approval_rejected_aborts_workflow() {
     );
 }
 
+/// `ApprovalStatus::Pending` (deferred / async approval) must return
+/// `WorkflowError::ApprovalPending`, not `ApprovalTimedOut`. (#419)
+#[tokio::test]
+async fn approval_pending_returns_approval_pending_error() {
+    use crate::runtime::approval::ApprovalStatus;
+    use std::sync::Arc;
+
+    struct PendingHandler;
+    #[async_trait::async_trait]
+    impl crate::runtime::approval::ApprovalHandler for PendingHandler {
+        async fn request_approval(
+            &self,
+            _step: &str,
+            _output: &str,
+            _approval: &crate::ast::ApprovalDef,
+        ) -> ApprovalStatus {
+            ApprovalStatus::Pending
+        }
+    }
+
+    let file = parse_file(r#"agent bot { model: openai }"#);
+    let step_a = make_approved_step("gated", "bot", make_cli_approval_def());
+    let workflow = make_workflow_steps("pending_wf", "start", vec![step_a]);
+
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    provider.push_response(simple_response("output"));
+
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: Some(Arc::new(PendingHandler)),
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let result = run_steps(&workflow, &ctx).await;
+    assert!(
+        matches!(result, Err(WorkflowError::ApprovalPending { .. })),
+        "Pending approval must return ApprovalPending, not ApprovalTimedOut; got: {result:?}"
+    );
+}
+
 /// Steps with no dependency on the failed step should still execute.
 #[tokio::test]
 async fn independent_step_runs_even_if_sibling_fails() {
