@@ -647,14 +647,14 @@ pub fn resolve_approval_handler(approval: &ApprovalDef) -> Box<dyn ApprovalHandl
     match std::env::var("REIN_TEST_APPROVAL_HANDLER").as_deref() {
         Ok("auto_approve") => {
             eprintln!(
-                "WARN: REIN_TEST_APPROVAL_HANDLER=auto_approve — \
+                "warn: REIN_TEST_APPROVAL_HANDLER=auto_approve — \
                  all approval gates will be automatically granted"
             );
             return Box::new(AutoApproveHandler);
         }
         Ok("auto_reject") => {
             eprintln!(
-                "WARN: REIN_TEST_APPROVAL_HANDLER=auto_reject — \
+                "warn: REIN_TEST_APPROVAL_HANDLER=auto_reject — \
                  all approval gates will be automatically rejected"
             );
             return Box::new(AutoRejectHandler::new("test rejection"));

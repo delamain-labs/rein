@@ -1506,8 +1506,9 @@ async fn rein_test_approval_handler_auto_reject_overrides_cli() {
 /// #507: Unknown values for REIN_TEST_APPROVAL_HANDLER must be ignored so a typo
 /// cannot silently auto-approve production workflows. We verify this by using a
 /// `webhook` channel backed by a mock server that returns 500 —
-/// `WebhookApprovalHandler` returns `Rejected { reason: "webhook returned 500" }`
-/// on non-2xx, whereas `AutoApproveHandler` would return `Approved` and
+/// `WebhookApprovalHandler` returns `Rejected { reason: "webhook returned 500 Internal
+/// Server Error" }` on non-2xx (reqwest `StatusCode::Display` includes the reason
+/// phrase), whereas `AutoApproveHandler` would return `Approved` and
 /// `AutoRejectHandler` would return `Rejected { reason: "test rejection" }`.
 /// Receiving a Rejected status whose reason contains "500" confirms both:
 ///   (a) the env var override was NOT applied (no auto_approve), and
