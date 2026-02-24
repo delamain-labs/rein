@@ -90,12 +90,18 @@ impl ApprovalHandler for CliApprovalHandler {
             std::io::stdin().read_line(&mut s).map(|_| s)
         })
         .await
-        .unwrap_or_else(|_| Err(std::io::Error::other("join error")));
+        .unwrap_or_else(|join_err| {
+            eprintln!("warn: approval stdin task failed to join: {join_err}");
+            Err(std::io::Error::other("join error"))
+        });
 
         match line {
-            Err(_) => ApprovalStatus::Rejected {
-                reason: "Failed to read input".to_string(),
-            },
+            Err(e) => {
+                eprintln!("warn: approval stdin read failed: {e}");
+                ApprovalStatus::Rejected {
+                    reason: "Failed to read input".to_string(),
+                }
+            }
             Ok(input) => match input.trim().to_lowercase().as_str() {
                 "y" | "yes" => ApprovalStatus::Approved,
                 _ => ApprovalStatus::Rejected {
@@ -628,8 +634,20 @@ pub fn resolve_approval_handler(approval: &ApprovalDef) -> Box<dyn ApprovalHandl
     // Unknown values fall through to the normal channel dispatch so a typo cannot
     // silently auto-approve a production workflow.
     match std::env::var("REIN_TEST_APPROVAL_HANDLER").as_deref() {
-        Ok("auto_approve") => return Box::new(AutoApproveHandler),
-        Ok("auto_reject") => return Box::new(AutoRejectHandler::new("test rejection")),
+        Ok("auto_approve") => {
+            eprintln!(
+                "WARN: REIN_TEST_APPROVAL_HANDLER=auto_approve — \
+                 all approval gates will be automatically granted"
+            );
+            return Box::new(AutoApproveHandler);
+        }
+        Ok("auto_reject") => {
+            eprintln!(
+                "WARN: REIN_TEST_APPROVAL_HANDLER=auto_reject — \
+                 all approval gates will be automatically rejected"
+            );
+            return Box::new(AutoRejectHandler::new("test rejection"));
+        }
         _ => {}
     }
 
