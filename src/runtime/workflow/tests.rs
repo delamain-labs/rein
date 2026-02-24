@@ -3209,7 +3209,8 @@ async fn for_each_step_failure_cascades_to_dependent() {
     }) = skipped_b
     {
         assert_eq!(
-            blocked_dependency, "step_a",
+            blocked_dependency.as_deref(),
+            Some("step_a"),
             "StepSkipped.blocked_dependency must be 'step_a'"
         );
     }
@@ -4188,5 +4189,260 @@ async fn step_events_have_real_timestamps_in_workflow_result() {
             crate::runtime::RunEvent::StepCompleted { step } if step == "step_b"
         )),
         "StepCompleted(step_b) must be emitted"
+    );
+}
+
+// ── #455: when: condition step skips ──────────────────────────────────────
+
+fn make_step_with_when(
+    name: &str,
+    agent: &str,
+    depends_on: Vec<&str>,
+    when: Option<crate::ast::WhenExpr>,
+) -> StepDef {
+    StepDef {
+        name: name.to_string(),
+        agent: agent.to_string(),
+        goal: None,
+        input: None,
+        output_constraints: vec![],
+        depends_on: depends_on.into_iter().map(str::to_string).collect(),
+        when,
+        on_failure: None,
+        send_to: None,
+        fallback: None,
+        for_each: None,
+        typed_input: None,
+        typed_outputs: vec![],
+        escalate: None,
+        approval: None,
+        span: Span::new(0, 1),
+    }
+}
+
+fn make_when_step_workflow(name: &str, steps: Vec<StepDef>) -> WorkflowDef {
+    WorkflowDef {
+        name: name.to_string(),
+        trigger: "start".to_string(),
+        stages: vec![],
+        steps,
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: crate::ast::ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    }
+}
+
+/// #455: A step with `when: confidence < 70` that evaluates false (prior output
+/// has confidence >= 70) must emit StepSkipped with no blocked_dependency.
+#[tokio::test]
+async fn when_condition_false_emits_step_skipped() {
+    let when_expr = crate::ast::WhenExpr::Comparison(WhenComparison {
+        field: "confidence".to_string(),
+        op: CompareOp::Lt,
+        value: WhenValue::Number("70".to_string()),
+    });
+    let workflow = make_when_step_workflow(
+        "test",
+        vec![
+            // step_a always runs and outputs confidence: 85
+            make_step("step_a", "bot_a", vec![]),
+            // step_b only runs when: confidence < 70 — condition is FALSE (85 >= 70)
+            make_step_with_when("step_b", "bot_b", vec!["step_a"], Some(when_expr)),
+        ],
+    );
+
+    let file = parse_file(
+        r#"
+        agent bot_a { model: openai }
+        agent bot_b { model: openai }
+    "#,
+    );
+    let provider = MockProvider::new();
+    // step_a returns "confidence: 85"
+    provider.push_response(simple_response("confidence: 85"));
+
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        provider: &provider,
+        executor: &executor,
+        file: &file,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        audit_log: None,
+        approval_handler: None,
+        workflow_name: None,
+    };
+
+    let result = run_workflow(&workflow, &ctx)
+        .await
+        .expect("run_workflow should succeed");
+
+    // step_b should be skipped (when condition false)
+    let skipped = result.events.iter().find(|e| {
+        matches!(e, crate::runtime::RunEvent::StepSkipped { step, .. } if step == "step_b")
+    });
+    assert!(
+        skipped.is_some(),
+        "expected StepSkipped for step_b; got events: {:?}",
+        result.events
+    );
+    // blocked_dependency must be None for a when:-skip
+    if let Some(crate::runtime::RunEvent::StepSkipped {
+        blocked_dependency, ..
+    }) = skipped
+    {
+        assert!(
+            blocked_dependency.is_none(),
+            "when:-skip must have blocked_dependency=None; got: {blocked_dependency:?}"
+        );
+    }
+
+    // step_b result should be Skipped
+    let step_b_result = result.stage_results.iter().find(|r| r.stage_name == "step_b");
+    assert!(
+        matches!(
+            step_b_result,
+            Some(StageResult {
+                status: StageResultStatus::Skipped,
+                ..
+            })
+        ),
+        "step_b result must be Skipped; got: {step_b_result:?}"
+    );
+}
+
+/// #455: A step with `when: confidence < 70` that evaluates true (prior output
+/// has confidence < 70) must execute normally (no StepSkipped emitted).
+#[tokio::test]
+async fn when_condition_true_step_executes() {
+    let when_expr = crate::ast::WhenExpr::Comparison(WhenComparison {
+        field: "confidence".to_string(),
+        op: CompareOp::Lt,
+        value: WhenValue::Number("70".to_string()),
+    });
+    let workflow = make_when_step_workflow(
+        "test",
+        vec![
+            make_step("step_a", "bot_a", vec![]),
+            make_step_with_when("step_b", "bot_b", vec!["step_a"], Some(when_expr)),
+        ],
+    );
+
+    let file = parse_file(
+        r#"
+        agent bot_a { model: openai }
+        agent bot_b { model: openai }
+    "#,
+    );
+    let provider = MockProvider::new();
+    // step_a returns confidence: 50 — below threshold, so step_b should run
+    provider.push_response(simple_response("confidence: 50"));
+    provider.push_response(simple_response("step_b result"));
+
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        provider: &provider,
+        executor: &executor,
+        file: &file,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        audit_log: None,
+        approval_handler: None,
+        workflow_name: None,
+    };
+
+    let result = run_workflow(&workflow, &ctx)
+        .await
+        .expect("run_workflow should succeed");
+
+    // step_b should NOT be in skipped events
+    let skipped_b = result.events.iter().any(|e| {
+        matches!(e, crate::runtime::RunEvent::StepSkipped { step, .. } if step == "step_b")
+    });
+    assert!(
+        !skipped_b,
+        "step_b should execute when condition is true; got events: {:?}",
+        result.events
+    );
+
+    // step_b should complete
+    let completed_b = result.events.iter().any(|e| {
+        matches!(e, crate::runtime::RunEvent::StepCompleted { step } if step == "step_b")
+    });
+    assert!(
+        completed_b,
+        "step_b should emit StepCompleted; got events: {:?}",
+        result.events
+    );
+}
+
+/// #455: A step skipped by when: must NOT cascade-block its dependents.
+/// Dependents of a when:-skipped step should still execute.
+#[tokio::test]
+async fn when_skipped_step_does_not_cascade_block_dependents() {
+    let when_expr = crate::ast::WhenExpr::Comparison(WhenComparison {
+        field: "confidence".to_string(),
+        op: CompareOp::Lt,
+        value: WhenValue::Number("70".to_string()),
+    });
+    let workflow = make_when_step_workflow(
+        "test",
+        vec![
+            // step_a runs always, outputs confidence: 85 (when condition fails)
+            make_step("step_a", "bot_a", vec![]),
+            // step_b is when:-skipped
+            make_step_with_when("step_b", "bot_b", vec!["step_a"], Some(when_expr)),
+            // step_c depends on step_b; it should still run despite step_b being skipped
+            make_step("step_c", "bot_c", vec!["step_b"]),
+        ],
+    );
+
+    let file = parse_file(
+        r#"
+        agent bot_a { model: openai }
+        agent bot_b { model: openai }
+        agent bot_c { model: openai }
+    "#,
+    );
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("confidence: 85")); // step_a
+    provider.push_response(simple_response("step_c result")); // step_c (step_b skipped)
+
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        provider: &provider,
+        executor: &executor,
+        file: &file,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        audit_log: None,
+        approval_handler: None,
+        workflow_name: None,
+    };
+
+    let result = run_workflow(&workflow, &ctx)
+        .await
+        .expect("run_workflow should succeed");
+
+    // step_b is when:-skipped
+    assert!(
+        result.events.iter().any(|e| {
+            matches!(e, crate::runtime::RunEvent::StepSkipped { step, .. } if step == "step_b")
+        }),
+        "step_b should be when:-skipped; got events: {:?}",
+        result.events
+    );
+
+    // step_c must still execute (not cascade-skipped)
+    assert!(
+        result.events.iter().any(|e| {
+            matches!(e, crate::runtime::RunEvent::StepCompleted { step } if step == "step_c")
+        }),
+        "step_c should execute despite step_b being when:-skipped; got events: {:?}",
+        result.events
     );
 }

@@ -3,7 +3,9 @@
 //! Supports multiple matching strategies: exact equality, substring containment,
 //! regular expressions, and JSON path extraction.
 
-use crate::ast::ConditionMatcher;
+use std::collections::HashMap;
+
+use crate::ast::{CompareOp, ConditionMatcher, WhenExpr, WhenValue};
 
 /// Extract the value of a `field: value` or `field=value` line from output.
 fn extract_field_value<'a>(output: &'a str, field: &str) -> Option<&'a str> {
@@ -85,4 +87,67 @@ fn resolve_json_path<'a>(
         current = current.get(segment)?;
     }
     Some(current)
+}
+
+/// Evaluate a `when:` expression against the current set of step outputs.
+///
+/// Returns `true` if the guard condition is satisfied (step should run),
+/// `false` if the condition is not met (step should be skipped).
+///
+/// Each value in `outputs` is the raw text output produced by the named step.
+/// Numeric comparisons parse the extracted field value as `f64`; non-parseable
+/// values are treated as 0.
+pub fn when_expr_matches(expr: &WhenExpr, outputs: &HashMap<String, String>) -> bool {
+    match expr {
+        WhenExpr::And(exprs) => exprs.iter().all(|e| when_expr_matches(e, outputs)),
+        WhenExpr::Or(exprs) => exprs.iter().any(|e| when_expr_matches(e, outputs)),
+        WhenExpr::Comparison(cmp) => {
+            // Search all prior step outputs for the field value.
+            let raw_value = outputs
+                .values()
+                .find_map(|output| extract_field_value(output, &cmp.field));
+
+            let Some(raw) = raw_value else {
+                // Field not found — condition cannot be satisfied.
+                return false;
+            };
+
+            match &cmp.value {
+                WhenValue::String(expected) | WhenValue::Ident(expected) => {
+                    raw.to_lowercase() == expected.to_lowercase()
+                }
+                WhenValue::Number(rhs) | WhenValue::Percent(rhs) => {
+                    let lhs: f64 = raw
+                        .trim_end_matches('%')
+                        .parse()
+                        .unwrap_or(0.0);
+                    let rhs_val: f64 = rhs
+                        .trim_end_matches('%')
+                        .parse()
+                        .unwrap_or(0.0);
+                    compare_numeric(lhs, &cmp.op, rhs_val)
+                }
+                WhenValue::Currency { amount, .. } => {
+                    let lhs: f64 = raw
+                        .trim_start_matches(|c: char| !c.is_ascii_digit() && c != '.')
+                        .parse()
+                        .unwrap_or(0.0);
+                    #[allow(clippy::cast_precision_loss)]
+                    let rhs = *amount as f64;
+                    compare_numeric(lhs, &cmp.op, rhs)
+                }
+            }
+        }
+    }
+}
+
+fn compare_numeric(lhs: f64, op: &CompareOp, rhs: f64) -> bool {
+    match op {
+        CompareOp::Lt => lhs < rhs,
+        CompareOp::Gt => lhs > rhs,
+        CompareOp::LtEq => lhs <= rhs,
+        CompareOp::GtEq => lhs >= rhs,
+        CompareOp::Eq => (lhs - rhs).abs() < f64::EPSILON,
+        CompareOp::NotEq => (lhs - rhs).abs() >= f64::EPSILON,
+    }
 }
