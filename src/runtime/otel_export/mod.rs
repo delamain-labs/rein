@@ -417,13 +417,13 @@ fn event_to_span_data(event: &super::RunEvent) -> (String, Vec<OtelAttribute>) {
         ),
         RunEvent::StepSkipped {
             step,
-            failed_dependency,
+            blocked_dependency,
             reason,
         } => (
             "rein.step.skipped".to_string(),
             vec![
                 attr_str("rein.step.name", step),
-                attr_str("rein.step.failed_dependency", failed_dependency),
+                attr_str("rein.step.blocked_dependency", blocked_dependency),
                 attr_str("rein.step.reason", reason),
             ],
         ),
