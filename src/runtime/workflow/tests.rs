@@ -3044,7 +3044,9 @@ async fn for_each_partial_failure_discards_completed_iterations() {
         "partial for_each results must be discarded; got: {:?}",
         results[0].output
     );
-    // A StepFailed event must be emitted with a non-empty reason.
+    // A StepFailed event must be emitted with a non-empty reason and error_kind
+    // "stage_failed". The for_each path wraps iteration errors as
+    // WorkflowError::StageFailed before calling apply_step_result.
     assert!(
         events.iter().any(|e| matches!(
             e,
@@ -3052,6 +3054,14 @@ async fn for_each_partial_failure_discards_completed_iterations() {
             if step == "batch" && !reason.is_empty()
         )),
         "expected StepFailed for 'batch' with non-empty reason; events: {events:?}"
+    );
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            crate::runtime::RunEvent::StepFailed { step, error_kind, .. }
+            if step == "batch" && error_kind == "stage_failed"
+        )),
+        "for_each failure must produce error_kind \"stage_failed\"; events: {events:?}"
     );
     // No StepCompleted event for the step (it did not complete).
     assert!(
@@ -3295,10 +3305,11 @@ async fn step_failed_carries_error_kind_agent_not_found() {
 #[tokio::test]
 async fn step_failed_carries_error_kind_stage_failed() {
     let file = parse_file("agent worker { model: openai }");
-    // Provider that returns a network error (ProviderError::Network) → run_stage maps it to
-    // RunError::Provider → WorkflowError::StageFailed (the soft-error path). It is NOT a
-    // timeout, so it does not produce WorkflowError::StageTimedOut (hard error). This mapping
-    // is the source of the expected error_kind "stage_failed".
+    // MockProvider::push_error returns a provider error string. That maps to
+    // WorkflowError::StageFailed (the soft-error path), confirmed by the existing
+    // provider_error_produces_stage_failed test. It is NOT a timeout, so it does not
+    // produce WorkflowError::StageTimedOut (hard error). This is the source of the
+    // expected error_kind "stage_failed".
     let provider = MockProvider::new();
     provider.push_error("simulated network failure");
     let executor = MockExecutor::new();
