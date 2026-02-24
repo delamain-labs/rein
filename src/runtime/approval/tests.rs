@@ -677,14 +677,98 @@ async fn slack_handler_truncates_long_agent_output_in_message() {
 
     let max_len =
         AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT + AuditingApprovalHandler::TRUNCATION_MARKER.len();
-    // The text field contains the full message (header + output); the output
-    // portion must have been truncated.
+    // The Slack text ends with "\n{output_preview}"; extract the output portion
+    // after the fixed prefix and assert its length directly.
+    let output_portion = text
+        .split("\n\nAgent output:\n")
+        .nth(1)
+        .expect("text must contain 'Agent output:' section");
     assert!(
-        !text.contains(&"y".repeat(max_len + 1)),
-        "slack text must not contain full long output; len={}", text.len()
+        output_portion.len() <= max_len,
+        "slack agent_output portion must be <= {} bytes (limit + marker), got {}",
+        max_len,
+        output_portion.len()
     );
     assert!(
-        text.contains(AuditingApprovalHandler::TRUNCATION_MARKER),
-        "slack text must contain TRUNCATION_MARKER when output is long; got: {text:?}"
+        output_portion.ends_with(AuditingApprovalHandler::TRUNCATION_MARKER),
+        "slack agent_output portion must end with TRUNCATION_MARKER; got: {output_portion:?}"
+    );
+}
+
+/// #500: WebhookApprovalHandler must pass through short agent_output unchanged (no marker).
+#[tokio::test]
+async fn webhook_handler_short_agent_output_not_truncated() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/approval"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let url = format!("{}/approval", server.uri());
+    let handler = WebhookApprovalHandler::new(url.clone());
+    let approval = make_approval_for_channel("webhook", &url);
+
+    let short_output = "short agent output";
+    handler
+        .request_approval("deploy", short_output, &approval)
+        .await;
+
+    let received = server.received_requests().await.unwrap();
+    let body: serde_json::Value =
+        serde_json::from_slice(&received[0].body).expect("body must be valid JSON");
+    let sent_output = body["agent_output"].as_str().expect("agent_output must be present");
+
+    assert_eq!(
+        sent_output, short_output,
+        "short output must be forwarded verbatim — no truncation marker"
+    );
+    assert!(
+        !sent_output.contains(AuditingApprovalHandler::TRUNCATION_MARKER),
+        "short output must not contain TRUNCATION_MARKER"
+    );
+}
+
+/// #500: SlackApprovalHandler must pass through short agent_output unchanged (no marker).
+#[tokio::test]
+async fn slack_handler_short_agent_output_not_truncated() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/slack"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let url = format!("{}/slack", server.uri());
+    let handler = SlackApprovalHandler::new(url.clone());
+    let approval = make_approval_for_channel("slack", &url);
+
+    let short_output = "short agent output";
+    handler
+        .request_approval("notify", short_output, &approval)
+        .await;
+
+    let received = server.received_requests().await.unwrap();
+    let body: serde_json::Value =
+        serde_json::from_slice(&received[0].body).expect("body must be valid JSON");
+    let text = body["text"].as_str().expect("text field must be present");
+
+    let output_portion = text
+        .split("\n\nAgent output:\n")
+        .nth(1)
+        .expect("text must contain 'Agent output:' section");
+    assert_eq!(
+        output_portion, short_output,
+        "short output must appear verbatim in Slack message — no truncation marker"
+    );
+    assert!(
+        !output_portion.contains(AuditingApprovalHandler::TRUNCATION_MARKER),
+        "short output must not contain TRUNCATION_MARKER in Slack message"
     );
 }
