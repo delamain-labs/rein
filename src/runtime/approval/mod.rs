@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::io::{self, Write};
 use std::sync::Arc;
 
 use crate::ast::{ApprovalDef, ApprovalKind};
@@ -61,32 +62,9 @@ impl ApprovalHandler for CliApprovalHandler {
         agent_output: &str,
         approval: &ApprovalDef,
     ) -> ApprovalStatus {
-        let kind_label = match approval.kind {
-            ApprovalKind::Approve => "APPROVAL REQUIRED",
-            ApprovalKind::Collaborate => "COLLABORATION REQUIRED",
-        };
-
-        eprintln!();
-        eprintln!("╔══════════════════════════════════════════╗");
-        eprintln!("║  🛑 {kind_label}");
-        eprintln!("╠══════════════════════════════════════════╣");
-        eprintln!("║  Step: {step_name}");
-        eprintln!(
-            "║  Channel: {} → {}",
-            approval.channel, approval.destination
-        );
-        if let Some(ref timeout) = approval.timeout {
-            eprintln!("║  Timeout: {timeout}");
-        }
-        eprintln!("╠══════════════════════════════════════════╣");
-        eprintln!("║  Agent output:");
-        // Cap at AGENT_OUTPUT_PREVIEW_LIMIT bytes — consistent with webhook/Slack/audit (#514).
-        let preview = truncate_agent_output(agent_output);
-        for line in preview.lines() {
-            eprintln!("║  {line}");
-        }
-        eprintln!("╚══════════════════════════════════════════╝");
-        eprintln!();
+        // Errors writing to stderr are unrecoverable in an interactive CLI context.
+        write_cli_prompt(step_name, agent_output, approval, &mut io::stderr())
+            .expect("failed to write approval prompt to stderr");
 
         eprint!("Approve? [y/n]: ");
 
@@ -182,6 +160,57 @@ pub(crate) fn truncate_agent_output(output: &str) -> Cow<'_, str> {
     } else {
         Cow::Borrowed(output)
     }
+}
+
+/// Write the CLI approval prompt to `out`.
+///
+/// Extracted from `CliApprovalHandler::request_approval` so unit tests can
+/// capture the display output without redirecting the process-wide stderr.
+///
+/// When `agent_output` is longer than [`AGENT_OUTPUT_PREVIEW_LIMIT`] bytes,
+/// a truncation notice is appended after the output lines so the human
+/// reviewer knows content was cut.
+pub(crate) fn write_cli_prompt(
+    step_name: &str,
+    agent_output: &str,
+    approval: &ApprovalDef,
+    out: &mut impl Write,
+) -> io::Result<()> {
+    let kind_label = match approval.kind {
+        ApprovalKind::Approve => "APPROVAL REQUIRED",
+        ApprovalKind::Collaborate => "COLLABORATION REQUIRED",
+    };
+    writeln!(out)?;
+    writeln!(out, "╔══════════════════════════════════════════╗")?;
+    writeln!(out, "║  🛑 {kind_label}")?;
+    writeln!(out, "╠══════════════════════════════════════════╣")?;
+    writeln!(out, "║  Step: {step_name}")?;
+    writeln!(
+        out,
+        "║  Channel: {} → {}",
+        approval.channel, approval.destination
+    )?;
+    if let Some(ref timeout) = approval.timeout {
+        writeln!(out, "║  Timeout: {timeout}")?;
+    }
+    writeln!(out, "╠══════════════════════════════════════════╣")?;
+    writeln!(out, "║  Agent output:")?;
+    // Cap at AGENT_OUTPUT_PREVIEW_LIMIT bytes — consistent with webhook/Slack/audit (#514).
+    let preview = truncate_agent_output(agent_output);
+    for line in preview.lines() {
+        writeln!(out, "║  {line}")?;
+    }
+    // Show truncation notice so the reviewer knows content was cut (#522).
+    if matches!(preview, Cow::Owned(_)) {
+        writeln!(
+            out,
+            "║  [output truncated — {AGENT_OUTPUT_PREVIEW_LIMIT} bytes shown of {} total]",
+            agent_output.len()
+        )?;
+    }
+    writeln!(out, "╚══════════════════════════════════════════╝")?;
+    writeln!(out)?;
+    Ok(())
 }
 
 /// A webhook-based approval handler.

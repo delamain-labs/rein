@@ -1161,3 +1161,37 @@ async fn resolve_handler_webhook_with_workflow_and_agent_propagates_to_audit_ent
     );
     assert_eq!(entries[1].metadata["decision"], "approved");
 }
+
+// --- #522 CliApprovalHandler truncation notice ---
+
+/// #522: Truncation notice must appear when agent_output exceeds the preview limit.
+#[test]
+fn write_cli_prompt_shows_truncation_notice_for_long_output() {
+    let long_output = "x".repeat(AGENT_OUTPUT_PREVIEW_LIMIT + 100);
+    let approval = make_approval_for_channel("cli", "");
+    let mut buf = Vec::new();
+    write_cli_prompt("deploy", &long_output, &approval, &mut buf).unwrap();
+    let output = String::from_utf8(buf).unwrap();
+    assert!(
+        output.contains("[output truncated"),
+        "truncation notice must be present for output longer than the preview limit; got:\n{output}"
+    );
+    assert!(
+        output.contains(&format!("{AGENT_OUTPUT_PREVIEW_LIMIT} bytes shown")),
+        "truncation notice must include the byte limit; got:\n{output}"
+    );
+}
+
+/// #522: No truncation notice when agent_output is within the preview limit.
+#[test]
+fn write_cli_prompt_no_truncation_notice_for_short_output() {
+    let short_output = "hello, reviewer";
+    let approval = make_approval_for_channel("cli", "");
+    let mut buf = Vec::new();
+    write_cli_prompt("deploy", short_output, &approval, &mut buf).unwrap();
+    let output = String::from_utf8(buf).unwrap();
+    assert!(
+        !output.contains("[output truncated"),
+        "truncation notice must NOT appear for short output; got:\n{output}"
+    );
+}
