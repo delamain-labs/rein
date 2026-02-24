@@ -4,6 +4,7 @@ use std::time::Instant;
 // This function is inherently sequential setup code (parse → validate →
 // build provider → attach engine extensions → dispatch). Extracting it
 // further would require artificial helpers with awkward return types.
+// TODO(#460): refactor into named setup phases to remove this suppression.
 #[allow(clippy::too_many_lines)]
 pub fn run_agent(
     path: &std::path::Path,
