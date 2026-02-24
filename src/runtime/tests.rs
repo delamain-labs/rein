@@ -949,7 +949,7 @@ fn to_structured_counts_stage_timeouts() {
 /// its own event type, not by others.
 #[test]
 fn to_structured_timeout_count_does_not_interfere_with_other_counters() {
-    use crate::runtime::{ToolCall, ToolResult};
+    use crate::runtime::ToolCall;
 
     let trace = RunTrace::from_events(vec![
         RunEvent::LlmCall {
