@@ -47,7 +47,13 @@ pub struct ToolResult {
 }
 
 /// A discrete event that occurs during an agent run.
+///
+/// # Stability
+/// This enum is `#[non_exhaustive]`: new variants may be added in minor
+/// versions without a semver major bump. Downstream crates that `match` on
+/// `RunEvent` must include a wildcard (`_ => {}`) arm.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RunEvent {
     LlmCall {
@@ -456,7 +462,12 @@ fn summarize_event(event: &RunEvent, lines: &mut Vec<String>, turn: &mut usize) 
             lines.push(format!("  ✗ step '{step}' failed: {reason}"));
         }
         RunEvent::StageTimeout { turn, timeout_secs } => {
-            lines.push(format!("  ✗ turn {turn} timed out after {timeout_secs}s"));
+            // Display as 1-indexed (turn + 1) to match the LlmCall summarizer
+            // convention which increments before printing. (#423)
+            let display_turn = turn + 1;
+            lines.push(format!(
+                "  ✗ turn {display_turn} timed out after {timeout_secs}s"
+            ));
         }
         RunEvent::StepSkipped { step, reason, .. } => {
             lines.push(format!("  ⏭ step '{step}' skipped: {reason}"));

@@ -790,3 +790,38 @@ fn structured_trace_uses_real_timestamps() {
         "offset_ms must not use the fake (i * 100) formula"
     );
 }
+
+// ── #423: StageTimeout display must use 1-indexed turn numbers ─────────────
+
+#[test]
+fn stage_timeout_summary_uses_one_based_turn_number() {
+    // A timeout on the very first LLM call (raw `turn = 0`) must display as
+    // "turn 1" in the human-readable summary, matching the `LlmCall` display
+    // convention which also uses 1-based turn numbers.
+    let events = vec![RunEvent::StageTimeout {
+        turn: 0,
+        timeout_secs: 30,
+    }];
+    let summary = RunTrace::summarize_events(&events);
+    assert!(
+        summary.contains("turn 1"),
+        "expected 1-indexed turn number; got: {summary}"
+    );
+    assert!(
+        !summary.contains("turn 0"),
+        "0-indexed turn number must not appear in summary; got: {summary}"
+    );
+}
+
+#[test]
+fn stage_timeout_second_turn_displays_as_turn_2() {
+    let events = vec![RunEvent::StageTimeout {
+        turn: 1,
+        timeout_secs: 10,
+    }];
+    let summary = RunTrace::summarize_events(&events);
+    assert!(
+        summary.contains("turn 2"),
+        "expected '2' for second turn (raw index 1); got: {summary}"
+    );
+}

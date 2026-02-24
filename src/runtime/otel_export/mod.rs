@@ -405,6 +405,9 @@ fn event_to_span_data(event: &super::RunEvent) -> (String, Vec<OtelAttribute>) {
             "rein.step.started".to_string(),
             vec![
                 attr_str("rein.step.name", step),
+                // -1 signals "index unknown / overflow" rather than i64::MAX,
+                // which would be indistinguishable from a legitimate large index.
+                // On 64-bit hosts usize→i64 conversion never actually overflows.
                 attr_int("rein.step.index", i64::try_from(*index).unwrap_or(-1)),
             ],
         ),
