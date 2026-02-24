@@ -87,6 +87,7 @@ fn make_agent(
             span: Span { start: 0, end: 1 },
         }),
         guardrails: None,
+        stage_timeout_secs: None,
         span: Span { start: 0, end: 10 },
     }
 }

@@ -70,12 +70,13 @@ pub fn run_agent(
     // Build permission registry from agent capabilities.
     let registry = rein::runtime::permissions::ToolRegistry::from_agent(agent);
 
-    // Build run config.
+    // Build run config. CLI flag takes precedence over DSL field.
+    let resolved_stage_timeout = stage_timeout_secs.or(agent.stage_timeout_secs);
     let config = rein::runtime::engine::RunConfig {
         system_prompt: None,
         max_turns: 10,
         budget_cents: agent.budget.as_ref().map_or(0, |b| b.amount),
-        stage_timeout_secs,
+        stage_timeout_secs: resolved_stage_timeout,
     };
 
     // Build engine with enforcement.

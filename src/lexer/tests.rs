@@ -527,6 +527,18 @@ fn guardrails_keyword() {
 }
 
 #[test]
+fn stage_keyword() {
+    let src = "stage timeout: 30s";
+    let tokens = non_eof(lex_ok(src));
+    assert_eq!(tokens[0].kind, TokenKind::Stage);
+    assert_eq!(tokens[1].kind, TokenKind::Timeout);
+    assert_eq!(tokens[2].kind, TokenKind::Colon);
+    // "30s" lexes as Number("30") followed by Ident("s")
+    assert_eq!(tokens[3].kind, TokenKind::Number("30".into()));
+    assert_eq!(tokens[4].kind, TokenKind::Ident("s".into()));
+}
+
+#[test]
 fn tool_and_endpoint_keywords() {
     let src = "tool zendesk { endpoint: \"https://api.zendesk.com\" }";
     let tokens = non_eof(lex_ok(src));

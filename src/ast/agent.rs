@@ -38,6 +38,8 @@ pub struct AgentDef {
     pub cannot: Vec<Capability>,
     pub budget: Option<Budget>,
     pub guardrails: Option<GuardrailsDef>,
+    /// Per-LLM-call timeout in seconds, set via `stage timeout: 30s` in the DSL.
+    pub stage_timeout_secs: Option<u64>,
     pub span: Span,
 }
 
@@ -53,6 +55,8 @@ pub struct ArchetypeDef {
     pub cannot: Vec<Capability>,
     pub budget: Option<Budget>,
     pub guardrails: Option<GuardrailsDef>,
+    /// Per-LLM-call timeout in seconds, set via `stage timeout: 30s` in the DSL.
+    pub stage_timeout_secs: Option<u64>,
     pub span: Span,
 }
 

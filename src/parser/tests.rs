@@ -2554,3 +2554,46 @@ fn parse_collecting_no_errors() {
     assert!(errors.is_empty());
     assert_eq!(file.agents.len(), 1);
 }
+
+// ── #378: stage timeout: <N>s inside agent block ─────────────────────────
+
+#[test]
+fn parse_agent_stage_timeout_seconds() {
+    let f = parse_ok(
+        r#"agent bot {
+            model: openai
+            stage timeout: 30s
+        }"#,
+    );
+    assert_eq!(f.agents[0].stage_timeout_secs, Some(30));
+}
+
+#[test]
+fn parse_agent_stage_timeout_with_other_fields() {
+    let f = parse_ok(
+        r#"agent bot {
+            model: openai
+            budget: $0.05 per ticket
+            stage timeout: 60s
+        }"#,
+    );
+    assert_eq!(f.agents[0].stage_timeout_secs, Some(60));
+}
+
+#[test]
+fn parse_agent_no_stage_timeout_defaults_to_none() {
+    let f = parse_ok("agent bot { model: openai }");
+    assert_eq!(f.agents[0].stage_timeout_secs, None);
+}
+
+#[test]
+fn parse_agent_duplicate_stage_timeout_errors() {
+    let err = parse_err(
+        r#"agent bot {
+            model: openai
+            stage timeout: 30s
+            stage timeout: 60s
+        }"#,
+    );
+    assert!(err.message.contains("duplicate"), "got: {}", err.message);
+}
