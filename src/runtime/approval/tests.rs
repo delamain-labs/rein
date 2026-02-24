@@ -595,3 +595,180 @@ async fn auditing_handler_populates_workflow_and_agent_context() {
     assert_eq!(entries[1].workflow.as_deref(), Some("deploy-workflow"));
     assert_eq!(entries[1].agent.as_deref(), Some("deploy-bot"));
 }
+
+// --- #500: cap agent_output in Webhook and Slack payloads ---
+
+/// #500: WebhookApprovalHandler must truncate agent_output to
+/// AGENT_OUTPUT_PREVIEW_LIMIT bytes in the outbound POST body.
+/// Large LLM responses must not bloat webhook payloads.
+#[tokio::test]
+async fn webhook_handler_truncates_long_agent_output_in_payload() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/approval"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let url = format!("{}/approval", server.uri());
+    let handler = WebhookApprovalHandler::new(url.clone());
+    let approval = make_approval_for_channel("webhook", &url);
+
+    // Produce an agent_output that is well over the 512-byte limit.
+    let long_output = "x".repeat(2000);
+    handler
+        .request_approval("deploy", &long_output, &approval)
+        .await;
+
+    // Inspect the last request received by the mock server.
+    let received = server.received_requests().await.unwrap();
+    assert_eq!(received.len(), 1, "expected exactly one POST");
+    let body: serde_json::Value =
+        serde_json::from_slice(&received[0].body).expect("body must be valid JSON");
+    let sent_output = body["agent_output"].as_str().expect("agent_output must be present");
+
+    // The sent output must not exceed the preview limit + marker.
+    let max_len =
+        AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT + AuditingApprovalHandler::TRUNCATION_MARKER.len();
+    assert!(
+        sent_output.len() <= max_len,
+        "webhook agent_output must be truncated; got {} bytes (limit {})",
+        sent_output.len(),
+        max_len
+    );
+    assert!(
+        sent_output.ends_with(AuditingApprovalHandler::TRUNCATION_MARKER),
+        "webhook agent_output must end with TRUNCATION_MARKER; got: {sent_output:?}"
+    );
+}
+
+/// #500: SlackApprovalHandler must truncate agent_output to
+/// AGENT_OUTPUT_PREVIEW_LIMIT bytes in the outbound message text.
+#[tokio::test]
+async fn slack_handler_truncates_long_agent_output_in_message() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/slack"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let url = format!("{}/slack", server.uri());
+    let handler = SlackApprovalHandler::new(url.clone());
+    let approval = make_approval_for_channel("slack", &url);
+
+    let long_output = "y".repeat(2000);
+    handler
+        .request_approval("notify", &long_output, &approval)
+        .await;
+
+    let received = server.received_requests().await.unwrap();
+    assert_eq!(received.len(), 1, "expected exactly one POST");
+    let body: serde_json::Value =
+        serde_json::from_slice(&received[0].body).expect("body must be valid JSON");
+    let text = body["text"].as_str().expect("text field must be present");
+
+    let max_len =
+        AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT + AuditingApprovalHandler::TRUNCATION_MARKER.len();
+    // The Slack text ends with "\n{output_preview}"; extract the output portion
+    // after the fixed prefix and assert its length directly.
+    let output_portion = text
+        .split("\n\nAgent output:\n")
+        .nth(1)
+        .expect("text must contain 'Agent output:' section");
+    assert!(
+        output_portion.len() <= max_len,
+        "slack agent_output portion must be <= {} bytes (limit + marker), got {}",
+        max_len,
+        output_portion.len()
+    );
+    assert!(
+        output_portion.ends_with(AuditingApprovalHandler::TRUNCATION_MARKER),
+        "slack agent_output portion must end with TRUNCATION_MARKER; got: {output_portion:?}"
+    );
+}
+
+/// #500: WebhookApprovalHandler must pass through short agent_output unchanged (no marker).
+#[tokio::test]
+async fn webhook_handler_short_agent_output_not_truncated() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/approval"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let url = format!("{}/approval", server.uri());
+    let handler = WebhookApprovalHandler::new(url.clone());
+    let approval = make_approval_for_channel("webhook", &url);
+
+    let short_output = "short agent output";
+    handler
+        .request_approval("deploy", short_output, &approval)
+        .await;
+
+    let received = server.received_requests().await.unwrap();
+    let body: serde_json::Value =
+        serde_json::from_slice(&received[0].body).expect("body must be valid JSON");
+    let sent_output = body["agent_output"].as_str().expect("agent_output must be present");
+
+    assert_eq!(
+        sent_output, short_output,
+        "short output must be forwarded verbatim — no truncation marker"
+    );
+    assert!(
+        !sent_output.contains(AuditingApprovalHandler::TRUNCATION_MARKER),
+        "short output must not contain TRUNCATION_MARKER"
+    );
+}
+
+/// #500: SlackApprovalHandler must pass through short agent_output unchanged (no marker).
+#[tokio::test]
+async fn slack_handler_short_agent_output_not_truncated() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/slack"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let url = format!("{}/slack", server.uri());
+    let handler = SlackApprovalHandler::new(url.clone());
+    let approval = make_approval_for_channel("slack", &url);
+
+    let short_output = "short agent output";
+    handler
+        .request_approval("notify", short_output, &approval)
+        .await;
+
+    let received = server.received_requests().await.unwrap();
+    let body: serde_json::Value =
+        serde_json::from_slice(&received[0].body).expect("body must be valid JSON");
+    let text = body["text"].as_str().expect("text field must be present");
+
+    let output_portion = text
+        .split("\n\nAgent output:\n")
+        .nth(1)
+        .expect("text must contain 'Agent output:' section");
+    assert_eq!(
+        output_portion, short_output,
+        "short output must appear verbatim in Slack message — no truncation marker"
+    );
+    assert!(
+        !output_portion.contains(AuditingApprovalHandler::TRUNCATION_MARKER),
+        "short output must not contain TRUNCATION_MARKER in Slack message"
+    );
+}

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use crate::ast::{ApprovalDef, ApprovalKind};
@@ -149,6 +150,25 @@ pub fn parse_timeout(s: &str) -> Option<u64> {
     }
 }
 
+/// Truncate `output` to [`AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT`] bytes,
+/// appending [`AuditingApprovalHandler::TRUNCATION_MARKER`] when a cut is made.
+///
+/// Returns a borrowed `Cow` (no allocation) when the output is within the limit;
+/// returns an owned `Cow` (one allocation) only when truncation is required.
+fn truncate_agent_output(output: &str) -> Cow<'_, str> {
+    let limit = AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT;
+    if output.len() > limit {
+        let cut = output.floor_char_boundary(limit);
+        Cow::Owned(format!(
+            "{}{}",
+            &output[..cut],
+            AuditingApprovalHandler::TRUNCATION_MARKER
+        ))
+    } else {
+        Cow::Borrowed(output)
+    }
+}
+
 /// A webhook-based approval handler.
 ///
 /// POSTs a JSON payload (including the agent's output) to the configured URL.
@@ -178,10 +198,13 @@ impl ApprovalHandler for WebhookApprovalHandler {
         agent_output: &str,
         approval: &ApprovalDef,
     ) -> ApprovalStatus {
+        // Cap agent_output to match AuditingApprovalHandler's preview limit so
+        // webhook payloads are consistent with audit records (#500).
+        let output_preview = truncate_agent_output(agent_output);
         let payload = serde_json::json!({
             "step": step_name,
             "channel": approval.channel,
-            "agent_output": agent_output,
+            "agent_output": &*output_preview,
         });
 
         match self.client.post(&self.url).json(&payload).send().await {
@@ -241,9 +264,12 @@ impl ApprovalHandler for SlackApprovalHandler {
         agent_output: &str,
         approval: &ApprovalDef,
     ) -> ApprovalStatus {
+        // Cap agent_output to match AuditingApprovalHandler's preview limit so
+        // Slack messages are consistent with audit records (#500).
+        let output_preview = truncate_agent_output(agent_output);
         let timeout_str = approval.timeout.as_deref().unwrap_or("no timeout");
         let text = format!(
-            "Approval required: step '{step_name}'\nTimeout: {timeout_str}\n\nAgent output:\n{agent_output}"
+            "Approval required: step '{step_name}'\nTimeout: {timeout_str}\n\nAgent output:\n{output_preview}"
         );
         let payload = serde_json::json!({ "text": text });
 
@@ -365,18 +391,13 @@ impl ApprovalHandler for AuditingApprovalHandler {
         requested.workflow = self.workflow_name.clone();
         requested.agent = self.agent_name.clone();
         // Truncate agent_output to AGENT_OUTPUT_PREVIEW_LIMIT bytes to avoid unbounded audit
-        // log growth. floor_char_boundary ensures the slice ends on a valid UTF-8 boundary
-        // even when the input contains multibyte characters.
-        let cut = agent_output.floor_char_boundary(Self::AGENT_OUTPUT_PREVIEW_LIMIT);
+        // log growth. floor_char_boundary (inside truncate_agent_output) ensures the slice
+        // ends on a valid UTF-8 boundary even when the input contains multibyte characters.
         let truncated = agent_output.len() > Self::AGENT_OUTPUT_PREVIEW_LIMIT;
-        let output_preview = if truncated {
-            format!("{}{}", &agent_output[..cut], Self::TRUNCATION_MARKER)
-        } else {
-            agent_output.to_string()
-        };
+        let output_preview = truncate_agent_output(agent_output);
         let mut req_meta = serde_json::json!({
             "channel": approval.channel,
-            "agent_output": output_preview,
+            "agent_output": &*output_preview,
             "agent_output_truncated": truncated,
         });
         if let Some(ref t) = approval.timeout {
