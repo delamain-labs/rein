@@ -253,6 +253,49 @@ fn partial_trace_root_span_has_partial_attribute() {
     );
 }
 
+// --- #452: rein.step.error_kind OTEL attribute ---
+
+/// #452: StepFailed events must emit `rein.step.error_kind` as a string attribute
+/// so OTEL dashboards can filter by failure mode without regex on rein.step.reason.
+#[test]
+fn step_failed_otel_span_includes_error_kind_attribute() {
+    use crate::runtime::RunEvent;
+    use crate::runtime::RunTrace;
+
+    let events = vec![RunEvent::StepFailed {
+        step: "deploy".to_string(),
+        reason: "agent not found: bot".to_string(),
+        error_kind: "agent_not_found".to_string(),
+    }];
+    let trace = RunTrace::from_events(events);
+    let structured = trace.to_structured(
+        "test_agent",
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T00:00:01Z",
+        1000,
+    );
+    let resource_spans = to_otlp(&structured);
+    let spans = &resource_spans.scope_spans[0].spans;
+
+    let failed_span = spans
+        .iter()
+        .find(|s| s.name == "rein.step.failed")
+        .expect("must have a rein.step.failed span");
+
+    let kind_attr = failed_span
+        .attributes
+        .iter()
+        .find(|a| a.key == "rein.step.error_kind")
+        .expect("rein.step.failed span must have rein.step.error_kind attribute");
+
+    assert_eq!(
+        kind_attr.value.string_value.as_deref(),
+        Some("agent_not_found"),
+        "rein.step.error_kind must equal the error_kind field value; got: {:?}",
+        kind_attr.value
+    );
+}
+
 // Normal (non-partial) trace must NOT have rein.run.partial attribute.
 #[test]
 fn non_partial_trace_has_no_partial_attribute() {
