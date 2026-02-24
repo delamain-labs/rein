@@ -82,9 +82,15 @@ impl ApprovalHandler for CliApprovalHandler {
             .expect("failed to write approval prompt to stderr");
 
         eprint!("Approve? [y/n]: ");
-        // Flush so the prompt appears before spawn_blocking transfers to the
-        // blocking thread. Without this, buffered output may not reach the
-        // terminal before the read begins (#508).
+        // Flush stderr so the prompt appears before spawn_blocking transfers to
+        // the blocking thread. On most platforms stderr is unbuffered, so this
+        // is a no-op in the common case — it is defensive for piped or
+        // redirected stderr contexts where buffering may be active (#508).
+        // Note: write_cli_prompt above also writes to stderr via a passed-in
+        // &mut impl Write; if that output is buffered, only the final eprint!
+        // line is covered by this flush. Both writes use io::stderr() directly,
+        // which is unbuffered on Linux/macOS, so in practice all output lands
+        // before the blocking read begins.
         let _ = io::stderr().flush();
 
         // Offload the blocking stdin read to a dedicated thread so the Tokio
@@ -638,9 +644,9 @@ impl ApprovalHandler for AuditingApprovalHandler {
 /// # Warning
 ///
 /// `REIN_TEST_APPROVAL_HANDLER` is intended **exclusively for automated testing**.
-/// Setting it in a production environment bypasses all approval gates and makes
-/// the WARN log the only signal that the override is active. Never set this
-/// variable in deployed systems.
+/// The override block is gated with `#[cfg(test)]` and is compiled out of
+/// production binaries entirely — the variable has no effect in release builds
+/// and cannot be used to bypass approval gates in deployed systems.
 ///
 /// - `"webhook"` → `WebhookApprovalHandler` (POST to `destination` URL)
 /// - `"slack"` → `SlackApprovalHandler` (POST to `destination` Slack webhook URL)
