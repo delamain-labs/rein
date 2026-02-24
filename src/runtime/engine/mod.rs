@@ -224,11 +224,11 @@ impl<'a> AgentEngine<'a> {
         self
     }
 
-    /// Run the agent with the given user message.
+    /// Validates `RunConfig` before a run starts.
     ///
     /// # Errors
-    /// Returns `RunError` if the run fails (budget exceeded, provider error, etc.).
-    /// Validate config before starting a run.
+    /// Returns `Err(RunError::ConfigError)` if `stage_timeout_secs` is `Some(0)`
+    /// (a zero-second timeout is not a valid no-timeout sentinel; use `None`).
     fn validate_config(&self) -> Result<(), RunError> {
         if self.config.stage_timeout_secs == Some(0) {
             return Err(RunError::ConfigError);
@@ -236,6 +236,16 @@ impl<'a> AgentEngine<'a> {
         Ok(())
     }
 
+    /// Run the agent with the given user message.
+    ///
+    /// # Errors
+    /// Returns `RunError` if the run fails. Possible variants include:
+    /// - `RunError::ConfigError` — invalid `RunConfig` (e.g. `stage_timeout_secs = Some(0)`)
+    /// - `RunError::BudgetExceeded` — accumulated cost exceeded `budget_cents`
+    /// - `RunError::Timeout` — provider call exceeded `stage_timeout_secs`
+    /// - `RunError::ProviderError` — provider returned a non-timeout failure
+    /// - `RunError::CircuitBreakerOpen` — circuit breaker is open
+    /// - `RunError::GuardrailBlocked` — a guardrail condition was triggered
     #[allow(clippy::too_many_lines)] // tracked in #460
     pub async fn run(&self, user_message: &str) -> Result<RunResult, RunError> {
         self.validate_config()?;
