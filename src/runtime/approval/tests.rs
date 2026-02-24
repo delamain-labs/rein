@@ -1445,6 +1445,29 @@ async fn non_slack_audit_entry_omits_notification_status() {
 
 // --- #507: REIN_TEST_APPROVAL_HANDLER env var ---
 
+/// RAII guard that removes a process environment variable when it is dropped,
+/// even if the test panics. All `#[serial]` env-var tests use this to prevent
+/// a panic between `set_var` and `remove_var` from leaving the variable set
+/// for subsequent tests in the serial group.
+struct EnvGuard {
+    key: &'static str,
+}
+
+impl EnvGuard {
+    fn set(key: &'static str, value: &str) -> Self {
+        // SAFETY: serialised by #[serial] — no concurrent thread reads the env.
+        unsafe { std::env::set_var(key, value) };
+        Self { key }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        // SAFETY: serialised by #[serial] — no concurrent thread reads the env.
+        unsafe { std::env::remove_var(self.key) };
+    }
+}
+
 /// #507: When REIN_TEST_APPROVAL_HANDLER=auto_approve, resolve_approval_handler
 /// must return an AutoApproveHandler regardless of the channel type, so tests can
 /// exercise the production resolve path without blocking on stdin.
@@ -1454,12 +1477,10 @@ async fn non_slack_audit_entry_omits_notification_status() {
 #[tokio::test]
 #[serial_test::serial]
 async fn rein_test_approval_handler_auto_approve_overrides_cli() {
-    // SAFETY: serialised by #[serial] — no concurrent thread reads the env.
-    unsafe { std::env::set_var("REIN_TEST_APPROVAL_HANDLER", "auto_approve") };
+    let _guard = EnvGuard::set("REIN_TEST_APPROVAL_HANDLER", "auto_approve");
     let approval = make_approval_for_channel("cli", "");
     let handler = resolve_approval_handler(&approval);
     let status = handler.request_approval("step", "output", &approval).await;
-    unsafe { std::env::remove_var("REIN_TEST_APPROVAL_HANDLER") };
     assert_eq!(
         status,
         ApprovalStatus::Approved,
@@ -1472,12 +1493,10 @@ async fn rein_test_approval_handler_auto_approve_overrides_cli() {
 #[tokio::test]
 #[serial_test::serial]
 async fn rein_test_approval_handler_auto_reject_overrides_cli() {
-    // SAFETY: serialised by #[serial] — no concurrent thread reads the env.
-    unsafe { std::env::set_var("REIN_TEST_APPROVAL_HANDLER", "auto_reject") };
+    let _guard = EnvGuard::set("REIN_TEST_APPROVAL_HANDLER", "auto_reject");
     let approval = make_approval_for_channel("cli", "");
     let handler = resolve_approval_handler(&approval);
     let status = handler.request_approval("step", "output", &approval).await;
-    unsafe { std::env::remove_var("REIN_TEST_APPROVAL_HANDLER") };
     assert!(
         matches!(status, ApprovalStatus::Rejected { .. }),
         "REIN_TEST_APPROVAL_HANDLER=auto_reject must return Rejected; got {status:?}"
@@ -1486,9 +1505,13 @@ async fn rein_test_approval_handler_auto_reject_overrides_cli() {
 
 /// #507: Unknown values for REIN_TEST_APPROVAL_HANDLER must be ignored so a typo
 /// cannot silently auto-approve production workflows. We verify this by using a
-/// `webhook` channel backed by a mock server that returns 500 — `WebhookApprovalHandler`
-/// returns `Pending` on non-2xx, whereas `AutoApproveHandler` would return `Approved`.
-/// Receiving `Pending` confirms the env var was correctly bypassed.
+/// `webhook` channel backed by a mock server that returns 500 —
+/// `WebhookApprovalHandler` returns `Rejected { reason: "webhook returned 500" }`
+/// on non-2xx, whereas `AutoApproveHandler` would return `Approved` and
+/// `AutoRejectHandler` would return `Rejected { reason: "test rejection" }`.
+/// Receiving a Rejected status whose reason contains "500" confirms both:
+///   (a) the env var override was NOT applied (no auto_approve), and
+///   (b) the normal webhook path was reached (not auto_reject).
 #[tokio::test]
 #[serial_test::serial]
 async fn rein_test_approval_handler_unknown_value_is_ignored() {
@@ -1502,20 +1525,18 @@ async fn rein_test_approval_handler_unknown_value_is_ignored() {
         .mount(&server)
         .await;
 
-    // SAFETY: serialised by #[serial] — no concurrent thread reads the env.
-    unsafe { std::env::set_var("REIN_TEST_APPROVAL_HANDLER", "unknown_value") };
+    let _guard = EnvGuard::set("REIN_TEST_APPROVAL_HANDLER", "unknown_value");
     let url = format!("{}/hook", server.uri());
     let approval = make_approval_for_channel("webhook", &url);
     let handler = resolve_approval_handler(&approval);
     let status = handler.request_approval("step", "output", &approval).await;
-    unsafe { std::env::remove_var("REIN_TEST_APPROVAL_HANDLER") };
 
-    // WebhookApprovalHandler returns Rejected on non-2xx. AutoApproveHandler would
-    // return Approved. Receiving Rejected proves the env var override was NOT applied.
+    // Strengthened: check the reason contains "500" (webhook path) rather than
+    // merely asserting Rejected{..}, which AutoRejectHandler would also satisfy.
     assert!(
-        matches!(status, ApprovalStatus::Rejected { .. }),
-        "unknown REIN_TEST_APPROVAL_HANDLER value must not trigger auto_approve; \
-         expected Rejected (webhook non-2xx), got {status:?}"
+        matches!(status, ApprovalStatus::Rejected { ref reason } if reason.contains("500")),
+        "unknown REIN_TEST_APPROVAL_HANDLER value must not trigger auto_approve or auto_reject; \
+         expected Rejected with webhook 500 reason, got {status:?}"
     );
 }
 

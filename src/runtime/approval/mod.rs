@@ -82,6 +82,10 @@ impl ApprovalHandler for CliApprovalHandler {
             .expect("failed to write approval prompt to stderr");
 
         eprint!("Approve? [y/n]: ");
+        // Flush so the prompt appears before spawn_blocking transfers to the
+        // blocking thread. Without this, buffered output may not reach the
+        // terminal before the read begins (#508).
+        let _ = io::stderr().flush();
 
         // Offload the blocking stdin read to a dedicated thread so the Tokio
         // executor thread is not blocked while waiting for human input.
@@ -623,6 +627,13 @@ impl ApprovalHandler for AuditingApprovalHandler {
 /// Unknown values are silently ignored and the normal channel dispatch proceeds.
 /// This override exists so integration tests can exercise the production
 /// `resolve_approval_handler` code path without blocking on stdin.
+///
+/// # Warning
+///
+/// `REIN_TEST_APPROVAL_HANDLER` is intended **exclusively for automated testing**.
+/// Setting it in a production environment bypasses all approval gates and makes
+/// the WARN log the only signal that the override is active. Never set this
+/// variable in deployed systems.
 ///
 /// - `"webhook"` → `WebhookApprovalHandler` (POST to `destination` URL)
 /// - `"slack"` → `SlackApprovalHandler` (POST to `destination` Slack webhook URL)
