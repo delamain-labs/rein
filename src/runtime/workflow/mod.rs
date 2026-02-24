@@ -76,6 +76,11 @@ pub struct WorkflowResult {
     /// `StepStarted`, `StepCompleted`, `StepFailed`, `StepSkipped`,
     /// `StepFallback`, `ForEachIteration`, `AutoResolved`.
     pub events: Vec<super::RunEvent>,
+    /// Unix-epoch timestamps in milliseconds, parallel to `events`.
+    /// Stage-based events carry real timestamps from the agent `RunTrace`.
+    /// Step-based workflow events (e.g. `StepStarted`) use 0 as a sentinel
+    /// until per-event timestamps are added (tracked separately).
+    pub event_timestamps_ms: Vec<u64>,
 }
 
 /// The result of a single stage within a workflow.
@@ -184,13 +189,13 @@ impl WorkflowError {
 
 impl std::error::Error for WorkflowError {}
 
-/// Run a single stage and return its result.
+/// Run a single stage and return its result plus raw timestamps.
 pub(super) async fn run_stage(
     stage_name: &str,
     agent_name: &str,
     input: &str,
     ctx: &WorkflowContext<'_>,
-) -> Result<(StageResult, Vec<super::RunEvent>), WorkflowError> {
+) -> Result<(StageResult, Vec<super::RunEvent>, Vec<u64>), WorkflowError> {
     let agent = ctx
         .file
         .agents
@@ -215,6 +220,7 @@ pub(super) async fn run_stage(
             error: e,
         })?;
 
+    let timestamps = result.trace.timestamps_ms.clone();
     let events = result.trace.events;
     Ok((
         StageResult {
@@ -226,6 +232,7 @@ pub(super) async fn run_stage(
             status: StageResultStatus::Executed,
         },
         events,
+        timestamps,
     ))
 }
 
@@ -234,7 +241,13 @@ pub(super) fn build_result(
     stage_results: Vec<StageResult>,
     final_output: String,
     events: Vec<super::RunEvent>,
+    event_timestamps_ms: Vec<u64>,
 ) -> WorkflowResult {
+    debug_assert_eq!(
+        events.len(),
+        event_timestamps_ms.len(),
+        "event_timestamps_ms must be parallel to events (one entry per event)"
+    );
     let total_cost = stage_results.iter().map(|r| r.cost_cents).sum();
     let total_tokens = stage_results.iter().map(|r| r.tokens).sum();
     WorkflowResult {
@@ -243,6 +256,7 @@ pub(super) fn build_result(
         total_cost_cents: total_cost,
         total_tokens,
         events,
+        event_timestamps_ms,
     }
 }
 
@@ -294,6 +308,7 @@ pub async fn run_sequential(
 ) -> Result<WorkflowResult, WorkflowError> {
     let mut stage_results = Vec::new();
     let mut all_events: Vec<super::RunEvent> = Vec::new();
+    let mut all_timestamps: Vec<u64> = Vec::new();
     let mut current_input = format!("Trigger: {}", workflow.trigger);
     let mut visited = std::collections::HashSet::new();
 
@@ -304,13 +319,14 @@ pub async fn run_sequential(
             return Err(WorkflowError::CircularRoute(stage.name.clone()));
         }
 
-        let (result, stage_events) =
+        let (result, stage_events, stage_timestamps) =
             run_stage(&stage.name, &stage.agent, &current_input, ctx).await?;
 
         current_input.clone_from(&result.output);
         let output = result.output.clone();
         stage_results.push(result);
         all_events.extend(stage_events);
+        all_timestamps.extend(stage_timestamps);
 
         current_stage = resolve_next_stage(workflow, stage, &output)?;
     }
@@ -320,7 +336,12 @@ pub async fn run_sequential(
         .map(|r| r.output.clone())
         .unwrap_or_default();
 
-    Ok(build_result(stage_results, final_output, all_events))
+    Ok(build_result(
+        stage_results,
+        final_output,
+        all_events,
+        all_timestamps,
+    ))
 }
 
 /// Execute all workflow stages with the trigger as input (fan-out pattern).
@@ -350,9 +371,11 @@ pub async fn run_parallel(
 
     let mut stage_results = Vec::with_capacity(outcomes.len());
     let mut all_events: Vec<super::RunEvent> = Vec::new();
-    for (result, stage_events) in outcomes {
+    let mut all_timestamps: Vec<u64> = Vec::new();
+    for (result, stage_events, stage_timestamps) in outcomes {
         stage_results.push(result);
         all_events.extend(stage_events);
+        all_timestamps.extend(stage_timestamps);
     }
 
     let final_output = stage_results
@@ -361,7 +384,12 @@ pub async fn run_parallel(
         .collect::<Vec<_>>()
         .join("\n");
 
-    Ok(build_result(stage_results, final_output, all_events))
+    Ok(build_result(
+        stage_results,
+        final_output,
+        all_events,
+        all_timestamps,
+    ))
 }
 
 /// Resolve step execution order using Kahn's topological sort algorithm.
@@ -499,11 +527,11 @@ pub async fn run_step(
         input.to_string()
     };
 
-    // run_stage now returns (StageResult, events); run_step discards the events
+    // run_stage now returns (StageResult, events, timestamps); run_step discards both
     // since its callers (run_step_with_fallback → run_steps) aggregate events separately.
     run_stage(&step.name, &step.agent, &effective_input, ctx)
         .await
-        .map(|(result, _events)| result)
+        .map(|(result, _events, _timestamps)| result)
 }
 
 /// Execute a step, running its fallback if the primary step fails.
@@ -1013,7 +1041,12 @@ pub async fn run_workflow(
             }
             result.stage_results.push(sr);
         }
+        let step_event_count = step_events.len();
         result.events.extend(step_events);
+        // Step-based events don't carry per-event timestamps yet; use 0 as sentinel.
+        result
+            .event_timestamps_ms
+            .extend(std::iter::repeat_n(0u64, step_event_count));
     }
 
     Ok(result)
