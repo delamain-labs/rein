@@ -114,20 +114,25 @@ impl From<serde_json::Error> for AuditError {
 impl AuditLog {
     /// Create a new audit log at the given path.
     ///
-    /// Creates parent directories if needed and performs a probe-open to verify
-    /// the file is writable at construction time. This ensures the fail-hard
-    /// CLI contract is enforced before any workflow execution begins — a
-    /// mis-configured audit path fails immediately rather than silently
-    /// dropping records at the first approval gate.
+    /// Creates parent directories if needed and verifies that the parent
+    /// directory is writable **without** creating the target file. The target
+    /// file is created lazily on the first `append` call. This prevents
+    /// compliance tools from seeing a zero-byte audit file and misinterpreting
+    /// it as "logging is active but nothing was approved" when the workflow
+    /// never executed (e.g. because `.rein` validation failed after `AuditLog::new`).
+    ///
+    /// The writability probe uses a temporary file in the same directory.
     pub fn new(path: impl Into<PathBuf>) -> Result<Self, AuditError> {
         let path = path.into();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
+            // Probe writability via a temp file in the same directory without
+            // creating or touching the target file. The temp file is created and
+            // immediately removed so it leaves no side effect.
+            let probe = parent.join(".rein-audit-probe");
+            fs::File::create(&probe)?;
+            fs::remove_file(&probe)?;
         }
-        // Probe-open: verify the file is writable now. The handle is
-        // dropped immediately; actual writes use a separate open per
-        // append call (append-only, no persistent handle held).
-        OpenOptions::new().create(true).append(true).open(&path)?;
         Ok(Self {
             path,
             write_lock: Mutex::new(()),

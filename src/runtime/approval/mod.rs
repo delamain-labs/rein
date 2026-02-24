@@ -307,6 +307,8 @@ impl AuditingApprovalHandler {
     /// Attach a workflow name to every audit entry emitted by this handler.
     ///
     /// Empty strings are silently ignored; the workflow field will remain `None`.
+    /// This guard is self-enforcing at the method boundary: callers cannot produce
+    /// `workflow: Some("")` in audit records regardless of what they pass in.
     #[must_use]
     pub fn with_workflow(mut self, name: impl Into<String>) -> Self {
         let name = name.into();
@@ -317,9 +319,16 @@ impl AuditingApprovalHandler {
     }
 
     /// Attach an agent name to every audit entry emitted by this handler.
+    ///
+    /// Empty strings are silently ignored; the agent field will remain `None`.
+    /// This guard is self-enforcing at the method boundary: callers cannot produce
+    /// `agent: Some("")` in audit records regardless of what they pass in.
     #[must_use]
     pub fn with_agent(mut self, name: impl Into<String>) -> Self {
-        self.agent_name = Some(name.into());
+        let name = name.into();
+        if !name.is_empty() {
+            self.agent_name = Some(name);
+        }
         self
     }
 }
@@ -332,6 +341,9 @@ impl ApprovalHandler for AuditingApprovalHandler {
         agent_output: &str,
         approval: &ApprovalDef,
     ) -> ApprovalStatus {
+        // Truncate agent_output at 512 bytes to avoid unbounded audit log growth.
+        // The truncation marker makes it clear the record is incomplete.
+        const OUTPUT_PREVIEW_LIMIT: usize = 512;
         // Emit ApprovalRequested before delegating.
         let mut requested = audit::entry(
             AuditKind::ApprovalRequested,
@@ -340,8 +352,14 @@ impl ApprovalHandler for AuditingApprovalHandler {
         requested.step = Some(step_name.to_string());
         requested.workflow = self.workflow_name.clone();
         requested.agent = self.agent_name.clone();
+        let output_preview = if agent_output.len() > OUTPUT_PREVIEW_LIMIT {
+            format!("{}… (truncated)", &agent_output[..OUTPUT_PREVIEW_LIMIT])
+        } else {
+            agent_output.to_string()
+        };
         let mut req_meta = serde_json::json!({
             "channel": approval.channel,
+            "agent_output": output_preview,
         });
         if let Some(ref t) = approval.timeout {
             req_meta["timeout"] = serde_json::Value::String(t.clone());

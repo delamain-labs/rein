@@ -1,6 +1,24 @@
 use super::*;
 use tempfile::TempDir;
 
+// #473: AuditLog::new must NOT create the target file as a side effect.
+// Only the parent directory should be verified as writable.
+#[test]
+fn new_does_not_create_target_file_on_success() {
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("audit.jsonl");
+    assert!(
+        !path.exists(),
+        "target file must not exist before AuditLog::new"
+    );
+    let _log = AuditLog::new(&path).unwrap();
+    assert!(
+        !path.exists(),
+        "AuditLog::new must not create the target file as a side effect; \
+         file should only appear on first append"
+    );
+}
+
 fn test_log() -> (TempDir, AuditLog) {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("audit.jsonl");
