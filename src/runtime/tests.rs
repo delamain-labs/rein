@@ -485,8 +485,7 @@ fn run_error_config_error_roundtrips() {
 #[test]
 fn run_error_serializes_as_snake_case() {
     // Unit variants use #[serde(rename_all = "snake_case")] and serialize as
-    // bare strings, preserving the existing wire format. Only the `Timeout`
-    // struct variant serializes as an object `{"timeout": {...}}`.
+    // bare strings, preserving the existing wire format.
     let v: serde_json::Value = serde_json::to_value(RunError::BudgetExceeded).expect("serialize");
     assert_eq!(v, "budget_exceeded");
 
@@ -506,15 +505,34 @@ fn run_error_timeout_roundtrips() {
         partial_trace: RunTrace::from_events(vec![]),
     };
     let json = serde_json::to_string(&err).expect("serialize");
-    // Without a `tag`, serde serializes a struct variant as {"<variant>": {<fields>}}.
-    // The key is the snake_case variant name and the value contains `partial_trace`.
+    // partial_trace carries #[serde(skip)], so Timeout serializes as
+    // {"timeout": {}} — an object with an empty body.
     let v: serde_json::Value = serde_json::from_str(&json).expect("parse");
     assert!(
         v["timeout"].is_object(),
-        "expected {{\"timeout\": {{...}}}} shape, got: {v}"
+        "expected {{\"timeout\": {{}}}} shape, got: {v}"
     );
     let back: RunError = serde_json::from_str(&json).expect("deserialize");
     assert!(matches!(back, RunError::Timeout { .. }));
+}
+
+// #426: partial_trace must NOT appear in the serialized RunError::Timeout.
+// It is in-process only and must not leak trace events onto the wire.
+#[test]
+fn run_error_timeout_partial_trace_not_on_wire() {
+    let err = RunError::Timeout {
+        partial_trace: RunTrace::from_events(vec![RunEvent::RunComplete {
+            total_cost_cents: 1,
+            total_tokens: 10,
+        }]),
+    };
+    let v: serde_json::Value = serde_json::to_value(&err).expect("serialize");
+    assert!(
+        v.get("timeout")
+            .and_then(|t| t.get("partial_trace"))
+            .is_none(),
+        "partial_trace must not appear in serialized RunError; got: {v}"
+    );
 }
 
 // ── RunTrace output ────────────────────────────────────────────────────────

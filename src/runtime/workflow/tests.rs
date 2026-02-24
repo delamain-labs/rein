@@ -3016,3 +3016,67 @@ async fn cascade_skip_propagates_three_hops() {
         "expected StepSkipped for step_c (transitive); events: {events:?}"
     );
 }
+
+// #427: RunError::Timeout inside a workflow stage must propagate as a hard error
+// (WorkflowError::StageTimedOut) that aborts the workflow immediately, rather
+// than being treated as a soft StageFailed that would allow subsequent stages to run.
+#[tokio::test(start_paused = true)]
+async fn stage_timeout_in_workflow_is_hard_error() {
+    use crate::runtime::provider::Message;
+    use crate::runtime::provider::Provider;
+    use crate::runtime::provider::ProviderError;
+    use crate::runtime::provider::ToolDef;
+
+    struct HangingProvider;
+
+    #[async_trait::async_trait]
+    impl Provider for HangingProvider {
+        fn name(&self) -> &'static str {
+            "hanging"
+        }
+        async fn chat(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolDef],
+        ) -> Result<ChatResponse, ProviderError> {
+            std::future::pending().await
+        }
+    }
+
+    let source = r#"
+        agent slow { model: openai }
+        agent fast { model: openai }
+    "#;
+    let file = parse_file(source);
+    let workflow = make_workflow("pipe", "go", &["slow", "fast"]);
+    let executor = MockExecutor::new();
+    let provider = HangingProvider;
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig {
+            stage_timeout_secs: Some(5),
+            ..RunConfig::default()
+        },
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let result = run_sequential(&workflow, &ctx).await;
+
+    // Must be an error (not Ok) — the timeout must abort the workflow.
+    assert!(
+        result.is_err(),
+        "expected error from timed-out stage; got Ok"
+    );
+    let err = result.unwrap_err();
+
+    // Must be a hard error: StageTimedOut, NOT StageFailed.
+    assert!(
+        matches!(err, WorkflowError::StageTimedOut { .. }),
+        "timeout inside workflow stage must produce StageTimedOut (hard error); got: {err:?}"
+    );
+}

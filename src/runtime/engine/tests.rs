@@ -16,6 +16,45 @@ use crate::runtime::provider::{ChatResponse, MockProvider, ToolCallRequest, Tool
 /// `tokio::time::timeout` wrapper so the test finishes instantly.
 struct HangingProvider;
 
+/// A `Provider` that returns a tool-call on the first call, then hangs forever.
+/// Used to test multi-turn timeout scenarios (#424).
+struct HangAfterFirstProvider {
+    calls: std::sync::Mutex<u32>,
+}
+
+impl HangAfterFirstProvider {
+    fn new() -> Self {
+        Self {
+            calls: std::sync::Mutex::new(0),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::runtime::provider::Provider for HangAfterFirstProvider {
+    fn name(&self) -> &'static str {
+        "hang_after_first"
+    }
+
+    async fn chat(
+        &self,
+        _messages: &[crate::runtime::provider::Message],
+        _tools: &[ToolDef],
+    ) -> Result<ChatResponse, crate::runtime::provider::ProviderError> {
+        let call_num = {
+            let mut guard = self.calls.lock().unwrap();
+            let n = *guard;
+            *guard += 1;
+            n
+        };
+        if call_num == 0 {
+            Ok(tool_call_response("test.noop", serde_json::json!({})))
+        } else {
+            std::future::pending().await
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl crate::runtime::provider::Provider for HangingProvider {
     fn name(&self) -> &'static str {
@@ -1095,5 +1134,58 @@ async fn stage_timeout_records_circuit_breaker_failure() {
         matches!(result2, Err(RunError::CircuitBreakerOpen)),
         "second run should be blocked by open circuit breaker; got: {:?}",
         result2
+    );
+}
+
+// #424: timeout on turn > 0 must carry prior events in partial_trace.
+// Turn 0 succeeds (tool call), turn 1 hangs — partial trace must contain
+// the turn 0 LlmCall event AND the final StageTimeout { turn: 1 } event.
+#[tokio::test(start_paused = true)]
+async fn stage_timeout_on_turn_1_includes_prior_events_in_partial_trace() {
+    let agent = make_agent(vec![cap("test", "noop")], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+    let executor = MockExecutor::new();
+    executor.on_call("test", "noop", "ok");
+
+    let provider = HangAfterFirstProvider::new();
+
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![ToolDef {
+            name: "test.noop".to_string(),
+            description: "no-op tool".to_string(),
+            parameters: serde_json::json!({}),
+        }],
+        RunConfig {
+            stage_timeout_secs: Some(5),
+            ..RunConfig::default()
+        },
+    );
+
+    let result = engine.run("hello").await;
+    let Err(RunError::Timeout { partial_trace }) = result else {
+        panic!("expected RunError::Timeout; got: {:?}", result);
+    };
+
+    // Must contain turn 0's LlmCall (from the successful first provider call).
+    assert!(
+        partial_trace
+            .events
+            .iter()
+            .any(|e| matches!(e, RunEvent::LlmCall { .. })),
+        "partial_trace must include turn 0 LlmCall; got: {:?}",
+        partial_trace.events
+    );
+
+    // StageTimeout must be the last event, on turn 1.
+    assert!(
+        matches!(
+            partial_trace.events.last(),
+            Some(RunEvent::StageTimeout { turn: 1, .. })
+        ),
+        "last event must be StageTimeout {{ turn: 1, .. }}; got: {:?}",
+        partial_trace.events
     );
 }

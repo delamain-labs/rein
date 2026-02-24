@@ -169,20 +169,27 @@ pub fn to_otlp(trace: &StructuredTrace) -> OtelResourceSpans {
         kind: 1, // INTERNAL
         start_time_unix_nano: start_ns,
         end_time_unix_nano: end_ns,
-        attributes: vec![
-            attr_str("rein.agent.name", &trace.agent),
-            attr_int("rein.tokens.total", trace.stats.total_tokens.cast_signed()),
-            attr_int(
-                "rein.cost.cents",
-                trace.stats.total_cost_cents.cast_signed(),
-            ),
-            attr_int("rein.llm.calls", trace.stats.llm_calls.cast_signed()),
-            attr_int("rein.tool.calls", trace.stats.tool_calls.cast_signed()),
-            attr_int(
-                "rein.tool.denied",
-                trace.stats.tool_calls_denied.cast_signed(),
-            ),
-        ],
+        attributes: {
+            let mut attrs = vec![
+                attr_str("rein.agent.name", &trace.agent),
+                attr_int("rein.tokens.total", trace.stats.total_tokens.cast_signed()),
+                attr_int(
+                    "rein.cost.cents",
+                    trace.stats.total_cost_cents.cast_signed(),
+                ),
+                attr_int("rein.llm.calls", trace.stats.llm_calls.cast_signed()),
+                attr_int("rein.tool.calls", trace.stats.tool_calls.cast_signed()),
+                attr_int(
+                    "rein.tool.denied",
+                    trace.stats.tool_calls_denied.cast_signed(),
+                ),
+            ];
+            // #430: mark partial/timed-out exports so dashboards can filter them.
+            if trace.is_partial {
+                attrs.push(attr_str("rein.run.partial", "true"));
+            }
+            attrs
+        },
         status: OtelStatus {
             code: 1, // OK
             message: None,
@@ -408,7 +415,7 @@ fn event_to_span_data(event: &super::RunEvent) -> (String, Vec<OtelAttribute>) {
         RunEvent::StageTimeout { turn, timeout_secs } => (
             "rein.stage.timeout".to_string(),
             vec![
-                attr_int("rein.stage.turn", i64::try_from(*turn).unwrap_or(-1)),
+                attr_int("rein.stage.turn", i64::try_from(*turn).unwrap_or(i64::MAX)),
                 attr_int(
                     "rein.stage.timeout_secs",
                     i64::try_from(*timeout_secs).unwrap_or(i64::MAX),

@@ -186,3 +186,85 @@ fn otlp_root_span_has_stats() {
         .unwrap();
     assert_eq!(cost.value.int_value, Some(5));
 }
+
+// #425: rein.stage.turn in StageTimeout span must use i64::MAX as overflow sentinel,
+// consistent with rein.stage.timeout_secs — not -1 which is semantically undefined.
+#[test]
+fn stage_timeout_turn_uses_imax_sentinel_not_minus_one() {
+    use crate::runtime::RunEvent;
+    use crate::runtime::RunTrace;
+
+    let events = vec![RunEvent::StageTimeout {
+        turn: 0,
+        timeout_secs: 5,
+    }];
+    let trace = RunTrace::from_events(events);
+    let structured = trace.to_structured(
+        "test_agent",
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T00:00:01Z",
+        1000,
+    );
+    let resource_spans = to_otlp(&structured);
+    let spans = &resource_spans.scope_spans[0].spans;
+
+    let timeout_span = spans
+        .iter()
+        .find(|s| s.name == "rein.stage.timeout")
+        .expect("must have a rein.stage.timeout span");
+
+    let turn_attr = timeout_span
+        .attributes
+        .iter()
+        .find(|a| a.key == "rein.stage.turn")
+        .expect("must have rein.stage.turn attribute");
+
+    // The value is 0 (valid), so just check it's not -1.
+    assert_ne!(
+        turn_attr.value.int_value,
+        Some(-1),
+        "rein.stage.turn must not use -1 as sentinel; got: {:?}",
+        turn_attr.value
+    );
+    assert_eq!(turn_attr.value.int_value, Some(0));
+}
+
+// #430: export_partial must mark the root span with rein.run.partial = "true"
+// so dashboards can distinguish incomplete runs from normal empty completions.
+#[test]
+fn partial_trace_root_span_has_partial_attribute() {
+    let mut trace = sample_trace();
+    trace.is_partial = true;
+
+    let resource_spans = to_otlp(&trace);
+    let root = &resource_spans.scope_spans[0].spans[0];
+
+    let partial_attr = root.attributes.iter().find(|a| a.key == "rein.run.partial");
+
+    assert!(
+        partial_attr.is_some(),
+        "partial trace must have rein.run.partial attribute on root span; attributes: {:?}",
+        root.attributes
+    );
+    assert_eq!(
+        partial_attr.unwrap().value.string_value.as_deref(),
+        Some("true"),
+        "rein.run.partial must be \"true\""
+    );
+}
+
+// Normal (non-partial) trace must NOT have rein.run.partial attribute.
+#[test]
+fn non_partial_trace_has_no_partial_attribute() {
+    let trace = sample_trace();
+    assert!(!trace.is_partial, "sample_trace() must not be partial");
+
+    let resource_spans = to_otlp(&trace);
+    let root = &resource_spans.scope_spans[0].spans[0];
+
+    assert!(
+        root.attributes.iter().all(|a| a.key != "rein.run.partial"),
+        "non-partial trace must not have rein.run.partial; attributes: {:?}",
+        root.attributes
+    );
+}

@@ -152,7 +152,7 @@ pub enum RunEvent {
 }
 
 /// An ordered log of all events that occurred during a run.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RunTrace {
     pub events: Vec<RunEvent>,
     /// Real wall-clock offsets (ms from run start) captured at event-push time.
@@ -279,6 +279,7 @@ impl RunTrace {
                 tool_calls_denied: tool_denied,
                 duration_ms,
             },
+            is_partial: false,
         }
     }
 
@@ -476,6 +477,11 @@ pub struct StructuredTrace {
     pub events: Vec<TimestampedEvent>,
     /// Aggregate statistics.
     pub stats: TraceStats,
+    /// `true` when this trace was exported from a partial/timed-out run.
+    /// OTEL consumers can filter on `rein.run.partial = "true"` to distinguish
+    /// incomplete runs from normally-empty completions.
+    #[serde(default)]
+    pub is_partial: bool,
 }
 
 /// An event with a timestamp.
@@ -513,7 +519,11 @@ pub enum RunError {
     /// Provider call exceeded `stage_timeout_secs`. Contains events emitted
     /// up to (and including) the `StageTimeout` event so callers can inspect
     /// the partial trace (e.g. in tests or structured error reporting).
+    ///
+    /// `partial_trace` carries `#[serde(skip)]` — it is in-process only and
+    /// must not appear on the wire. Wire consumers see `{"timeout": {}}`.
     Timeout {
+        #[serde(skip)]
         partial_trace: RunTrace,
     },
 }
