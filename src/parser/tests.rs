@@ -216,6 +216,28 @@ fn parse_can_list_mixed_newline_and_comma() {
 }
 
 #[test]
+fn error_leading_comma_in_can_list() {
+    // A comma before the first item is not a valid capability start → parse error
+    let err = parse_err("agent foo { can [,zendesk.read] }");
+    assert!(
+        err.message.contains("identifier") || err.message.contains("Ident"),
+        "expected identifier error; got: {}",
+        err.message
+    );
+}
+
+#[test]
+fn error_double_comma_in_can_list() {
+    // Two consecutive commas between items → parse error
+    let err = parse_err("agent foo { can [zendesk.read,,zendesk.write] }");
+    assert!(
+        err.message.contains("identifier") || err.message.contains("Ident"),
+        "expected identifier error; got: {}",
+        err.message
+    );
+}
+
+#[test]
 fn parse_can_list() {
     let src = r#"
 agent foo {
