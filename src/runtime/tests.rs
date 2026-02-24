@@ -500,6 +500,8 @@ fn run_error_serializes_as_snake_case() {
     // bare strings. Struct variants (`BudgetExceeded`, `CircuitBreakerOpen`,
     // `Timeout`) serialize as `{"variant": {}}` — empty object because
     // partial_trace carries #[serde(skip)].
+    // Struct variants: BudgetExceeded, CircuitBreakerOpen, Timeout all serialize
+    // as {"<variant>": {}} — empty object because partial_trace is #[serde(skip)].
     let v: serde_json::Value = serde_json::to_value(RunError::BudgetExceeded {
         partial_trace: RunTrace::from_events(vec![]),
     })
@@ -509,6 +511,16 @@ fn run_error_serializes_as_snake_case() {
         "expected object key budget_exceeded; got: {v}"
     );
 
+    let v: serde_json::Value = serde_json::to_value(RunError::CircuitBreakerOpen {
+        partial_trace: RunTrace::from_events(vec![]),
+    })
+    .expect("serialize");
+    assert!(
+        v.get("circuit_breaker_open").is_some(),
+        "expected object key circuit_breaker_open; got: {v}"
+    );
+
+    // Unit variants serialize as bare strings.
     let v: serde_json::Value = serde_json::to_value(RunError::PermissionDenied).expect("serialize");
     assert_eq!(v, "permission_denied");
 

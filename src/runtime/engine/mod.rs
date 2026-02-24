@@ -127,6 +127,19 @@ impl RunState {
         self.event_timestamps_ms.push(elapsed_ms);
         self.events.push(event);
     }
+
+    /// Drain both `events` and `event_timestamps_ms` into a [`RunTrace`].
+    ///
+    /// Always use this method — not bare `mem::take(&mut state.events)` — to
+    /// build a partial trace. This ensures the real per-event timestamps are
+    /// taken alongside the events, so OTEL span timings in the partial trace
+    /// reflect actual wall-clock offsets rather than synthetic placeholders.
+    fn take_partial_trace(&mut self) -> super::RunTrace {
+        super::RunTrace::from_events_timed(
+            std::mem::take(&mut self.events),
+            std::mem::take(&mut self.event_timestamps_ms),
+        )
+    }
 }
 
 /// The agent execution engine. Orchestrates the LLM, tool call, result loop
@@ -280,7 +293,7 @@ impl<'a> AgentEngine<'a> {
                         failures: cb.failure_count(),
                         threshold: cb.threshold(),
                     });
-                    let partial = RunTrace::from_events(std::mem::take(&mut state.events));
+                    let partial = state.take_partial_trace();
                     self.export_partial(
                         &partial,
                         state.total_tokens,
@@ -300,7 +313,7 @@ impl<'a> AgentEngine<'a> {
                         turn,
                         timeout_secs: secs,
                     });
-                    let partial = RunTrace::from_events(std::mem::take(&mut state.events));
+                    let partial = state.take_partial_trace();
                     self.export_partial(
                         &partial,
                         state.total_tokens,
@@ -329,7 +342,7 @@ impl<'a> AgentEngine<'a> {
             if Self::check_budget(&mut state, cost).is_err() {
                 // Build partial trace and export OTEL snapshot before returning,
                 // consistent with the CircuitBreakerOpen and Timeout error paths.
-                let partial = RunTrace::from_events(std::mem::take(&mut state.events));
+                let partial = state.take_partial_trace();
                 self.export_partial(
                     &partial,
                     state.total_tokens,
