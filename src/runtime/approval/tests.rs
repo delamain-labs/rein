@@ -1180,6 +1180,10 @@ fn write_cli_prompt_shows_truncation_notice_for_long_output() {
         output.contains(&format!("{AGENT_OUTPUT_PREVIEW_LIMIT} bytes shown")),
         "truncation notice must include the byte limit; got:\n{output}"
     );
+    assert!(
+        output.contains(&format!("of {} total", long_output.len())),
+        "truncation notice must report the correct total byte count; got:\n{output}"
+    );
 }
 
 /// #522: No truncation notice when agent_output is within the preview limit.

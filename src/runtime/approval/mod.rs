@@ -200,15 +200,18 @@ pub(crate) fn write_cli_prompt(
     for line in preview.lines() {
         writeln!(out, "║  {line}")?;
     }
-    // Show truncation notice so the reviewer knows content was cut (#522).
+    writeln!(out, "╚══════════════════════════════════════════╝")?;
+    // INVARIANT: truncate_agent_output returns Cow::Owned only when a cut was made.
+    // If that function is ever changed to return Owned for other reasons (e.g. normalisation),
+    // this detection would silently lie — update both the detection and this comment then.
+    // The notice is printed outside the box to avoid overflowing the fixed-width border (#522).
     if matches!(preview, Cow::Owned(_)) {
         writeln!(
             out,
-            "║  [output truncated — {AGENT_OUTPUT_PREVIEW_LIMIT} bytes shown of {} total]",
+            "  [output truncated — {AGENT_OUTPUT_PREVIEW_LIMIT} bytes shown of {} total]",
             agent_output.len()
         )?;
     }
-    writeln!(out, "╚══════════════════════════════════════════╝")?;
     writeln!(out)?;
     Ok(())
 }
