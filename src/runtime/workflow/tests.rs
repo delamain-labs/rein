@@ -1454,11 +1454,10 @@ async fn for_each_step_audit_entries_carry_workflow_name() {
         workflow_name: Some("triage_pipeline".to_string()),
     };
 
-    // run_steps uses the trigger as the top-level input for steps.
-    let trigger_input = format!("Trigger: {}", workflow.trigger);
-    let (results, _events) = run_steps(&workflow, &ctx).await.expect("run_steps must succeed");
+    let (results, _events) = run_steps(&workflow, &ctx)
+        .await
+        .expect("run_steps must succeed");
     assert_eq!(results.len(), 1, "one step result expected");
-    drop(trigger_input);
 
     // Two iterations → 2 ApprovalRequested + 2 ApprovalResolved = 4 entries.
     let entries = log.read_all().expect("read audit log");
@@ -1468,7 +1467,7 @@ async fn for_each_step_audit_entries_carry_workflow_name() {
         "expected 4 audit entries (2 per iteration × 2 iterations); got: {entries:#?}"
     );
 
-    // Every entry must carry workflow = Some("triage_pipeline").
+    // Every entry must carry both the workflow name and the step name.
     for entry in &entries {
         assert_eq!(
             entry.workflow.as_deref(),
@@ -1477,15 +1476,26 @@ async fn for_each_step_audit_entries_carry_workflow_name() {
             entry.workflow,
             kind = entry.kind
         );
+        assert_eq!(
+            entry.step.as_deref(),
+            Some("process_ticket"),
+            "audit entry {kind:?} must have step='process_ticket'; got {:?}",
+            entry.step,
+            kind = entry.kind
+        );
     }
 
     // Sanity: both ApprovalRequested and ApprovalResolved kinds must be present.
     assert!(
-        entries.iter().any(|e| e.kind == AuditKind::ApprovalRequested),
+        entries
+            .iter()
+            .any(|e| e.kind == AuditKind::ApprovalRequested),
         "ApprovalRequested entries must be present"
     );
     assert!(
-        entries.iter().any(|e| e.kind == AuditKind::ApprovalResolved),
+        entries
+            .iter()
+            .any(|e| e.kind == AuditKind::ApprovalResolved),
         "ApprovalResolved entries must be present"
     );
 }
