@@ -97,7 +97,7 @@ console.log(result.stdout);
 
 ## REST API (`rein serve`)
 
-Start the server:
+Start the server (default port is `3000`):
 
 ```bash
 rein serve agents/assistant.rein --port 4000
@@ -205,7 +205,8 @@ jobs:
       - name: Install Rein
         run: cargo install rein-lang
       - name: Dry run
-        run: rein run --dry-run agents/assistant.rein
+        # --demo uses a mock provider — no API keys required in CI
+        run: rein run --demo agents/assistant.rein --message "smoke test"
 ```
 
 ### Exit code handling in shell scripts

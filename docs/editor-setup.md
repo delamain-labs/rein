@@ -1,60 +1,55 @@
 # Editor Setup for Rein
 
-Rein ships a Language Server Protocol (LSP) implementation via `rein lsp`. This guide covers setup for VS Code and Neovim.
+Rein provides a first-party VS Code extension and a Tree-sitter grammar for Neovim. Both are included in the repository under `editors/` and `tree-sitter-rein/` respectively.
 
 ---
 
 ## Capabilities
 
-The Rein LSP currently provides:
-
-| Capability | Status |
-|------------|--------|
-| Syntax diagnostics | ✅ Supported |
-| Hover (field docs) | ✅ Supported |
-| Go-to-definition | ⚠️ Parse-only (same file) |
-| Completion | ❌ Not yet implemented |
-| Formatting | ✅ Via `rein fmt` (not LSP) |
-
-Diagnostics fire on every save and report parse errors and semantic validation issues directly in your editor.
+| Capability | VS Code | Neovim (LSP) |
+|------------|---------|--------------|
+| Syntax highlighting | ✅ TextMate grammar | ✅ Tree-sitter grammar |
+| Diagnostics | ✅ On save | ✅ On save |
+| Hover (field docs) | ✅ Supported | ✅ Supported |
+| Go-to-definition | ⚠️ Same file only | ⚠️ Same file only |
+| Completion | ❌ Not yet implemented | ❌ Not yet implemented |
+| Formatting | ✅ Via `rein fmt` (not LSP) | ✅ Via `rein fmt` (not LSP) |
 
 ---
 
 ## VS Code
 
-There is no published VS Code extension yet. Use the generic LSP client extension to wire `rein lsp` manually.
+The `editors/vscode/` directory contains a first-party extension with syntax highlighting, real-time diagnostics, hover docs, and completion stubs.
 
 ### Setup
 
-1. Install [vscode-glspc](https://marketplace.visualstudio.com/items?itemName=dunstontc.vscode-glspc) or the [Generic Language Client](https://marketplace.visualstudio.com/items?itemName=lsp-example.lsp-example) extension.
+1. Install `rein`:
+   ```bash
+   cargo install rein-lang
+   ```
 
-2. Add to your `settings.json`:
+2. Install the extension by copying it to your VS Code extensions directory:
+   ```bash
+   cp -r editors/vscode ~/.vscode/extensions/rein-lang
+   ```
+   Or open the `editors/vscode/` folder in VS Code and run **"Install Extension from VSIX"** if you've built it.
+
+3. Open a `.rein` file — syntax highlighting and diagnostics activate automatically.
+
+### Configuration
+
+If `rein` is not on your `PATH`, set the binary path in `settings.json`:
 
 ```json
 {
-  "languageServerExample.trace.server": "verbose",
-  "languageServerExample.serverPath": "/path/to/rein",
-  "languageServerExample.serverArgs": ["lsp"],
-  "languageServerExample.filePattern": "**/*.rein"
+  "rein.serverPath": "/path/to/rein"
 }
 ```
 
-Replace `/path/to/rein` with the output of `which rein`.
+### Known limitations
 
-3. Associate `.rein` files with a language ID. Add to `settings.json`:
-
-```json
-{
-  "files.associations": {
-    "*.rein": "rein"
-  }
-}
-```
-
-### Known limitations in VS Code
-
-- No syntax highlighting (no TextMate grammar published yet — track [#369](https://github.com/delamain-labs/rein/issues/369))
-- Completions not implemented — the LSP will not suggest block types or field names
+- **Completions not implemented** — the LSP will not suggest block types or field names yet.
+- **Go-to-definition is single-file only** — cross-file navigation is not supported.
 
 ---
 
@@ -95,20 +90,28 @@ vim.filetype.add({
 })
 ```
 
-### Optional: basic syntax highlighting via Tree-sitter
+### Tree-sitter syntax highlighting
 
-A Tree-sitter grammar for Rein does not yet exist. For minimal highlighting, create a filetype detection file and use a generic fallback:
+A Tree-sitter grammar is available at `tree-sitter-rein/`. Build and install it:
+
+```bash
+cd tree-sitter-rein
+tree-sitter generate
+tree-sitter build
+```
+
+Then in Neovim, add the parser using `nvim-treesitter`:
 
 ```lua
--- Treat .rein files as similar to TOML for basic highlighting
-vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
-  pattern = '*.rein',
-  callback = function()
-    vim.bo.filetype = 'rein'
-    -- Fallback: use a close-enough grammar for color
-    vim.treesitter.language.register('toml', 'rein')
-  end,
-})
+local parser_config = require("nvim-treesitter.parsers").get_parser_configs()
+parser_config.rein = {
+  install_info = {
+    url = "https://github.com/delamain-labs/rein",
+    files = { "tree-sitter-rein/src/parser.c" },
+    branch = "master",
+  },
+  filetype = "rein",
+}
 ```
 
 ---
@@ -119,7 +122,7 @@ Run `rein lsp` directly in a terminal — it should block waiting for LSP stdio 
 
 ```bash
 rein --version
-# rein 0.2.1
+# rein <version>
 ```
 
 To confirm diagnostics are firing, introduce a syntax error in a `.rein` file and save. The LSP should report the error inline.
