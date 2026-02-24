@@ -158,6 +158,15 @@ fn new_with_bare_filename_succeeds() {
     // A bare filename ("audit.jsonl") has parent() == Some(""), which is
     // functionally None. The probe must fall back to cwd rather than
     // silently skipping the writability check.
+    //
+    // Why this test uses cwd instead of a TempDir:
+    // `std::env::set_current_dir` is process-global and not safe to use in
+    // parallel tests. Bare-filename behavior is inherently cwd-dependent by
+    // design — the test exercises the production contract (cwd must be
+    // writable), which holds in all normal test environments. CI runners that
+    // execute in read-only directories will fail this test, which is the
+    // correct signal: a read-only cwd is a misconfiguration, not a test bug.
+    //
     // We don't want to litter cwd with a real log file, so we use a
     // uniquely-named path and verify it doesn't get created (lazy init).
     let (id, _) = AuditLog::generate_id();

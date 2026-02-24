@@ -3446,8 +3446,7 @@ async fn mixed_workflow_final_output_retains_stage_output_when_all_steps_fail() 
     // final_output must be the stage output, not an empty string from the
     // failed step (which has is_real_execution() == false).
     assert_eq!(
-        result.final_output,
-        "stage output",
+        result.final_output, "stage output",
         "final_output must retain stage output when all steps fail; got: {:?}",
         result.final_output
     );

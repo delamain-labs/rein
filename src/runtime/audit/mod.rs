@@ -19,6 +19,20 @@ fn default_true() -> bool {
     true
 }
 
+/// Returns `true` if `*v` is `true`.
+///
+/// Used as `skip_serializing_if` predicate for `is_clock_reliable` so that
+/// the field is omitted from serialized JSON when the clock is reliable (the
+/// common case). Combined with `default = "default_true"`, absent fields
+/// round-trip correctly for both old and new entries.
+///
+/// `bool` is `Copy`, but serde's `skip_serializing_if` always passes `&T`,
+/// so the `&bool` argument is unavoidable here.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_true(v: &bool) -> bool {
+    *v
+}
+
 /// A single audit log entry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuditEntry {
@@ -46,8 +60,10 @@ pub struct AuditEntry {
     /// so compliance consumers must not rely on it for time ordering.
     ///
     /// Deserializes as `true` when the field is absent (entries produced before
-    /// this field was added are assumed reliable).
-    #[serde(default = "default_true")]
+    /// this field was added are assumed reliable). Omitted from serialized JSON
+    /// when `true` (the common case) to keep audit lines compact; always
+    /// written when `false` so compliance consumers can detect the anomaly.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub is_clock_reliable: bool,
 }
 
@@ -159,10 +175,7 @@ impl AuditLog {
         // immediately removed so it leaves no side effect.
         // Use generate_id() suffix to avoid collisions when multiple processes
         // or parallel test threads create audit logs in the same directory.
-        let probe = probe_dir.join(format!(
-            ".rein-audit-probe-{}",
-            Self::generate_id().0
-        ));
+        let probe = probe_dir.join(format!(".rein-audit-probe-{}", Self::generate_id().0));
         fs::File::create(&probe)?;
         // Cleanup is best-effort: writability is already confirmed by the
         // successful create above. If remove_file fails (e.g. the file was

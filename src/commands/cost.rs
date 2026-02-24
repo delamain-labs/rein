@@ -197,6 +197,9 @@ mod tests {
         .unwrap();
 
         let code = run_cost(&[tmp.path().to_path_buf()]);
-        assert_eq!(code, 0, "run_cost must succeed even when traces contain timeouts");
+        assert_eq!(
+            code, 0,
+            "run_cost must succeed even when traces contain timeouts"
+        );
     }
 }
