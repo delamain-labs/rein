@@ -3498,6 +3498,76 @@ async fn stage_timeout_in_workflow_is_hard_error() {
     );
 }
 
+// #420: When a workflow stage times out, its partial_trace events must appear
+// in the partial events returned alongside the error, so operators can see
+// what happened before the timeout (e.g. StageTimeout event in the trace).
+#[tokio::test(start_paused = true)]
+async fn stage_timeout_partial_trace_events_included_in_error() {
+    use crate::runtime::provider::Message;
+    use crate::runtime::provider::Provider;
+    use crate::runtime::provider::ProviderError;
+    use crate::runtime::provider::ToolDef;
+
+    struct HangingProvider2;
+
+    #[async_trait::async_trait]
+    impl Provider for HangingProvider2 {
+        fn name(&self) -> &'static str {
+            "hanging2"
+        }
+        async fn chat(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolDef],
+        ) -> Result<ChatResponse, ProviderError> {
+            std::future::pending().await
+        }
+    }
+
+    let source = r#"
+        agent slow { model: openai }
+        agent fast { model: openai }
+    "#;
+    let file = parse_file(source);
+    let workflow = make_workflow("pipe", "go", &["slow", "fast"]);
+    let executor = MockExecutor::new();
+    let provider = HangingProvider2;
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig {
+            stage_timeout_secs: Some(5),
+            ..RunConfig::default()
+        },
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let result = run_sequential(&workflow, &ctx).await;
+    assert!(result.is_err(), "expected error from timed-out stage");
+    let (err, partial_events) = result.unwrap_err();
+
+    assert!(
+        matches!(err, WorkflowError::StageTimedOut { .. }),
+        "must be StageTimedOut; got: {err:?}"
+    );
+
+    // #420: partial_events must include the StageTimeout event from the timed-out
+    // stage's partial trace — not just be an empty vec.
+    let has_stage_timeout = partial_events.iter().any(|e| {
+        matches!(e, crate::runtime::RunEvent::StageTimeout { .. })
+    });
+    assert!(
+        has_stage_timeout,
+        "#420: partial_events must include StageTimeout from the timed-out stage; \
+         got partial_events: {:?}",
+        partial_events
+    );
+}
+
 // --- #453: final_output contract in mixed stage+step workflows ---
 
 /// #453: When a workflow has both stages (that succeed) and steps (that all fail),

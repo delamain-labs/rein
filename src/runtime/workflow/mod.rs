@@ -408,9 +408,18 @@ pub async fn run_sequential(
         }
 
         let (result, stage_events, stage_timestamps) =
-            run_stage(&stage.name, &stage.agent, &current_input, ctx)
-                .await
-                .map_err(|e| (e, all_events.clone()))?;
+            match run_stage(&stage.name, &stage.agent, &current_input, ctx).await {
+                Ok(r) => r,
+                Err(WorkflowError::StageTimedOut { stage, partial_trace }) => {
+                    // #420: surface partial trace events from the timed-out stage so
+                    // callers can see what the stage did before the timeout (e.g.
+                    // the `StageTimeout` event itself). Clone so the error also
+                    // retains its own copy for display/log purposes.
+                    all_events.extend(partial_trace.events.clone());
+                    return Err((WorkflowError::StageTimedOut { stage, partial_trace }, all_events));
+                }
+                Err(e) => return Err((e, all_events.clone())),
+            };
 
         current_input.clone_from(&result.output);
         let output = result.output.clone();
