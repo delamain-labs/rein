@@ -1186,6 +1186,21 @@ fn write_cli_prompt_shows_truncation_notice_for_long_output() {
     );
 }
 
+/// #522: No truncation notice at exactly AGENT_OUTPUT_PREVIEW_LIMIT bytes
+/// (the guard is `>`, not `>=`).
+#[test]
+fn write_cli_prompt_no_truncation_notice_at_exact_limit() {
+    let exact_output = "x".repeat(AGENT_OUTPUT_PREVIEW_LIMIT);
+    let approval = make_approval_for_channel("cli", "");
+    let mut buf = Vec::new();
+    write_cli_prompt("deploy", &exact_output, &approval, &mut buf).unwrap();
+    let output = String::from_utf8(buf).unwrap();
+    assert!(
+        !output.contains("[output truncated"),
+        "truncation notice must NOT appear at exactly the preview limit; got:\n{output}"
+    );
+}
+
 /// #522: No truncation notice when agent_output is within the preview limit.
 #[test]
 fn write_cli_prompt_no_truncation_notice_for_short_output() {
