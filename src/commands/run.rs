@@ -1,6 +1,8 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use rein::runtime::workflow::StageResult;
+
 // This function is inherently sequential setup code (parse → validate →
 // build provider → attach engine extensions → dispatch). Extracting it
 // further would require artificial helpers with awkward return types.
@@ -211,12 +213,57 @@ fn run_workflow_mode(
     let duration = start.elapsed();
     match wf_result {
         Ok(result) => {
+            // Count soft failures. Workflows use a partial-success model: a
+            // step that fails softly (agent not found, LLM error) records a
+            // StepFailed event and allows independent steps to continue rather
+            // than aborting the whole run.
+            //
+            // Exit code convention:
+            //   0 — all steps succeeded (no StepFailed or StepSkipped events)
+            //   1 — partial success: at least one step failed softly or was
+            //       cascade-skipped (workflow ran to completion with failures)
+            //   2 — hard abort: a non-recoverable error terminated the run
+            //       before all steps could execute (see Err arm below)
+            let failed_count = result
+                .events
+                .iter()
+                .filter(|e| matches!(e, rein::runtime::RunEvent::StepFailed { .. }))
+                .count();
+            let skipped_count = result
+                .events
+                .iter()
+                .filter(|e| matches!(e, rein::runtime::RunEvent::StepSkipped { .. }))
+                .count();
+
             eprintln!();
-            eprintln!(
-                "--- Workflow complete ({} stages) ---",
-                result.stage_results.len()
-            );
-            eprintln!("Final output: {}", result.final_output);
+            let completed_stages = result
+                .stage_results
+                .iter()
+                .filter(|r| r.is_real_execution())
+                .count();
+            eprintln!("--- Workflow complete ({completed_stages} stages) ---");
+            if failed_count > 0 || skipped_count > 0 {
+                // `failed_count > 0` implies `result.events` is non-empty (at least one
+                // `StepFailed` event was pushed), so the trace block below always fires
+                // when this warning is shown.
+                eprintln!(
+                    "warning: {failed_count} step(s) failed, {skipped_count} skipped (see trace below)"
+                );
+            }
+            // Show the "all steps failed" message only when no step actually
+            // ran to completion. A workflow where the terminal step produces
+            // empty output (a valid LLM response) and an earlier step failed
+            // must still print the real (empty) output, not the misleading
+            // sentinel message.
+            let has_real_execution = result
+                .stage_results
+                .iter()
+                .any(StageResult::is_real_execution);
+            if !has_real_execution && (failed_count > 0 || skipped_count > 0) {
+                eprintln!("Final output: (none — all steps failed or were skipped)");
+            } else {
+                eprintln!("Final output: {}", result.final_output);
+            }
             if !result.events.is_empty() {
                 eprintln!(
                     "{}",
@@ -224,11 +271,28 @@ fn run_workflow_mode(
                 );
             }
             eprintln!("Duration: {duration:.2?}");
-            0
+            // Skips only occur as cascades from upstream failures under current
+            // semantics — a skipped step implies at least one failed step.
+            // The assert makes this invariant machine-checked so a future change
+            // (e.g., when:-condition skips tracked in #461) cannot silently
+            // produce a wrong exit code. When #461 lands, remove this assert
+            // and update the exit-code table in docs/getting-started.md.
+            debug_assert!(
+                failed_count > 0 || skipped_count == 0,
+                "skipped_count={skipped_count} but failed_count=0: skips must cascade from a failure (see #461)"
+            );
+            // Exit 0: all steps succeeded.
+            // Exit 1: partial success — step(s) failed or were cascade-skipped.
+            // Exit 2: hard abort — see Err arm below.
+            i32::from(failed_count > 0 || skipped_count > 0)
         }
         Err(e) => {
             eprintln!("Workflow failed: {e}");
-            1
+            // Exit 2: hard abort (policy rejection, cyclic deps, infra failure).
+            // Distinct from exit 1 (partial success) so shell consumers can
+            // tell whether the workflow completed with some failures vs. was
+            // terminated before all steps ran.
+            2
         }
     }
 }

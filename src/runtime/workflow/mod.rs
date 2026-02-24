@@ -1,6 +1,22 @@
 use std::sync::Arc;
 
 use crate::ast::{ExecutionMode, ReinFile, RouteRule, Stage, WorkflowDef};
+
+/// The execution outcome of a single workflow step.
+///
+/// `status` replaces the old sentinel-string pattern (`agent_name == "<failed>"`)
+/// with an explicit, compiler-checked enum field. Use `StageResult::is_real_execution()`
+/// as the single, canonical predicate; inspect `status` directly only when you need
+/// to distinguish `Failed` from `Skipped`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StageResultStatus {
+    /// The step ran to completion (agent produced a response).
+    Executed,
+    /// The step failed with a soft error (agent not found, LLM error, etc.).
+    Failed,
+    /// The step was cascade-skipped because a dependency failed or was skipped.
+    Skipped,
+}
 use crate::runtime::approval::{ApprovalHandler, ApprovalStatus};
 
 use super::engine::{AgentEngine, RunConfig};
@@ -43,6 +59,11 @@ pub struct WorkflowResult {
     /// Results from each stage, in order of execution.
     pub stage_results: Vec<StageResult>,
     /// The final output text.
+    ///
+    /// For step-based workflows: the output of the **last step that ran to
+    /// completion** in topological order (`status == Executed`). If the
+    /// terminal step fails or is skipped, this is the output of the last
+    /// earlier step that succeeded. Empty string if all steps failed.
     pub final_output: String,
     /// Total cost across all stages.
     pub total_cost_cents: u64,
@@ -52,6 +73,7 @@ pub struct WorkflowResult {
     /// executions (sequential/parallel) this includes agent-level events
     /// from every stage: `LlmCall`, `ToolCallAttempt`, `BudgetUpdate`, etc.
     /// For step-based executions this contains workflow-level events:
+    /// `StepStarted`, `StepCompleted`, `StepFailed`, `StepSkipped`,
     /// `StepFallback`, `ForEachIteration`, `AutoResolved`.
     pub events: Vec<super::RunEvent>,
 }
@@ -64,6 +86,18 @@ pub struct StageResult {
     pub output: String,
     pub cost_cents: u64,
     pub tokens: u64,
+    /// Execution outcome. Prefer `is_real_execution()` over matching `status`
+    /// directly unless you need to distinguish `Failed` from `Skipped`.
+    pub status: StageResultStatus,
+}
+
+impl StageResult {
+    /// Returns `true` if this result represents a step that actually executed
+    /// (as opposed to a step that failed softly or was cascade-skipped).
+    #[must_use]
+    pub fn is_real_execution(&self) -> bool {
+        self.status == StageResultStatus::Executed
+    }
 }
 
 /// Errors that can occur during workflow execution.
@@ -113,6 +147,41 @@ impl std::fmt::Display for WorkflowError {
     }
 }
 
+impl WorkflowError {
+    /// Returns `true` for errors that must abort the entire workflow immediately
+    /// (policy enforcement, infrastructure invariants).
+    ///
+    /// Returns `false` for soft errors (agent not found, LLM failure) where the
+    /// step should be recorded as failed and the workflow should continue,
+    /// skipping any steps that depend on the failed step.
+    ///
+    /// Classification uses an exhaustive `match` (no wildcard) so that adding a
+    /// new `WorkflowError` variant produces a compile error until its hard/soft
+    /// status is made explicit.
+    ///
+    /// Hard errors: policy enforcement, topology bugs, infrastructure failures.
+    /// Soft errors: transient agent/LLM failures where the step is skipped and
+    /// dependent steps are cascaded; the workflow continues.
+    #[must_use]
+    pub fn is_hard_error(&self) -> bool {
+        match self {
+            // Policy enforcement — workflow must not continue after a rejected
+            // or timed-out human approval gate. Topology/config bugs (cyclic
+            // deps, circular routes, missing route targets) mean the graph
+            // itself is malformed — silently absorbing them hides operator
+            // misconfiguration. State persistence failure risks data corruption.
+            Self::ApprovalRejected { .. }
+            | Self::ApprovalTimedOut { .. }
+            | Self::CyclicDependency(_)
+            | Self::CircularRoute(_)
+            | Self::PersistenceFailure(_)
+            | Self::StageNotFound(_) => true,
+            // Soft — step is recorded as failed; dependents are skipped.
+            Self::AgentNotFound(_) | Self::StageFailed { .. } => false,
+        }
+    }
+}
+
 impl std::error::Error for WorkflowError {}
 
 /// Run a single stage and return its result.
@@ -154,6 +223,7 @@ pub(super) async fn run_stage(
             output: result.response,
             cost_cents: result.total_cost_cents,
             tokens: result.total_tokens,
+            status: StageResultStatus::Executed,
         },
         events,
     ))
@@ -463,6 +533,107 @@ pub(crate) async fn run_step_with_fallback(
     }
 }
 
+/// Outcome of processing one step's result inside the `run_steps` loop.
+enum StepOutcome {
+    /// Step completed normally; continue to next step.
+    Continue,
+    /// `auto_resolve` conditions were met — break the loop early.
+    AutoResolved,
+    /// Hard error — propagate immediately and abort the workflow.
+    HardError(WorkflowError),
+}
+
+/// Mutable loop state threaded through `run_steps` and `apply_step_result`.
+///
+/// Bundles the four collections that are mutated on every iteration so
+/// `apply_step_result` takes a single `&mut StepLoopState` rather than four
+/// separate `&mut` parameters.
+struct StepLoopState {
+    outputs: std::collections::HashMap<String, String>,
+    /// Steps that are blocked from running — either they failed (soft error)
+    /// or were skipped because a dependency was blocked. Dependents of any
+    /// step in this set are skipped via the skip-guard in `run_steps`.
+    /// Named `blocked_steps` rather than `failed_steps` to make clear that
+    /// the set includes cascade-skipped steps, not just steps that errored.
+    blocked_steps: std::collections::HashSet<String>,
+    events: Vec<super::RunEvent>,
+    results: Vec<StageResult>,
+}
+
+/// Process the result of a single step execution, updating shared loop state.
+///
+/// Extracts the success/failure logic from the `run_steps` loop so that the
+/// outer function stays within the project line-limit.
+fn apply_step_result(
+    step: &crate::ast::StepDef,
+    step_result: Result<(StageResult, Vec<super::RunEvent>), WorkflowError>,
+    workflow: &WorkflowDef,
+    state: &mut StepLoopState,
+) -> StepOutcome {
+    match step_result {
+        Ok((result, step_events)) => {
+            state.events.extend(step_events);
+
+            // Check workflow-level auto_resolve conditions after each step.
+            let resolved = if let Some(ref ar) = workflow.auto_resolve {
+                auto_resolve_matches(&result.output, ar)
+            } else {
+                None
+            };
+
+            state
+                .outputs
+                .insert(step.name.clone(), result.output.clone());
+
+            if let Some(ref condition) = resolved {
+                state.events.push(super::RunEvent::AutoResolved {
+                    step: step.name.clone(),
+                    condition: condition.clone(),
+                });
+                state.results.push(result);
+                return StepOutcome::AutoResolved;
+            }
+
+            state.results.push(result);
+            state.events.push(super::RunEvent::StepCompleted {
+                step: step.name.clone(),
+            });
+            StepOutcome::Continue
+        }
+        Err(e) => {
+            // Hard errors abort immediately; soft errors record the failure and
+            // let the workflow continue, skipping dependent steps.
+            if e.is_hard_error() {
+                return StepOutcome::HardError(e);
+            }
+            let reason = e.to_string();
+            state.blocked_steps.insert(step.name.clone());
+            // Insert an empty output so the step appears in `outputs` for
+            // downstream input-building. Note: `outputs.get(dep)` will return
+            // `Some("")` for failed entries — not `None` — so `filter_map`
+            // in the input-building block will include these as empty strings.
+            // This is safe only because the skip-guard at the top of this loop
+            // prevents any step that declares a blocked step as a dependency
+            // from executing. Do not read `outputs` outside of `run_steps`
+            // without accounting for this invariant.
+            state.outputs.insert(step.name.clone(), String::new());
+            state.events.push(super::RunEvent::StepFailed {
+                step: step.name.clone(),
+                reason,
+            });
+            state.results.push(StageResult {
+                stage_name: step.name.clone(),
+                agent_name: step.agent.clone(),
+                output: String::new(),
+                cost_cents: 0,
+                tokens: 0,
+                status: StageResultStatus::Failed,
+            });
+            StepOutcome::Continue
+        }
+    }
+}
+
 /// Execute all step blocks in a workflow, resolving `depends_on` ordering.
 ///
 /// Steps are executed in topological order. Each step receives the concatenated
@@ -470,26 +641,75 @@ pub(crate) async fn run_step_with_fallback(
 ///
 /// - Steps with `fallback` retry on failure using the fallback agent.
 /// - Steps with `for_each` iterate over a JSON array in the trigger input.
-/// - If `workflow.auto_resolve` conditions are met after a step, remaining steps
-///   are short-circuited.
+///   Errors from `for_each` steps propagate to the `run_steps` loop via `?`
+///   and are then classified by `apply_step_result`: soft errors (agent not
+///   found, LLM failure) are absorbed — the step is recorded as failed and
+///   dependent steps are skipped; hard errors abort the workflow.
+/// - If `workflow.auto_resolve` conditions are met after a step, remaining
+///   steps are short-circuited.
+/// - Hard errors (`ApprovalRejected`, `ApprovalTimedOut`, `CyclicDependency`)
+///   abort the workflow immediately. Soft errors record the failure and continue.
 ///
 /// # Errors
-/// Returns `WorkflowError` if any step fails or a dependency cycle is detected.
+/// Returns `WorkflowError` for hard errors or dependency cycles.
 pub async fn run_steps(
     workflow: &WorkflowDef,
     ctx: &WorkflowContext<'_>,
 ) -> Result<(Vec<StageResult>, Vec<super::RunEvent>), WorkflowError> {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     let ordered = resolve_dag(&workflow.steps)?;
     let trigger_input = format!("Trigger: {}", workflow.trigger);
 
-    let mut outputs: HashMap<String, String> = HashMap::new();
-    let mut results = Vec::new();
-    let mut events: Vec<super::RunEvent> = Vec::new();
+    let mut state = StepLoopState {
+        outputs: HashMap::new(),
+        blocked_steps: HashSet::new(),
+        results: Vec::new(),
+        events: Vec::new(),
+    };
 
     for (index, step) in ordered.into_iter().enumerate() {
-        events.push(super::RunEvent::StepStarted {
+        // Skip this step if any declared dependency is blocked (failed or cascade-skipped).
+        if let Some(failed_dep) = step
+            .depends_on
+            .iter()
+            .find(|dep| state.blocked_steps.contains(*dep))
+        {
+            let reason = format!("dependency '{failed_dep}' failed");
+            state.events.push(super::RunEvent::StepSkipped {
+                step: step.name.clone(),
+                failed_dependency: failed_dep.clone(),
+                reason,
+            });
+            // Insert an empty output so the step appears in `outputs` for
+            // downstream input-building. `outputs.get(dep)` returns `Some("")`
+            // for skipped entries, not `None`. Dependent steps are prevented
+            // from running by the skip-guard (via failed_steps below).
+            state.outputs.insert(step.name.clone(), String::new());
+            // StepStarted is intentionally omitted for skipped steps — a skipped
+            // step never began execution, so the event lifecycle is:
+            //   normal:  StepStarted → StepCompleted
+            //   failed:  StepStarted → StepFailed
+            //   skipped: StepSkipped (no StepStarted)
+            // Do not add StepStarted here to avoid a spurious event before StepSkipped.
+            state.results.push(StageResult {
+                stage_name: step.name.clone(),
+                agent_name: step.agent.clone(),
+                output: String::new(),
+                cost_cents: 0,
+                tokens: 0,
+                status: StageResultStatus::Skipped,
+            });
+            // Also mark this step as blocked so its own dependents are skipped.
+            state.blocked_steps.insert(step.name.clone());
+            continue;
+        }
+
+        // Safety invariant: this block is only reached when every entry in
+        // `step.depends_on` succeeded (the skip-guard above ensures any step
+        // with a failed/skipped dependency is `continue`d before here).
+        // Therefore `outputs.get(dep)` will not return `Some("")` for any dep.
+        state.events.push(super::RunEvent::StepStarted {
             step: step.name.clone(),
             index,
         });
@@ -499,7 +719,7 @@ pub async fn run_steps(
         } else {
             step.depends_on
                 .iter()
-                .filter_map(|dep| outputs.get(dep))
+                .filter_map(|dep| state.outputs.get(dep))
                 .cloned()
                 .collect::<Vec<_>>()
                 .join("\n")
@@ -539,45 +759,14 @@ pub async fn run_steps(
                 })
         };
 
-        let (result, step_events) = match step_result {
-            Ok(v) => v,
-            Err(e) => {
-                // TODO(#380): emit `StepFailed` here once the return type is
-                // changed to surface partial events. Currently `events` is
-                // dropped on early return, so pushing `StepFailed` would be
-                // unobservable dead code. Deferring emission until #380 fixes
-                // the signature.
-                return Err(e);
-            }
-        };
-
-        events.extend(step_events);
-        events.push(super::RunEvent::StepCompleted {
-            step: step.name.clone(),
-        });
-
-        // Check workflow-level auto_resolve conditions after each step.
-        let resolved = if let Some(ref ar) = workflow.auto_resolve {
-            auto_resolve_matches(&result.output, ar)
-        } else {
-            None
-        };
-
-        outputs.insert(step.name.clone(), result.output.clone());
-
-        if let Some(ref condition) = resolved {
-            events.push(super::RunEvent::AutoResolved {
-                step: step.name.clone(),
-                condition: condition.clone(),
-            });
-            results.push(result);
-            break;
+        match apply_step_result(step, step_result, workflow, &mut state) {
+            StepOutcome::Continue => {}
+            StepOutcome::AutoResolved => break,
+            StepOutcome::HardError(e) => return Err(e),
         }
-
-        results.push(result);
     }
 
-    Ok((results, events))
+    Ok((state.results, state.events))
 }
 
 /// Execute a step once per item in a JSON array extracted from the input.
@@ -585,6 +774,11 @@ pub async fn run_steps(
 /// Parses `input` as JSON, extracts the array at `collection_key`, then runs
 /// the step for each element. Iteration outputs are aggregated as a JSON array
 /// string (to avoid ambiguity with newlines in LLM output).
+///
+/// **All-or-nothing semantics**: a soft error on any iteration aborts the
+/// remaining iterations and propagates the error to `run_steps`, which records
+/// the whole step as failed. Partial results from completed iterations are
+/// discarded. Per-iteration partial success is not supported (tracked as #428).
 ///
 /// If the JSON key is missing or the input is not valid JSON, the step is
 /// executed once with the full input. This is intentional: callers with a
@@ -642,7 +836,21 @@ async fn run_step_for_each(
     let mut events: Vec<super::RunEvent> = Vec::new();
 
     for (index, item) in items.iter().enumerate() {
-        let (result, fallback_used) = run_step_with_fallback(step, item, ctx).await?;
+        // Augment soft errors with iteration context so a `StepFailed` event
+        // identifies which item caused the abort. The `stage` field is set to
+        // `"<step> (iteration N of M)"` so the Display output — and therefore
+        // the `StepFailed.reason` in the event trace — includes the iteration
+        // number. Hard errors (e.g. `ApprovalRejected`) propagate unchanged.
+        let (result, fallback_used) = match run_step_with_fallback(step, item, ctx).await {
+            Ok(r) => r,
+            Err(WorkflowError::StageFailed { error, .. }) => {
+                return Err(WorkflowError::StageFailed {
+                    stage: format!("{} (iteration {} of {})", step.name, index + 1, total),
+                    error,
+                });
+            }
+            Err(e) => return Err(e),
+        };
         total_cost += result.cost_cents;
         total_tokens += result.tokens;
         outputs.push(serde_json::Value::String(result.output));
@@ -678,6 +886,7 @@ async fn run_step_for_each(
             output: aggregated,
             cost_cents: total_cost,
             tokens: total_tokens,
+            status: StageResultStatus::Executed,
         },
         events,
     ))
@@ -791,7 +1000,17 @@ pub async fn run_workflow(
         for sr in step_results {
             result.total_cost_cents += sr.cost_cents;
             result.total_tokens += sr.tokens;
-            result.final_output.clone_from(&sr.output);
+            // "Last real-execution wins" contract: final_output is updated for
+            // each step whose status == Executed (in topological order). The
+            // last Executed step in the order sets the output seen by callers.
+            // If the terminal step in declaration order fails/is skipped, the
+            // output of the last *successful* step is returned — this is
+            // intentional and documented on `WorkflowResult::final_output`.
+            // Steps with `status == Failed` or `status == Skipped` have an
+            // empty output and must not overwrite a previous real result.
+            if sr.is_real_execution() {
+                result.final_output.clone_from(&sr.output);
+            }
             result.stage_results.push(sr);
         }
         result.events.extend(step_events);

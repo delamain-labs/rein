@@ -1831,11 +1831,29 @@ async fn step_without_fallback_propagates_error() {
         workflow_name: None,
     };
 
-    let err = run_steps(&workflow, &ctx).await.unwrap_err();
-    assert!(matches!(
-        err,
-        WorkflowError::StageFailed { .. } | WorkflowError::AgentNotFound(_)
-    ));
+    // Since #363: soft errors (AgentNotFound/StageFailed) no longer abort the
+    // whole run — run_steps returns Ok so dependent steps can be skipped.
+    // The failed step's result has empty output.
+    let (results, events) = run_steps(&workflow, &ctx)
+        .await
+        .expect("soft errors return Ok");
+    assert_eq!(results.len(), 1);
+    assert!(
+        results[0].output.is_empty(),
+        "failed step output must be empty"
+    );
+    assert_eq!(
+        results[0].status,
+        StageResultStatus::Failed,
+        "failed StageResult must have status Failed so consumers can distinguish it"
+    );
+    // A StepFailed event must be emitted so the trace is observable.
+    assert!(
+        events.iter().any(
+            |e| matches!(e, crate::runtime::RunEvent::StepFailed { step, .. } if step == "alone")
+        ),
+        "expected StepFailed event for step 'alone'"
+    );
 }
 
 #[tokio::test]
@@ -2211,6 +2229,8 @@ async fn run_steps_emits_step_started_and_completed() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     let (_, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
@@ -2231,11 +2251,12 @@ async fn run_steps_emits_step_started_and_completed() {
     );
 }
 
-/// Tests that `run_steps` returns an appropriate error when a step's agent is
-/// not found. `StepFailed` emission is deferred to issue #380, which will
-/// change the `run_steps` signature to surface partial events alongside errors.
+/// Tests that `run_steps` returns partial success when a step's agent is not
+/// found. Under the partial-success model, `AgentNotFound` is a soft error:
+/// `run_steps` returns `Ok` with a `StepFailed` event in the trace rather
+/// than `Err`. This allows subsequent independent steps to continue.
 #[tokio::test]
-async fn run_steps_returns_error_on_missing_agent() {
+async fn run_steps_returns_partial_success_on_missing_agent() {
     let file = parse_file("agent other { model: openai }");
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
@@ -2261,13 +2282,27 @@ async fn run_steps_returns_error_on_missing_agent() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
-    let err = run_steps(&workflow, &ctx).await.unwrap_err();
-    assert!(matches!(
-        err,
-        WorkflowError::StageFailed { .. } | WorkflowError::AgentNotFound(_)
-    ));
+    let (results, events) = run_steps(&workflow, &ctx)
+        .await
+        .expect("partial success: soft error should not return Err");
+
+    // The step result must have status Failed (not Executed or Skipped).
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].status, StageResultStatus::Failed);
+
+    // A StepFailed event must be emitted with the agent-not-found reason.
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            crate::runtime::RunEvent::StepFailed { step, reason }
+            if step == "broken" && reason.contains("ghost_agent")
+        )),
+        "expected StepFailed for broken; events: {events:?}"
+    );
 }
 
 /// #356 — StepStarted and StepCompleted must wrap the for_each iteration set,
@@ -2303,6 +2338,8 @@ async fn run_steps_emits_step_started_and_completed_for_for_each() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     let (_, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
@@ -2325,5 +2362,657 @@ async fn run_steps_emits_step_started_and_completed_for_for_each() {
             if step == "each_step"
         )),
         "expected StepCompleted for each_step"
+    );
+}
+
+// --- #363 Step Failure Skips Dependent Steps ---
+
+fn make_workflow_steps(name: &str, trigger: &str, steps: Vec<StepDef>) -> WorkflowDef {
+    WorkflowDef {
+        name: name.to_string(),
+        trigger: trigger.to_string(),
+        stages: vec![],
+        steps,
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    }
+}
+
+/// Step A uses agent "nonexistent" (not in file) so AgentNotFound is returned.
+/// Step B depends on step A and should be skipped with a StepSkipped event.
+#[tokio::test]
+async fn failed_dependency_skips_dependent_step() {
+    let file = parse_file(r#"agent bot { model: openai }"#);
+
+    let step_a = make_step("step_a", "nonexistent", vec![]);
+    let step_b = make_step("step_b", "bot", vec!["step_a"]);
+
+    let workflow = make_workflow_steps("dag_skip", "start", vec![step_a, step_b]);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    // Only step_a will run (and fail); step_b must be skipped without needing a response.
+    let (results, events) = run_steps(&workflow, &ctx)
+        .await
+        .expect("run_steps returns Ok even when steps fail/skip");
+
+    // step_b should appear in results as a skipped entry (empty output)
+    assert_eq!(results.len(), 2, "both steps should produce a result entry");
+
+    // StepFailed event must be emitted for step_a (the step that actually failed)
+    let failed_event = events.iter().find(
+        |e| matches!(e, crate::runtime::RunEvent::StepFailed { step, .. } if step == "step_a"),
+    );
+    assert!(
+        failed_event.is_some(),
+        "expected StepFailed for step_a, got events: {events:?}"
+    );
+
+    // StepSkipped event must be emitted for step_b
+    let skipped_event = events.iter().find(
+        |e| matches!(e, crate::runtime::RunEvent::StepSkipped { step, .. } if step == "step_b"),
+    );
+    assert!(
+        skipped_event.is_some(),
+        "expected StepSkipped for step_b, got events: {events:?}"
+    );
+}
+
+/// Build a `StepDef` with the given approval gate. Avoids 24-line boilerplate
+/// duplication in every approval test.
+fn make_approved_step(name: &str, agent: &str, approval: crate::ast::ApprovalDef) -> StepDef {
+    use crate::ast::Span as AstSpan;
+    StepDef {
+        name: name.to_string(),
+        agent: agent.to_string(),
+        goal: None,
+        input: None,
+        output_constraints: vec![],
+        depends_on: vec![],
+        when: None,
+        on_failure: None,
+        send_to: None,
+        fallback: None,
+        for_each: None,
+        typed_input: None,
+        typed_outputs: vec![],
+        escalate: None,
+        approval: Some(approval),
+        span: AstSpan::new(0, 1),
+    }
+}
+
+/// CLI approval gate used across multiple approval tests.
+fn make_cli_approval_def() -> crate::ast::ApprovalDef {
+    use crate::ast::{ApprovalDef, ApprovalKind, Span as AstSpan};
+    ApprovalDef {
+        kind: ApprovalKind::Approve,
+        channel: "cli".to_string(),
+        destination: "#ops".to_string(),
+        timeout: Some("1m".to_string()),
+        mode: None,
+        span: AstSpan::new(0, 1),
+    }
+}
+
+/// `ApprovalTimedOut` is a hard error and must abort `run_steps` immediately
+/// (not be absorbed as a soft failure).
+#[tokio::test]
+async fn approval_timed_out_aborts_workflow() {
+    use crate::runtime::approval::ApprovalStatus;
+    use std::sync::Arc;
+
+    struct TimedOutHandler;
+    #[async_trait::async_trait]
+    impl crate::runtime::approval::ApprovalHandler for TimedOutHandler {
+        async fn request_approval(
+            &self,
+            _step: &str,
+            _output: &str,
+            _approval: &crate::ast::ApprovalDef,
+        ) -> ApprovalStatus {
+            ApprovalStatus::TimedOut
+        }
+    }
+
+    let file = parse_file(r#"agent bot { model: openai }"#);
+    let step_a = make_approved_step("gated", "bot", make_cli_approval_def());
+    let workflow = make_workflow_steps("timed_out_wf", "start", vec![step_a]);
+
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    provider.push_response(simple_response("output"));
+
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: Some(Arc::new(TimedOutHandler)),
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let result = run_steps(&workflow, &ctx).await;
+    assert!(
+        matches!(result, Err(WorkflowError::ApprovalTimedOut { .. })),
+        "ApprovalTimedOut must abort run_steps immediately; got: {result:?}"
+    );
+}
+
+/// `ApprovalRejected` is a hard error and must abort `run_steps` immediately
+/// (not be absorbed as a soft failure). Mirrors `approval_timed_out_aborts_workflow`.
+#[tokio::test]
+async fn approval_rejected_aborts_workflow() {
+    use crate::runtime::approval::ApprovalStatus;
+    use std::sync::Arc;
+
+    struct RejectHandler;
+    #[async_trait::async_trait]
+    impl crate::runtime::approval::ApprovalHandler for RejectHandler {
+        async fn request_approval(
+            &self,
+            _step: &str,
+            _output: &str,
+            _approval: &crate::ast::ApprovalDef,
+        ) -> ApprovalStatus {
+            ApprovalStatus::Rejected {
+                reason: "policy violation".to_string(),
+            }
+        }
+    }
+
+    let file = parse_file(r#"agent bot { model: openai }"#);
+    let step_a = make_approved_step("gated", "bot", make_cli_approval_def());
+    let workflow = make_workflow_steps("rejected_wf", "start", vec![step_a]);
+
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    provider.push_response(simple_response("output"));
+
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: Some(Arc::new(RejectHandler)),
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let result = run_steps(&workflow, &ctx).await;
+    assert!(
+        matches!(result, Err(WorkflowError::ApprovalRejected { .. })),
+        "ApprovalRejected must abort run_steps immediately; got: {result:?}"
+    );
+}
+
+/// Steps with no dependency on the failed step should still execute.
+#[tokio::test]
+async fn independent_step_runs_even_if_sibling_fails() {
+    let file = parse_file(r#"agent bot { model: openai }"#);
+
+    // step_a: fails (nonexistent agent)
+    // step_b: independent (no depends_on) — should still run
+    let step_a = make_step("step_a", "nonexistent", vec![]);
+    let step_b = make_step("step_b", "bot", vec![]);
+
+    let workflow = make_workflow_steps("dag_sibling", "start", vec![step_a, step_b]);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    // step_b (bot) runs successfully
+    provider.push_response(simple_response("step_b_output"));
+
+    let (results, _events) = run_steps(&workflow, &ctx)
+        .await
+        .expect("run_steps must not abort when only independent step fails");
+
+    // step_a must be recorded as Failed (not Executed or Skipped)
+    let step_a_result = results
+        .iter()
+        .find(|r| r.stage_name == "step_a")
+        .expect("step_a must have a result entry");
+    assert_eq!(
+        step_a_result.status,
+        StageResultStatus::Failed,
+        "failed step must have status Failed; results: {results:?}"
+    );
+    // step_b should have produced output
+    let step_b_result = results
+        .iter()
+        .find(|r| r.stage_name == "step_b")
+        .expect("step_b should have a result entry");
+    assert_eq!(
+        step_b_result.output, "step_b_output",
+        "step_b output mismatch; results: {results:?}"
+    );
+}
+
+/// #363 — Skipped StageResult has `status == StageResultStatus::Skipped` so
+/// consumers can distinguish it from a successfully-run step.
+#[tokio::test]
+async fn skipped_step_result_uses_skipped_status() {
+    let file = parse_file(r#"agent bot { model: openai }"#);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // step_a: fails; step_b: depends on step_a → skipped.
+    let step_a = make_step("step_a", "nonexistent", vec![]);
+    let step_b = make_step("step_b", "bot", vec!["step_a"]);
+    let workflow = make_workflow_steps("status_test", "start", vec![step_a, step_b]);
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let (results, _events) = run_steps(&workflow, &ctx)
+        .await
+        .expect("soft error must not abort run");
+
+    let step_b_result = results.iter().find(|r| r.stage_name == "step_b").unwrap();
+    assert_eq!(
+        step_b_result.status,
+        StageResultStatus::Skipped,
+        "skipped StageResult must have status Skipped"
+    );
+}
+
+/// #363 — A step whose dependency failed still sees an (empty) entry in the
+/// `outputs` map. Downstream steps using `filter_map` must not silently drop
+/// the gap; it is observable via the empty string, not a missing key.
+#[tokio::test]
+async fn failed_step_output_inserted_into_outputs_map() {
+    let file = parse_file(r#"agent bot { model: openai }"#);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // step_a (fails) → step_b (depends on step_a, skipped).
+    // step_c is independent and should run normally.
+    let step_a = make_step("step_a", "nonexistent", vec![]);
+    let step_b = make_step("step_b", "bot", vec!["step_a"]);
+    let step_c = make_step("step_c", "bot", vec![]);
+    let workflow = make_workflow_steps("outputs_gap", "start", vec![step_a, step_b, step_c]);
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    provider.push_response(simple_response("step_c_out"));
+
+    let (results, events) = run_steps(&workflow, &ctx)
+        .await
+        .expect("independent step must run");
+
+    // step_c ran and produced output
+    let step_c_r = results.iter().find(|r| r.stage_name == "step_c").unwrap();
+    assert_eq!(step_c_r.output, "step_c_out");
+
+    // step_a failed → StepFailed event; step_b skipped → StepSkipped event
+    assert!(events.iter().any(
+        |e| matches!(e, crate::runtime::RunEvent::StepFailed { step, .. } if step == "step_a")
+    ));
+    assert!(events.iter().any(
+        |e| matches!(e, crate::runtime::RunEvent::StepSkipped { step, .. } if step == "step_b")
+    ));
+
+    // Failed and skipped results carry the correct status
+    let step_a_r = results.iter().find(|r| r.stage_name == "step_a").unwrap();
+    assert_eq!(step_a_r.status, StageResultStatus::Failed);
+    let step_b_r = results.iter().find(|r| r.stage_name == "step_b").unwrap();
+    assert_eq!(step_b_r.status, StageResultStatus::Skipped);
+}
+
+/// `CyclicDependency` is a hard error — `run_steps` must return `Err` and
+/// not attempt to execute any step when the dependency graph has a cycle.
+#[tokio::test]
+async fn cyclic_dependency_is_hard_error() {
+    let file = parse_file(r#"agent bot { model: openai }"#);
+
+    // step_a → step_b → step_a (cycle)
+    let step_a = make_step("step_a", "bot", vec!["step_b"]);
+    let step_b = make_step("step_b", "bot", vec!["step_a"]);
+
+    let workflow = make_workflow_steps("cyclic", "start", vec![step_a, step_b]);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let err = run_steps(&workflow, &ctx)
+        .await
+        .expect_err("cyclic dependency must return Err");
+
+    assert!(
+        matches!(
+            err,
+            crate::runtime::workflow::WorkflowError::CyclicDependency(_)
+        ),
+        "expected CyclicDependency hard error, got: {err:?}"
+    );
+    assert!(
+        err.is_hard_error(),
+        "CyclicDependency must be classified as a hard error"
+    );
+}
+
+/// #363/#374 — A `for_each` step that fails (agent not found) is a soft error:
+/// it is recorded as `StepFailed` and its declared dependents receive
+/// `StepSkipped`. The `StepSkipped` event must include `failed_dependency`
+/// set to the failing step's name (not a generic "unknown").
+#[tokio::test]
+async fn for_each_step_failure_cascades_to_dependent() {
+    // "ghost" does not exist in the file → for_each step fails with AgentNotFound.
+    let file = parse_file(r#"agent follower { model: openai }"#);
+    let provider = MockProvider::new();
+    // step_a uses "ghost" (AgentNotFound) — provider is never called for it.
+    // step_b is skipped (depends on step_a). Only step_c (independent) runs.
+    provider.push_response(simple_response("follower ran")); // consumed by step_c
+    let executor = MockExecutor::new();
+
+    // step_a: for_each with non-existent agent → will fail
+    let step_a = make_step_for_each("step_a", "ghost", "items");
+    // step_b: depends on step_a → should be skipped when step_a fails
+    let step_b = make_step("step_b", "follower", vec!["step_a"]);
+    // step_c: independent — should still run despite step_a failure
+    let step_c = make_step("step_c", "follower", vec![]);
+
+    let workflow = make_workflow_steps("cascade_test", "start", vec![step_a, step_b, step_c]);
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let result = run_workflow(&workflow, &ctx)
+        .await
+        .expect("workflow should succeed (soft error, partial success)");
+
+    // step_a failed → StepFailed event must be emitted.
+    assert!(
+        result.events.iter().any(
+            |e| matches!(e, crate::runtime::RunEvent::StepFailed { step, .. } if step == "step_a")
+        ),
+        "expected StepFailed for step_a; events: {:?}",
+        result.events
+    );
+
+    // step_b skipped because step_a failed → StepSkipped with correct failed_dependency.
+    let skipped_b = result.events.iter().find(
+        |e| matches!(e, crate::runtime::RunEvent::StepSkipped { step, .. } if step == "step_b"),
+    );
+    assert!(
+        skipped_b.is_some(),
+        "expected StepSkipped for step_b; events: {:?}",
+        result.events
+    );
+    if let Some(crate::runtime::RunEvent::StepSkipped {
+        failed_dependency, ..
+    }) = skipped_b
+    {
+        assert_eq!(
+            failed_dependency, "step_a",
+            "StepSkipped.failed_dependency must be 'step_a'"
+        );
+    }
+
+    // step_c is independent and should have run with the expected output.
+    assert!(
+        result
+            .events
+            .iter()
+            .any(|e| matches!(e, crate::runtime::RunEvent::StepCompleted { step, .. } if step == "step_c")),
+        "step_c should have completed; events: {:?}",
+        result.events
+    );
+    let step_c_result = result
+        .stage_results
+        .iter()
+        .find(|r| r.stage_name == "step_c")
+        .expect("step_c must have a result entry");
+    assert_eq!(
+        step_c_result.output, "follower ran",
+        "step_c output mismatch"
+    );
+}
+
+/// #363/#374 — Partial `for_each` failure: iteration 0 succeeds, iteration 1
+/// fails (provider queue empty → `ProviderError::Api`). The whole step must be
+/// recorded as `StepFailed` and partial results from iteration 0 must be
+/// discarded. All-or-nothing semantics are required by the `for_each` contract.
+#[tokio::test]
+async fn for_each_partial_failure_discards_completed_iterations() {
+    let file = parse_file(r#"agent bot { model: openai }"#);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // Push only one response: iteration 0 succeeds, iteration 1 fails
+    // because the provider queue is empty (returns ProviderError::Api 500).
+    provider.push_response(simple_response("iter0_output"));
+
+    let step = make_step_for_each("batch", "bot", "items");
+    let workflow = WorkflowDef {
+        name: "wf".to_string(),
+        trigger: r#"{"items": ["item0", "item1"]}"#.to_string(),
+        stages: vec![],
+        steps: vec![step],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    // run_steps returns Ok (soft error), but the step is recorded as failed.
+    let (results, events) = run_steps(&workflow, &ctx)
+        .await
+        .expect("soft error must not abort run_steps");
+
+    // The step must be marked as failed, not completed.
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+        results[0].status,
+        StageResultStatus::Failed,
+        "partial for_each failure must have status Failed"
+    );
+    // Partial output from iteration 0 must be discarded.
+    assert!(
+        results[0].output.is_empty(),
+        "partial for_each results must be discarded; got: {:?}",
+        results[0].output
+    );
+    // A StepFailed event must be emitted with a non-empty reason.
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            crate::runtime::RunEvent::StepFailed { step, reason }
+            if step == "batch" && !reason.is_empty()
+        )),
+        "expected StepFailed for 'batch' with non-empty reason; events: {events:?}"
+    );
+    // No StepCompleted event for the step (it did not complete).
+    assert!(
+        !events.iter().any(
+            |e| matches!(e, crate::runtime::RunEvent::StepCompleted { step } if step == "batch")
+        ),
+        "StepCompleted must not be emitted when for_each fails; events: {events:?}"
+    );
+}
+
+/// #363 — When ALL steps in a workflow fail, `final_output` must be an empty
+/// string. Callers (e.g. the CLI) must handle this case explicitly rather than
+/// treating it as a normal completion with empty output.
+#[tokio::test]
+async fn all_steps_fail_gives_empty_final_output() {
+    // No valid agents in the file → every step fails with AgentNotFound.
+    let file = parse_file(r#"agent other { model: openai }"#);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    let step_a = make_step("step_a", "ghost_a", vec![]);
+    let step_b = make_step("step_b", "ghost_b", vec![]);
+    let workflow = make_workflow_steps("all_fail", "start", vec![step_a, step_b]);
+
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let result = run_workflow(&workflow, &ctx)
+        .await
+        .expect("partial success must not return Err");
+
+    assert!(
+        result.final_output.is_empty(),
+        "final_output must be empty when all steps fail; got: {:?}",
+        result.final_output
+    );
+    // Both steps should have failed entries in stage_results.
+    assert_eq!(result.stage_results.len(), 2);
+    assert!(result.stage_results.iter().all(|r| !r.is_real_execution()));
+}
+
+/// #363 — A 3-hop cascade: step_a fails → step_b (depends on step_a) is skipped
+/// → step_c (depends on step_b) must ALSO be skipped. This validates that a
+/// skipped step is added to `blocked_steps` so its own dependents propagate the
+/// skip correctly, not just direct dependents of the original failure.
+#[tokio::test]
+async fn cascade_skip_propagates_three_hops() {
+    let file = parse_file(r#"agent bot { model: openai }"#);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // step_a: fails (agent not found)
+    // step_b: depends on step_a → skipped
+    // step_c: depends on step_b → must also be skipped (not on step_a directly)
+    let step_a = make_step("step_a", "nonexistent", vec![]);
+    let step_b = make_step("step_b", "bot", vec!["step_a"]);
+    let step_c = make_step("step_c", "bot", vec!["step_b"]);
+    let workflow = make_workflow_steps("three_hop", "start", vec![step_a, step_b, step_c]);
+
+    // No provider responses needed — no step should actually run.
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let (results, events) = run_steps(&workflow, &ctx)
+        .await
+        .expect("run_steps must not abort on soft errors");
+
+    assert_eq!(
+        results.len(),
+        3,
+        "all three steps must produce a result entry"
+    );
+
+    // step_a failed
+    let step_a_r = results.iter().find(|r| r.stage_name == "step_a").unwrap();
+    assert_eq!(step_a_r.status, StageResultStatus::Failed);
+
+    // step_b skipped (direct dependent of failed step)
+    let step_b_r = results.iter().find(|r| r.stage_name == "step_b").unwrap();
+    assert_eq!(
+        step_b_r.status,
+        StageResultStatus::Skipped,
+        "step_b must be skipped"
+    );
+
+    // step_c skipped (transitive — depends on skipped step_b, not on step_a)
+    let step_c_r = results.iter().find(|r| r.stage_name == "step_c").unwrap();
+    assert_eq!(
+        step_c_r.status,
+        StageResultStatus::Skipped,
+        "step_c must be skipped transitively"
+    );
+
+    // StepSkipped events for both step_b and step_c
+    assert!(
+        events.iter().any(
+            |e| matches!(e, crate::runtime::RunEvent::StepSkipped { step, .. } if step == "step_b")
+        ),
+        "expected StepSkipped for step_b; events: {events:?}"
+    );
+    assert!(
+        events.iter().any(
+            |e| matches!(e, crate::runtime::RunEvent::StepSkipped { step, .. } if step == "step_c")
+        ),
+        "expected StepSkipped for step_c (transitive); events: {events:?}"
     );
 }

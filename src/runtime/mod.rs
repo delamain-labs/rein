@@ -127,19 +127,27 @@ pub enum RunEvent {
     StepCompleted {
         step: String,
     },
-    /// A workflow step failed (agent not found, provider error, etc.).
-    ///
-    /// NOTE: emission is deferred to #380; this variant is declared but no
-    /// callsite currently pushes it. Consumers should not rely on receiving
-    /// this event until #380 is resolved.
-    StepFailed {
-        step: String,
-        reason: String,
-    },
     /// Provider call exceeded the configured `stage_timeout_secs` on this turn.
     StageTimeout {
         turn: usize,
         timeout_secs: u64,
+    },
+    /// A step was skipped because one or more of its declared dependencies failed.
+    StepSkipped {
+        /// Name of the step that was skipped.
+        step: String,
+        /// Name of the dependency step that caused this step to be skipped.
+        /// Enables structured OTEL queries like `rein.step.failed_dependency = "step_a"`.
+        failed_dependency: String,
+        /// Human-readable reason (e.g. "dependency '`step_a`' failed").
+        reason: String,
+    },
+    /// A workflow step failed during execution (soft failure — workflow continues).
+    StepFailed {
+        /// Name of the step that failed.
+        step: String,
+        /// Human-readable error description.
+        reason: String,
     },
 }
 
@@ -446,6 +454,9 @@ fn summarize_event(event: &RunEvent, lines: &mut Vec<String>, turn: &mut usize) 
         }
         RunEvent::StageTimeout { turn, timeout_secs } => {
             lines.push(format!("  ✗ turn {turn} timed out after {timeout_secs}s"));
+        }
+        RunEvent::StepSkipped { step, reason, .. } => {
+            lines.push(format!("  ⏭ step '{step}' skipped: {reason}"));
         }
     }
 }
