@@ -677,8 +677,39 @@ pub enum RunError {
         #[serde(skip)]
         partial_trace: RunTrace,
     },
-    GuardrailBlocked,
-    EvalFailed,
+    /// Guardrail rule triggered a blocking action. Contains events up to and
+    /// including the `GuardrailTriggered` event so callers can inspect which
+    /// rule fired and the LLM output that caused the block.
+    ///
+    /// `partial_trace` carries `#[serde(skip)]` — in-process only; wire
+    /// consumers see `{"guardrail_blocked": {}}`.
+    ///
+    /// # BREAKING CHANGE
+    /// Prior to this change, this variant was a unit variant and serialized
+    /// as the bare string `"guardrail_blocked"`. It now serializes as
+    /// `{"guardrail_blocked": {}}`. Consumers that pattern-match the raw JSON
+    /// shape must update their deserialization logic.
+    #[non_exhaustive]
+    GuardrailBlocked {
+        #[serde(skip)]
+        partial_trace: RunTrace,
+    },
+    /// Eval metric check failed. Contains events up to and including the
+    /// failing `EvalResult` event so callers can inspect which metric failed.
+    ///
+    /// `partial_trace` carries `#[serde(skip)]` — in-process only; wire
+    /// consumers see `{"eval_failed": {}}`.
+    ///
+    /// # BREAKING CHANGE
+    /// Prior to this change, this variant was a unit variant and serialized
+    /// as the bare string `"eval_failed"`. It now serializes as
+    /// `{"eval_failed": {}}`. Consumers that pattern-match the raw JSON
+    /// shape must update their deserialization logic.
+    #[non_exhaustive]
+    EvalFailed {
+        #[serde(skip)]
+        partial_trace: RunTrace,
+    },
     /// Provider call exceeded `stage_timeout_secs`. Contains events emitted
     /// up to (and including) the `StageTimeout` event so callers can inspect
     /// the partial trace (e.g. in tests or structured error reporting).
@@ -706,8 +737,8 @@ impl std::fmt::Display for RunError {
             Self::ProviderError => write!(f, "provider error"),
             Self::ConfigError => write!(f, "configuration error"),
             Self::CircuitBreakerOpen { .. } => write!(f, "circuit breaker open"),
-            Self::GuardrailBlocked => write!(f, "guardrail blocked"),
-            Self::EvalFailed => write!(f, "eval failed"),
+            Self::GuardrailBlocked { .. } => write!(f, "guardrail blocked"),
+            Self::EvalFailed { .. } => write!(f, "eval failed"),
             Self::Timeout { .. } => write!(f, "provider timed out"),
         }
     }

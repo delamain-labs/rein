@@ -369,7 +369,16 @@ impl<'a> AgentEngine<'a> {
                     });
                 }
                 if result.blocked {
-                    return Err(RunError::GuardrailBlocked);
+                    let partial = state.take_partial_trace();
+                    self.export_partial(
+                        &partial,
+                        state.total_tokens,
+                        state.total_cost_cents,
+                        run_start.elapsed(),
+                    );
+                    return Err(RunError::GuardrailBlocked {
+                        partial_trace: partial,
+                    });
                 }
                 result.output
             };

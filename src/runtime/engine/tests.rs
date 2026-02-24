@@ -1327,3 +1327,69 @@ fn run_error_timeout_implements_std_error() {
     };
     assert_eq!(err.to_string(), "provider timed out");
 }
+
+// --- #490: GuardrailBlocked must carry partial_trace from engine ---
+
+/// #490: When AgentEngine::run() returns RunError::GuardrailBlocked, the
+/// partial_trace must contain the GuardrailTriggered event that fired before
+/// the block. This allows callers to inspect which rule triggered the block
+/// and what content caused it.
+#[tokio::test]
+async fn guardrail_blocked_carries_partial_trace_with_triggered_event() {
+    use crate::ast::{GuardrailRule, GuardrailSection, GuardrailsDef, Span};
+    use crate::runtime::guardrails::GuardrailEngine;
+    use crate::runtime::RunEvent;
+
+    // Build a guardrail engine that blocks PII (emails).
+    let def = GuardrailsDef {
+        sections: vec![GuardrailSection {
+            name: "output".to_string(),
+            rules: vec![GuardrailRule {
+                key: "pii_detection".to_string(),
+                value: "block".to_string(),
+                span: Span { start: 0, end: 0 },
+            }],
+            span: Span { start: 0, end: 0 },
+        }],
+        span: Span { start: 0, end: 0 },
+    };
+    let guardrails = GuardrailEngine::from_def(&def);
+
+    let agent = make_agent(vec![], vec![], None);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // The LLM response contains PII — this will trigger the block.
+    provider.push_response(simple_response(
+        "Contact me at user@example.com for support.",
+    ));
+
+    let registry = crate::runtime::permissions::ToolRegistry::from_agent(&agent);
+    let engine = AgentEngine::new(&provider, &executor, &registry, vec![], RunConfig::default())
+        .with_guardrails(guardrails);
+
+    let err = engine.run("hello").await.unwrap_err();
+
+    let RunError::GuardrailBlocked { partial_trace } = err else {
+        panic!("expected RunError::GuardrailBlocked, got another error");
+    };
+
+    // partial_trace must contain the GuardrailTriggered event.
+    let has_triggered = partial_trace.events.iter().any(|e| {
+        matches!(
+            e,
+            RunEvent::GuardrailTriggered {
+                rule,
+                blocked,
+                ..
+            }
+            if rule == "pii_detection" && *blocked
+        )
+    });
+    assert!(
+        has_triggered,
+        "partial_trace must contain GuardrailTriggered(pii_detection, blocked=true); \
+         got events: {:?}",
+        partial_trace.events
+    );
+}
