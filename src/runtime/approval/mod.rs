@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use tracing::{info, warn};
 
 use crate::ast::{ApprovalDef, ApprovalKind};
-use crate::runtime::audit::{self, AuditKind, AuditLog};
+use crate::runtime::audit::{self, AuditKind, AuditLog, AuditSink};
 
 #[cfg(test)]
 mod tests;
@@ -447,16 +447,23 @@ impl ApprovalHandler for SlackApprovalHandler {
 ///
 /// This is the canonical way to add audit trails to approval flows — callers
 /// construct the appropriate inner handler and wrap it here.
-pub struct AuditingApprovalHandler {
+///
+/// The `S` type parameter lets callers supply any `AuditSink` implementation
+/// (file-backed `AuditLog`, in-memory buffer for tests, custom database sink,
+/// etc.) without coupling to the concrete `AuditLog` type. (#418)
+///
+/// The default `S = AuditLog` means existing code that passes `Arc<AuditLog>`
+/// continues to compile without modification.
+pub struct AuditingApprovalHandler<S: AuditSink = AuditLog> {
     inner: Arc<dyn ApprovalHandler>,
-    log: Arc<AuditLog>,
+    log: Arc<S>,
     workflow_name: Option<String>,
     agent_name: Option<String>,
 }
 
-impl AuditingApprovalHandler {
+impl<S: AuditSink> AuditingApprovalHandler<S> {
     #[must_use]
-    pub fn new(inner: Arc<dyn ApprovalHandler>, log: Arc<AuditLog>) -> Self {
+    pub fn new(inner: Arc<dyn ApprovalHandler>, log: Arc<S>) -> Self {
         Self {
             inner,
             log,
@@ -476,7 +483,7 @@ impl AuditingApprovalHandler {
     #[must_use]
     pub fn with_context(
         inner: Arc<dyn ApprovalHandler>,
-        log: Arc<AuditLog>,
+        log: Arc<S>,
         workflow_name: Option<impl Into<String>>,
         agent_name: Option<impl Into<String>>,
     ) -> Self {
@@ -518,7 +525,7 @@ impl AuditingApprovalHandler {
 }
 
 #[async_trait::async_trait]
-impl ApprovalHandler for AuditingApprovalHandler {
+impl<S: AuditSink + 'static> ApprovalHandler for AuditingApprovalHandler<S> {
     async fn request_approval(
         &self,
         step_name: &str,
