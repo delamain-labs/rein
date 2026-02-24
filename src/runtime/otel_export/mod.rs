@@ -4,6 +4,7 @@
 //! that can be sent to any OpenTelemetry collector.
 
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 use super::StructuredTrace;
 
@@ -126,8 +127,8 @@ pub(crate) fn try_rfc3339_to_unix_nanos(ts: &str) -> Option<u64> {
 /// will appear clearly wrong in any OTLP viewer and is therefore detectable.
 fn rfc3339_to_unix_nanos(ts: &str) -> u64 {
     try_rfc3339_to_unix_nanos(ts).unwrap_or_else(|| {
-        eprintln!(
-            "rein[otel]: warning: could not parse timestamp '{ts}' as RFC 3339; \
+        warn!(
+            "rein[otel]: could not parse timestamp '{ts}' as RFC 3339; \
              falling back to Unix epoch 0 — spans will have incorrect timestamps"
         );
         0
@@ -150,10 +151,10 @@ pub fn to_otlp(trace: &StructuredTrace) -> OtelResourceSpans {
     // Uses try_ variant to correctly distinguish parse failure from a legitimately
     // epoch-zero completed_at (avoiding silent fallback for valid epoch timestamps).
     let end_ns = try_rfc3339_to_unix_nanos(&trace.completed_at).unwrap_or_else(|| {
-        eprintln!(
-            "rein[otel]: warning: could not parse completed_at '{}' as RFC 3339; \
-             falling back to start + duration — end timestamp may be approximate",
-            trace.completed_at
+        warn!(
+            completed_at = %trace.completed_at,
+            "rein[otel]: could not parse completed_at as RFC 3339; \
+             falling back to start + duration — end timestamp may be approximate"
         );
         start_ns.saturating_add(trace.stats.duration_ms.saturating_mul(1_000_000))
     });
