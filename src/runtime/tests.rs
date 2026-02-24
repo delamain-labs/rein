@@ -864,6 +864,24 @@ fn stage_timeout_summary_uses_one_based_turn_number() {
     );
 }
 
+// #452: Deserializing legacy JSON (without `error_kind`) must produce "unknown"
+// rather than a missing-field error. This guards the backward-compat promise
+// documented in the CHANGELOG.
+#[test]
+fn step_failed_deserializes_error_kind_default_to_unknown() {
+    // JSON produced before the `error_kind` field was added has no such key.
+    let json = r#"{"type":"step_failed","step":"deploy","reason":"agent not found"}"#;
+    let event: RunEvent =
+        serde_json::from_str(json).expect("must deserialize legacy StepFailed JSON");
+    let RunEvent::StepFailed { error_kind, .. } = event else {
+        panic!("expected StepFailed variant");
+    };
+    assert_eq!(
+        error_kind, "unknown",
+        "missing error_kind key must default to \"unknown\""
+    );
+}
+
 #[test]
 fn stage_timeout_second_turn_displays_as_turn_2() {
     let events = vec![RunEvent::StageTimeout {
