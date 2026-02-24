@@ -63,9 +63,7 @@ async fn single_stage_workflow() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     provider.push_response(simple_response("Triaged: low priority"));
@@ -96,9 +94,7 @@ async fn two_stage_pipeline_passes_output() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     // Stage 1: triage
@@ -145,9 +141,7 @@ async fn three_stage_pipeline() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     provider.push_response(simple_response("output_a"));
@@ -174,9 +168,7 @@ async fn unknown_agent_returns_error() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     provider.push_response(simple_response("ok"));
@@ -198,9 +190,7 @@ async fn stage_failure_returns_error() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     provider.push_error("provider down");
@@ -231,9 +221,7 @@ async fn parallel_workflow_runs_all_stages() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     provider.push_response(simple_response("output_a"));
@@ -264,9 +252,7 @@ async fn parallel_unknown_agent_records_failed_stage() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     // Queue response for agent "a" — it should still execute despite "missing" failing.
@@ -324,9 +310,7 @@ async fn parallel_all_stages_soft_fail_returns_ok() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let result = run_parallel(&workflow, &ctx)
@@ -367,9 +351,7 @@ async fn parallel_workflow_preserves_stage_order() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     provider.push_response(simple_response("first"));
@@ -399,9 +381,7 @@ async fn run_workflow_dispatches_by_mode() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     // Sequential
@@ -482,9 +462,7 @@ async fn conditional_routes_to_then_stage() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     // triage → escalate (conditional match) → respond (Next from escalate)
@@ -512,9 +490,7 @@ async fn conditional_routes_to_else_stage() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     provider.push_response(simple_response("Priority: low. Simple question."));
@@ -577,9 +553,7 @@ async fn conditional_no_else_ends_workflow() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     provider.push_response(simple_response("needs_action: no. All clear."));
@@ -609,9 +583,7 @@ async fn resumable_fresh_run_no_checkpoint() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     provider.push_response(simple_response("output_a"));
@@ -650,9 +622,7 @@ async fn resumable_resumes_after_first_stage() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     // Only stage b gets a response — if stage a runs it would consume this
@@ -713,9 +683,7 @@ async fn resumable_resumes_mid_pipeline() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     // Only c and d get responses — a and b are replayed from the checkpoint.
@@ -780,9 +748,7 @@ async fn resumable_different_workflow_name_restarts_fresh() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     // Both stages must run — the checkpoint is for a different workflow.
@@ -828,9 +794,7 @@ async fn resumable_conditional_routing_on_resume() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     // Triage is in the checkpoint; only escalate and respond need responses.
@@ -882,9 +846,7 @@ async fn resumable_corrupt_checkpoint_returns_persistence_error() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let tmp = NamedTempFile::new().unwrap();
@@ -1010,9 +972,7 @@ async fn conditional_route_to_nonexistent_stage_errors() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
     provider.push_response(simple_response("priority: high"));
 
@@ -1079,9 +1039,7 @@ async fn circular_route_returns_error() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
     provider.push_response(simple_response("go: yes"));
     provider.push_response(simple_response("go: yes"));
@@ -1142,9 +1100,7 @@ async fn step_execution_runs_agent_with_goal() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     provider.push_response(simple_response("Draft complete!"));
@@ -1215,9 +1171,7 @@ async fn step_with_auto_approve_proceeds() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: Some(Arc::new(AutoApproveHandler)),
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions { approval_handler: Some(Arc::new(AutoApproveHandler)), audit_log: None, workflow_name: None },
     };
 
     provider.push_response(simple_response("Draft approved and complete"));
@@ -1283,9 +1237,7 @@ async fn step_with_auto_reject_returns_error() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: Some(Arc::new(AutoRejectHandler::new("test rejection"))),
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions { approval_handler: Some(Arc::new(AutoRejectHandler::new("test rejection"))), audit_log: None, workflow_name: None },
     };
 
     let result = run_workflow(&workflow, &ctx).await;
@@ -1344,9 +1296,7 @@ async fn step_without_approval_def_skips_handler() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     provider.push_response(simple_response("Done without approval"));
@@ -1426,9 +1376,7 @@ async fn step_with_audit_log_records_approval_events() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: Some(approval_handler),
-        audit_log: Some(Arc::clone(&log)),
-        workflow_name: Some("audit_test_workflow".to_string()),
+        options: RunOptions { approval_handler: Some(approval_handler), audit_log: Some(Arc::clone(&log)), workflow_name: Some("audit_test_workflow".to_string()) },
     };
 
     let result = run_workflow(&workflow, &ctx)
@@ -1539,9 +1487,7 @@ async fn for_each_step_audit_entries_carry_workflow_name() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: Some(approval_handler),
-        audit_log: Some(Arc::clone(&log)),
-        workflow_name: Some("triage_pipeline".to_string()),
+        options: RunOptions { approval_handler: Some(approval_handler), audit_log: Some(Arc::clone(&log)), workflow_name: Some("triage_pipeline".to_string()) },
     };
 
     let (results, _events, _) = run_steps(&workflow, &ctx)
@@ -1662,9 +1608,7 @@ async fn step_with_audit_log_and_no_workflow_name_omits_workflow_field() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: Some(approval_handler),
-        audit_log: Some(Arc::clone(&log)),
-        workflow_name: None,
+        options: RunOptions { approval_handler: Some(approval_handler), audit_log: Some(Arc::clone(&log)), workflow_name: None },
     };
 
     run_workflow(&workflow, &ctx)
@@ -1762,9 +1706,7 @@ async fn step_without_audit_log_calls_handler_exactly_once() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: Some(handler),
-        audit_log: None, // no audit log — no AuditingApprovalHandler wrapping
-        workflow_name: None,
+        options: RunOptions { approval_handler: Some(handler), audit_log: None, workflow_name: None },
     };
 
     run_workflow(&workflow, &ctx)
@@ -1850,9 +1792,7 @@ async fn step_with_audit_log_and_no_injected_handler_uses_resolved_handler() {
         tool_defs: &[],
         config: &RunConfig::default(),
         // No injected handler — must fall through to resolve_approval_handler.
-        approval_handler: None,
-        audit_log: Some(Arc::clone(&log)),
-        workflow_name: Some("no_handler_wf".to_string()),
+        options: RunOptions { approval_handler: None, audit_log: Some(Arc::clone(&log)), workflow_name: Some("no_handler_wf".to_string()) },
     };
 
     // The resolved CliApprovalHandler reads stdin; in non-interactive CI, stdin
@@ -2016,9 +1956,7 @@ async fn workflow_steps_respect_depends_on_order() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     // a runs first, b runs second
@@ -2123,9 +2061,7 @@ async fn step_fallback_runs_on_primary_failure() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let (results, events, _) = run_steps(&workflow, &ctx).await.expect("should succeed");
@@ -2167,9 +2103,7 @@ async fn step_without_fallback_propagates_error() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     // Since #363: soft errors (AgentNotFound/StageFailed) no longer abort the
@@ -2228,9 +2162,7 @@ async fn step_for_each_iterates_over_array() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     // Input with a JSON array keyed by "items".
@@ -2304,9 +2236,7 @@ async fn workflow_auto_resolve_short_circuits_on_condition_met() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let (results, events, _) = run_steps(&workflow, &ctx).await.expect("should succeed");
@@ -2367,9 +2297,7 @@ async fn workflow_auto_resolve_does_not_short_circuit_when_condition_unmet() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let (results, events, _) = run_steps(&workflow, &ctx).await.expect("should succeed");
@@ -2432,9 +2360,7 @@ async fn auto_resolve_empty_conditions_does_not_short_circuit() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let (results, events, _) = run_steps(&workflow, &ctx)
@@ -2474,9 +2400,7 @@ async fn run_sequential_populates_events() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
     provider.push_response(simple_response("done"));
 
@@ -2515,9 +2439,7 @@ async fn run_parallel_populates_events() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
     provider.push_response(simple_response("from_a"));
     provider.push_response(simple_response("from_b"));
@@ -2557,9 +2479,7 @@ async fn run_steps_emits_step_started_and_completed() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let (_, events, _) = run_steps(&workflow, &ctx).await.expect("should succeed");
@@ -2603,9 +2523,7 @@ async fn multi_step_step_started_index_sequence() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let (_, events, _) = run_steps(&workflow, &ctx).await.expect("should succeed");
@@ -2666,9 +2584,7 @@ async fn step_started_index_reflects_dag_position_after_skip() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let (_, events, _) = run_steps(&workflow, &ctx)
@@ -2724,9 +2640,7 @@ async fn run_steps_returns_partial_success_on_missing_agent() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let (results, events, _) = run_steps(&workflow, &ctx)
@@ -2780,9 +2694,7 @@ async fn run_steps_emits_step_started_and_completed_for_for_each() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let (_, events, _) = run_steps(&workflow, &ctx).await.expect("should succeed");
@@ -2844,9 +2756,7 @@ async fn failed_dependency_skips_dependent_step() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     // Only step_a will run (and fail); step_b must be skipped without needing a response.
@@ -2947,9 +2857,7 @@ async fn approval_timed_out_aborts_workflow() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: Some(Arc::new(TimedOutHandler)),
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions { approval_handler: Some(Arc::new(TimedOutHandler)), audit_log: None, workflow_name: None },
     };
 
     let result = run_steps(&workflow, &ctx).await;
@@ -2995,9 +2903,7 @@ async fn approval_rejected_aborts_workflow() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: Some(Arc::new(RejectHandler)),
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions { approval_handler: Some(Arc::new(RejectHandler)), audit_log: None, workflow_name: None },
     };
 
     let result = run_steps(&workflow, &ctx).await;
@@ -3045,9 +2951,7 @@ async fn approval_pending_returns_approval_pending_error() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: Some(Arc::new(PendingHandler)),
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions { approval_handler: Some(Arc::new(PendingHandler)), audit_log: None, workflow_name: None },
     };
 
     let result = run_steps(&workflow, &ctx).await;
@@ -3076,9 +2980,7 @@ async fn independent_step_runs_even_if_sibling_fails() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     // step_b (bot) runs successfully
@@ -3134,9 +3036,7 @@ async fn skipped_step_result_uses_skipped_status() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let (results, _events, _) = run_steps(&workflow, &ctx)
@@ -3172,9 +3072,7 @@ async fn failed_step_output_inserted_into_outputs_map() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     provider.push_response(simple_response("step_c_out"));
@@ -3221,9 +3119,7 @@ async fn cyclic_dependency_is_hard_error() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let (err, partial_events) = run_steps(&workflow, &ctx)
@@ -3277,9 +3173,7 @@ async fn for_each_step_failure_cascades_to_dependent() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let result = run_workflow(&workflow, &ctx)
@@ -3373,9 +3267,7 @@ async fn for_each_partial_failure_keeps_successful_iterations() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let (results, events, _) = run_steps(&workflow, &ctx)
@@ -3435,9 +3327,7 @@ async fn all_steps_fail_gives_empty_final_output() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let result = run_workflow(&workflow, &ctx)
@@ -3479,9 +3369,7 @@ async fn cascade_skip_propagates_three_hops() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let (results, events, _) = run_steps(&workflow, &ctx)
@@ -3572,9 +3460,7 @@ async fn stage_timeout_in_workflow_is_hard_error() {
             stage_timeout_secs: Some(5),
             ..RunConfig::default()
         },
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let result = run_sequential(&workflow, &ctx).await;
@@ -3636,9 +3522,7 @@ async fn stage_timeout_partial_trace_events_included_in_error() {
             stage_timeout_secs: Some(5),
             ..RunConfig::default()
         },
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let result = run_sequential(&workflow, &ctx).await;
@@ -3723,9 +3607,7 @@ async fn mixed_workflow_final_output_retains_stage_output_when_all_steps_fail() 
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     // run_workflow must succeed even though the step fails (soft error).
@@ -3781,9 +3663,7 @@ async fn step_failed_carries_error_kind_agent_not_found() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let (_, events, _) = run_steps(&workflow, &ctx).await.unwrap();
@@ -3836,9 +3716,7 @@ async fn step_failed_carries_error_kind_stage_failed() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let (_, events, _) = run_steps(&workflow, &ctx).await.unwrap();
@@ -3925,9 +3803,7 @@ async fn workflow_aborted_event_has_correct_error_kind_and_reason() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: Some(Arc::new(AutoRejectHandler::new("test rejection"))),
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions { approval_handler: Some(Arc::new(AutoRejectHandler::new("test rejection"))), audit_log: None, workflow_name: None },
     };
 
     let (_err, partial_events) = run_steps(&workflow, &ctx).await.unwrap_err();
@@ -3976,9 +3852,7 @@ async fn soft_error_does_not_emit_workflow_aborted() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let (_, events, _) = run_steps(&workflow, &ctx)
@@ -4052,9 +3926,7 @@ async fn run_workflow_emits_workflow_aborted_on_stage_hard_error() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
     provider.push_response(simple_response("go: yes"));
     provider.push_response(simple_response("go: yes"));
@@ -4148,9 +4020,7 @@ async fn run_workflow_mixed_abort_includes_stage_events() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: Some(Arc::new(AutoRejectHandler::new("test rejection"))),
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions { approval_handler: Some(Arc::new(AutoRejectHandler::new("test rejection"))), audit_log: None, workflow_name: None },
     };
     // Stage consumes one response; step approval is handled by AutoRejectHandler.
     provider.push_response(simple_response("stage output"));
@@ -4201,9 +4071,7 @@ async fn run_sequential_abort_includes_prior_stage_events() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
     provider.push_response(simple_response("stage_a_output"));
 
@@ -4247,9 +4115,7 @@ async fn run_parallel_soft_failure_does_not_abort_workflow() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
     provider.push_response(simple_response("a_output"));
 
@@ -4321,9 +4187,7 @@ async fn step_events_have_real_timestamps_in_workflow_result() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     provider.push_response(simple_response("a_out"));
@@ -4449,9 +4313,7 @@ async fn when_condition_false_emits_step_skipped() {
         file: &file,
         tool_defs: &[],
         config: &RunConfig::default(),
-        audit_log: None,
-        approval_handler: None,
-        workflow_name: None,
+        options: RunOptions { approval_handler: None, audit_log: None, workflow_name: None },
     };
 
     let result = run_workflow(&workflow, &ctx)
@@ -4527,9 +4389,7 @@ async fn when_condition_true_step_executes() {
         file: &file,
         tool_defs: &[],
         config: &RunConfig::default(),
-        audit_log: None,
-        approval_handler: None,
-        workflow_name: None,
+        options: RunOptions { approval_handler: None, audit_log: None, workflow_name: None },
     };
 
     let result = run_workflow(&workflow, &ctx)
@@ -4596,9 +4456,7 @@ async fn when_skipped_step_does_not_cascade_block_dependents() {
         file: &file,
         tool_defs: &[],
         config: &RunConfig::default(),
-        audit_log: None,
-        approval_handler: None,
-        workflow_name: None,
+        options: RunOptions { approval_handler: None, audit_log: None, workflow_name: None },
     };
 
     let result = run_workflow(&workflow, &ctx)
@@ -4675,9 +4533,7 @@ async fn for_each_one_iteration_fails_softly_rest_continue() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     // #408: must succeed (not abort) even though one iteration fails.
@@ -4738,9 +4594,7 @@ async fn for_each_all_iterations_fail_softly() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let (results, events, _) = run_steps(&workflow, &ctx)
@@ -4805,9 +4659,7 @@ async fn skip_guard_with_fallback_executes_fallback_on_skip() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let result = run_workflow(&workflow, &ctx)
@@ -4865,9 +4717,7 @@ async fn skip_guard_with_fallback_marks_failed_when_fallback_also_fails() {
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: None,
-        audit_log: None,
-        workflow_name: None,
+        options: RunOptions::default(),
     };
 
     let result = run_workflow(&workflow, &ctx)
@@ -4895,4 +4745,42 @@ async fn skip_guard_with_fallback_marks_failed_when_fallback_also_fails() {
         "#456: step_c must be cascade-skipped after step_b fallback failure; got: {:?}",
         step_c_result
     );
+}
+
+// ── #440: RunOptions struct ───────────────────────────────────────────────
+
+/// `RunOptions` must be constructable independently from `WorkflowContext`
+/// and embeddable as `ctx.options` to group governance fields.
+///
+/// This test acts as a compile-time regression guard: if the struct fields
+/// are renamed or moved back into `WorkflowContext` directly, this test
+/// fails to compile.
+#[tokio::test]
+async fn workflow_context_accepts_run_options_struct() {
+    let file = parse_file(
+        r"
+        agent echo { model: openai }
+    ",
+    );
+    let workflow = make_workflow("opts_test", "event", &["echo"]);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // Construct RunOptions separately from WorkflowContext.
+    let opts = RunOptions::default();
+
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        options: opts,
+    };
+
+    provider.push_response(simple_response("echo output"));
+    let result = run_sequential(&workflow, &ctx)
+        .await
+        .expect("should succeed");
+    assert_eq!(result.final_output, "echo output");
 }

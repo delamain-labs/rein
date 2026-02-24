@@ -35,16 +35,16 @@ pub use resumable::run_sequential_resumable;
 #[cfg(test)]
 mod tests;
 
-/// Bundles the shared dependencies needed to execute workflow stages.
+/// Governance and observability options for a single workflow run.
 ///
-/// Eliminates repetitive parameter lists across `run_sequential`,
-/// `run_parallel`, `run_sequential_resumable`, and `run_workflow`.
-pub struct WorkflowContext<'a> {
-    pub file: &'a ReinFile,
-    pub provider: &'a dyn Provider,
-    pub executor: &'a dyn ToolExecutor,
-    pub tool_defs: &'a [ToolDef],
-    pub config: &'a RunConfig,
+/// Extracted from `WorkflowContext` to reduce the number of fields callers
+/// must populate when only infrastructure dependencies are needed. Callers
+/// that don't need any governance features can pass `RunOptions::default()`
+/// instead of spelling out three `None` values. (#440)
+#[derive(Default)]
+pub struct RunOptions {
+    /// Optional pre-resolved approval handler. When `None`, each step
+    /// resolves its own handler from the `ApprovalDef` channel at runtime.
     pub approval_handler: Option<Arc<dyn ApprovalHandler>>,
     /// When set, approval decisions are wrapped with `AuditingApprovalHandler`
     /// so every `ApprovalRequested` / `ApprovalResolved` event is persisted.
@@ -52,6 +52,24 @@ pub struct WorkflowContext<'a> {
     /// Name of the workflow being executed. Passed to `AuditingApprovalHandler`
     /// so audit entries record the originating workflow for compliance queries.
     pub workflow_name: Option<String>,
+}
+
+/// Bundles the shared dependencies needed to execute workflow stages.
+///
+/// Eliminates repetitive parameter lists across `run_sequential`,
+/// `run_parallel`, `run_sequential_resumable`, and `run_workflow`.
+///
+/// Governance and observability fields (`approval_handler`, `audit_log`,
+/// `workflow_name`) are grouped in [`RunOptions`] so callers that don't
+/// need them can pass `RunOptions::default()` instead of three `None`
+/// values. (#440)
+pub struct WorkflowContext<'a> {
+    pub file: &'a ReinFile,
+    pub provider: &'a dyn Provider,
+    pub executor: &'a dyn ToolExecutor,
+    pub tool_defs: &'a [ToolDef],
+    pub config: &'a RunConfig,
+    pub options: RunOptions,
 }
 
 /// The result of a completed workflow run.
@@ -611,7 +629,7 @@ pub fn resolve_dag(
 /// Execute a single step definition, running its referenced agent with the
 /// step's goal as additional context.
 ///
-/// `ctx.workflow_name` is passed to `AuditingApprovalHandler::with_context` so
+/// `ctx.options.workflow_name` is passed to `AuditingApprovalHandler::with_context` so
 /// audit entries record the workflow they belong to for compliance queries.
 ///
 /// # Errors
@@ -623,13 +641,14 @@ pub async fn run_step(
 ) -> Result<StageResult, WorkflowError> {
     // Check approval gate before execution.
     //
-    // #411: Pre-injected handlers (`ctx.approval_handler.is_some()`) are used
-    // as-is — the caller is responsible for audit-wrapping them before
+    // #411: Pre-injected handlers (`ctx.options.approval_handler.is_some()`) are
+    // used as-is — the caller is responsible for audit-wrapping them before
     // assembling `WorkflowContext`. Channel-resolved handlers (when
-    // `ctx.approval_handler` is `None`) are wrapped here when an audit log is
-    // present, because run_step is the only site that knows the step's channel.
+    // `ctx.options.approval_handler` is `None`) are wrapped here when an audit
+    // log is present, because run_step is the only site that knows the step's
+    // channel.
     if let Some(approval_def) = &step.approval {
-        let status = if let Some(h) = ctx.approval_handler.as_ref() {
+        let status = if let Some(h) = ctx.options.approval_handler.as_ref() {
             // Pre-injected (already audit-wrapped if the caller required it).
             h.request_approval(&step.name, input, approval_def).await
         } else {
@@ -638,11 +657,11 @@ pub async fn run_step(
             let base = Arc::from(crate::runtime::approval::resolve_approval_handler(
                 approval_def,
             ));
-            if let Some(log) = &ctx.audit_log {
+            if let Some(log) = &ctx.options.audit_log {
                 crate::runtime::approval::AuditingApprovalHandler::with_context(
                     base,
                     Arc::clone(log),
-                    ctx.workflow_name.as_deref(),
+                    ctx.options.workflow_name.as_deref(),
                     Some(step.agent.as_str()),
                 )
                 .request_approval(&step.name, input, approval_def)
