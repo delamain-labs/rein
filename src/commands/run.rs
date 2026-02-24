@@ -3,12 +3,18 @@ use std::time::Instant;
 
 use rein::runtime::workflow::StageResult;
 
+// This function is inherently sequential setup code (parse → validate →
+// build provider → attach engine extensions → dispatch). Extracting it
+// further would require artificial helpers with awkward return types.
+// TODO(#460): refactor into named setup phases to remove this suppression.
+#[allow(clippy::too_many_lines)]
 pub fn run_agent(
     path: &std::path::Path,
     message: Option<&str>,
     dry_run: bool,
     demo: bool,
     otel: bool,
+    audit_log: Option<&std::path::Path>,
 ) -> i32 {
     let filename = path.to_string_lossy();
 
@@ -126,10 +132,29 @@ pub fn run_agent(
         .with_otel_mode(otel_mode)
         .with_agent_name(agent.name.clone());
 
+    // `--audit-log` is only meaningful for workflow runs. Guard here — before
+    // the workflow dispatch branch — so the error fires whether or not a
+    // workflow is defined. Silently ignoring the flag would be a footgun for
+    // compliance users who expect audit records but receive none.
+    if audit_log.is_some() && file.workflows.is_empty() {
+        eprintln!(
+            "error: --audit-log requires a workflow run (use 'workflow:' in your .rein file)"
+        );
+        eprintln!("hint: remove --audit-log or add a workflow definition to your .rein file");
+        return 1;
+    }
+
     // If the file has workflows, run the first workflow instead of single-agent execution.
     if let Some(workflow) = file.workflows.first() {
         let budget_cents = agent.budget.as_ref().map_or(0, |b| b.amount);
-        return run_workflow_mode(workflow, &file, provider.as_ref(), &executor, budget_cents);
+        return run_workflow_mode(
+            workflow,
+            &file,
+            provider.as_ref(),
+            &executor,
+            budget_cents,
+            audit_log,
+        );
     }
 
     run_engine(&engine, user_message)
@@ -141,6 +166,7 @@ fn run_workflow_mode(
     provider: &dyn rein::runtime::provider::Provider,
     executor: &dyn rein::runtime::executor::ToolExecutor,
     budget_cents: u64,
+    audit_log_path: Option<&std::path::Path>,
 ) -> i32 {
     // Only inject a global handler when env-var overrides are active (CI/testing).
     // In normal runs `approval_handler` is `None` so each step resolves its own
@@ -152,6 +178,25 @@ fn run_workflow_mode(
         budget_cents,
         stage_timeout_secs: None,
     };
+    // Construct an AuditLog if the caller requested one via --audit-log.
+    // Failure is fatal: an operator who explicitly passes --audit-log expects
+    // full audit coverage. Silently continuing with no log would produce a
+    // run with zero audit coverage while the operator believes they have it.
+    let audit_log: Option<Arc<rein::runtime::audit::AuditLog>> = if let Some(p) = audit_log_path {
+        match rein::runtime::audit::AuditLog::new(p) {
+            Ok(log) => Some(Arc::new(log)),
+            Err(e) => {
+                eprintln!(
+                    "error: could not initialize audit log '{}': {e}",
+                    p.display()
+                );
+                eprintln!("hint: check that the parent directory exists and is writable");
+                return 1;
+            }
+        }
+    } else {
+        None
+    };
     let ctx = rein::runtime::workflow::WorkflowContext {
         file,
         provider,
@@ -159,6 +204,8 @@ fn run_workflow_mode(
         tool_defs: &[],
         config: &wf_config,
         approval_handler,
+        audit_log,
+        workflow_name: Some(workflow.name.clone()),
     };
     let start = Instant::now();
     let wf_result =
@@ -531,5 +578,91 @@ mod tests {
         let o = obs(None, &[]);
         let mode = resolve_otel_mode(Some(&o), true);
         assert!(matches!(mode, OtelMode::FileOnComplete));
+    }
+
+    // #358: AuditLog::new returns Err for unwritable paths. The CLI layer
+    // (run_workflow_mode) is responsible for turning this Err into exit code 1;
+    // this unit test verifies that AuditLog::new itself correctly fails rather
+    // than silently succeeding, so the CLI logic has a reliable signal to act on.
+    #[test]
+    #[cfg(unix)]
+    fn audit_log_new_fails_for_unwritable_path() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+        // Create a tempdir, revoke all permissions, then try to create a file
+        // inside it. This is hermetic and deterministic (no dependency on
+        // filesystem layout or root privileges) unlike a hard-coded
+        // /nonexistent-root path.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o000)).expect("chmod 000");
+        let result = rein::runtime::audit::AuditLog::new(dir.path().join("audit.jsonl"));
+        // Restore permissions so TempDir::drop can clean up.
+        let _ = fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700));
+        assert!(
+            result.is_err(),
+            "AuditLog::new should return Err for unwritable paths so CLI can fail-hard"
+        );
+    }
+
+    // #358: Passing --audit-log to a single-agent run (no workflow block) must
+    // exit with code 1 and print an actionable error. Silently ignoring the flag
+    // would be a footgun for compliance users who expect audit records but receive
+    // none — fail-hard is the correct contract.
+    #[test]
+    fn run_agent_audit_log_without_workflow_exits_1() {
+        use std::io::Write;
+        // Minimal .rein file with an agent but no workflow block.
+        let mut tmp = tempfile::NamedTempFile::new().expect("temp .rein file");
+        writeln!(
+            tmp,
+            "agent deploy {{\n  model: \"claude-opus-4-6\"\n  goal: \"test\"\n}}"
+        )
+        .expect("write");
+        let audit_path = tempfile::NamedTempFile::new().expect("temp audit path");
+        let code = run_agent(
+            tmp.path(),
+            None,
+            false,
+            true, // demo mode — no API key needed
+            false,
+            Some(audit_path.path()),
+        );
+        assert_eq!(
+            code, 1,
+            "--audit-log on a single-agent run must exit 1, got {code}"
+        );
+    }
+
+    // #358: The run_step production path wraps an Arc<dyn ApprovalHandler> with
+    // AuditingApprovalHandler — test that the blanket impl delegates correctly.
+    #[tokio::test]
+    async fn auditing_handler_wraps_arc_dyn_approval_handler() {
+        use rein::ast::{ApprovalDef, ApprovalKind, Span};
+        use rein::runtime::approval::{ApprovalHandler, ApprovalStatus, AutoApproveHandler};
+        use rein::runtime::audit::AuditLog;
+        use std::sync::Arc;
+
+        let tmp = tempfile::NamedTempFile::new().expect("temp file");
+        let log = Arc::new(AuditLog::new(tmp.path()).expect("AuditLog::new"));
+
+        // Erase to Arc<dyn ApprovalHandler> as the production path does.
+        let handler: Arc<dyn ApprovalHandler> = Arc::new(AutoApproveHandler);
+
+        let auditing =
+            rein::runtime::approval::AuditingApprovalHandler::new(Arc::clone(&handler), log);
+
+        let approval_def = ApprovalDef {
+            kind: ApprovalKind::Approve,
+            channel: "cli".to_string(),
+            destination: String::new(),
+            timeout: None,
+            mode: None,
+            span: Span { start: 0, end: 0 },
+        };
+
+        let status = auditing
+            .request_approval("test_step", "output", &approval_def)
+            .await;
+        assert!(matches!(status, ApprovalStatus::Approved));
     }
 }

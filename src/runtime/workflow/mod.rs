@@ -45,6 +45,12 @@ pub struct WorkflowContext<'a> {
     pub tool_defs: &'a [ToolDef],
     pub config: &'a RunConfig,
     pub approval_handler: Option<Arc<dyn ApprovalHandler>>,
+    /// When set, approval decisions are wrapped with `AuditingApprovalHandler`
+    /// so every `ApprovalRequested` / `ApprovalResolved` event is persisted.
+    pub audit_log: Option<Arc<crate::runtime::audit::AuditLog>>,
+    /// Name of the workflow being executed. Passed to `AuditingApprovalHandler`
+    /// so audit entries record the originating workflow for compliance queries.
+    pub workflow_name: Option<String>,
 }
 
 /// The result of a completed workflow run.
@@ -431,6 +437,9 @@ pub fn resolve_dag(
 /// Execute a single step definition, running its referenced agent with the
 /// step's goal as additional context.
 ///
+/// `ctx.workflow_name` is passed to `AuditingApprovalHandler::with_workflow` so
+/// audit entries record the workflow they belong to for compliance queries.
+///
 /// # Errors
 /// Returns `WorkflowError` if the agent is not found or execution fails.
 pub async fn run_step(
@@ -439,18 +448,34 @@ pub async fn run_step(
     ctx: &WorkflowContext<'_>,
 ) -> Result<StageResult, WorkflowError> {
     // Check approval gate before execution.
-    // Use the injected handler (tests/CLI override) if present; otherwise
-    // resolve a channel-appropriate handler from the approval definition.
+    // Resolve both the injected handler (tests/CI env-var overrides) and the
+    // channel-derived handler into a single Arc so the audit wrapper can be
+    // applied uniformly regardless of which path produced the handler.
     if let Some(approval_def) = &step.approval {
-        let status = if let Some(handler) = &ctx.approval_handler {
-            handler
+        let base: Arc<dyn ApprovalHandler> = if let Some(h) = ctx.approval_handler.as_ref() {
+            Arc::clone(h)
+        } else {
+            Arc::from(crate::runtime::approval::resolve_approval_handler(
+                approval_def,
+            ))
+        };
+        let status = if let Some(log) = &ctx.audit_log {
+            let mut auditing = crate::runtime::approval::AuditingApprovalHandler::new(
+                Arc::clone(&base),
+                Arc::clone(log),
+            )
+            .with_agent(step.agent.clone());
+            // Only set workflow when the name is known. An empty string would
+            // incorrectly populate AuditEntry.workflow as Some("") rather than None,
+            // causing compliance queries against workflow names to return false positives.
+            if let Some(name) = &ctx.workflow_name {
+                auditing = auditing.with_workflow(name.clone());
+            }
+            auditing
                 .request_approval(&step.name, input, approval_def)
                 .await
         } else {
-            let handler = crate::runtime::approval::resolve_approval_handler(approval_def);
-            handler
-                .request_approval(&step.name, input, approval_def)
-                .await
+            base.request_approval(&step.name, input, approval_def).await
         };
         match status {
             ApprovalStatus::Approved => {}

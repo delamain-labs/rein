@@ -8,6 +8,12 @@ use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Monotonic counter for `generate_id()` to ensure uniqueness within a process
+/// even when two IDs are generated within the same nanosecond.
+static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// A single audit log entry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -57,13 +63,22 @@ pub enum AuditKind {
     ToolDenied,
     /// Budget limit reached.
     BudgetExceeded,
+    /// Approval was requested for a workflow step.
+    ApprovalRequested,
+    /// Approval decision was recorded for a workflow step.
+    ApprovalResolved,
     /// Custom event.
     Custom(String),
 }
 
 /// Persistent audit log backed by JSON-lines files.
+///
+/// Writes are serialized via an internal `Mutex<()>` so concurrent calls from
+/// parallel workflow steps produce well-formed JSONL with no interleaved lines.
 pub struct AuditLog {
     path: PathBuf,
+    /// Guards `append` so concurrent parallel-step writes do not interleave.
+    write_lock: Mutex<()>,
 }
 
 /// Error type for audit operations.
@@ -98,17 +113,39 @@ impl From<serde_json::Error> for AuditError {
 
 impl AuditLog {
     /// Create a new audit log at the given path.
-    /// Creates parent directories if needed.
+    ///
+    /// Creates parent directories if needed and performs a probe-open to verify
+    /// the file is writable at construction time. This ensures the fail-hard
+    /// CLI contract is enforced before any workflow execution begins — a
+    /// mis-configured audit path fails immediately rather than silently
+    /// dropping records at the first approval gate.
     pub fn new(path: impl Into<PathBuf>) -> Result<Self, AuditError> {
         let path = path.into();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        Ok(Self { path })
+        // Probe-open: verify the file is writable now. The handle is
+        // dropped immediately; actual writes use a separate open per
+        // append call (append-only, no persistent handle held).
+        OpenOptions::new().create(true).append(true).open(&path)?;
+        Ok(Self {
+            path,
+            write_lock: Mutex::new(()),
+        })
     }
 
     /// Append an entry to the audit log (append-only).
+    ///
+    /// Acquires `write_lock` before opening the file so concurrent calls from
+    /// parallel workflow steps do not interleave partial JSONL lines.
     pub fn append(&self, entry: &AuditEntry) -> Result<(), AuditError> {
+        // Recover from lock poison: the guard holds `()` so a poisoned lock
+        // carries no invalid state. Panicking here would abort the approval
+        // flow and violate the fail-open-on-write contract.
+        let _guard = self
+            .write_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -160,13 +197,18 @@ impl AuditLog {
     }
 
     /// Generate a unique event ID.
+    ///
+    /// Combines a nanosecond wall-clock timestamp with a process-local atomic
+    /// sequence number so IDs remain unique even when two events are generated
+    /// within the same nanosecond (e.g. in parallel workflow steps or tests).
     pub fn generate_id() -> String {
         use std::time::{SystemTime, UNIX_EPOCH};
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        format!("audit-{nanos:x}")
+        let seq = ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("audit-{nanos:x}-{seq}")
     }
 }
 
