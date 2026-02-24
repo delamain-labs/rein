@@ -127,6 +127,7 @@ mod tests {
                 tool_calls: 2,
                 tool_calls_denied: 0,
                 duration_ms: 1000,
+                timeout_count: 0,
             },
             is_partial: false,
         }

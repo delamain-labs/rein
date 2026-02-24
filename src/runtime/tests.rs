@@ -894,3 +894,52 @@ fn stage_timeout_second_turn_displays_as_turn_2() {
         "expected '2' for second turn (raw index 1); got: {summary}"
     );
 }
+
+// --- #379: timeout_count in TraceStats ---
+
+/// #379: A trace with no StageTimeout events must produce timeout_count == 0.
+/// Guards against accidental removal of the default initializer or match arm.
+#[test]
+fn to_structured_timeout_count_is_zero_when_no_timeouts() {
+    let trace = RunTrace::from_events(vec![RunEvent::LlmCall {
+        model: "gpt-4o".to_string(),
+        input_tokens: 100,
+        output_tokens: 50,
+        cost_cents: 5,
+    }]);
+    let structured = trace.to_structured(
+        "agent",
+        "2024-01-01T00:00:00Z",
+        "2024-01-01T00:01:00Z",
+        60000,
+    );
+    assert_eq!(
+        structured.stats.timeout_count, 0,
+        "no StageTimeout events must produce timeout_count = 0"
+    );
+}
+
+/// #379: StageTimeout events must increment timeout_count in TraceStats.
+#[test]
+fn to_structured_counts_stage_timeouts() {
+    let trace = RunTrace::from_events(vec![
+        RunEvent::StageTimeout {
+            turn: 0,
+            timeout_secs: 30,
+        },
+        RunEvent::StageTimeout {
+            turn: 1,
+            timeout_secs: 30,
+        },
+    ]);
+    let structured = trace.to_structured(
+        "agent",
+        "2024-01-01T00:00:00Z",
+        "2024-01-01T00:01:00Z",
+        60000,
+    );
+    assert_eq!(
+        structured.stats.timeout_count, 2,
+        "two StageTimeout events must produce timeout_count = 2"
+    );
+}

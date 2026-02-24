@@ -61,10 +61,21 @@ pub struct WorkflowResult {
     pub stage_results: Vec<StageResult>,
     /// The final output text.
     ///
-    /// For step-based workflows: the output of the **last step that ran to
-    /// completion** in topological order (`status == Executed`). If the
-    /// terminal step fails or is skipped, this is the output of the last
-    /// earlier step that succeeded. Empty string if all steps failed.
+    /// **Stage-based workflows** (`run_sequential` / `run_parallel`): the
+    /// output of the last stage. Empty if the workflow produced no output.
+    ///
+    /// **Step-based workflows** (`run_steps`): the output of the **last step
+    /// that ran to completion** in topological order (`status == Executed`).
+    /// If the terminal step fails or is skipped, this retains the output of
+    /// the last earlier step that succeeded. Empty string if all steps failed.
+    ///
+    /// **Mixed workflows** (stages followed by steps, e.g. via `run_sequential`
+    /// returning a result that is then augmented by `run_steps`): steps
+    /// override the stage output for each step that executes successfully.
+    /// If all steps fail or are skipped, `final_output` retains the last
+    /// successful stage output — it is **not** reset to empty. Shell consumers
+    /// and tests should check `stage_results` and `events` to distinguish
+    /// "all steps failed, output is from stages" from "last step succeeded".
     pub final_output: String,
     /// Total cost across all stages.
     pub total_cost_cents: u64,
@@ -657,10 +668,13 @@ struct StepLoopState {
 ///
 /// Extracts the success/failure logic from the `run_steps` loop so that the
 /// outer function stays within the project line-limit.
+///
+/// Accepts only the `auto_resolve` slice of the workflow definition rather than
+/// the full `WorkflowDef` — the function only uses this field (ISP — #469).
 fn apply_step_result(
     step: &crate::ast::StepDef,
     step_result: Result<(StageResult, Vec<super::RunEvent>), WorkflowError>,
-    workflow: &WorkflowDef,
+    auto_resolve: Option<&crate::ast::AutoResolveBlock>,
     state: &mut StepLoopState,
 ) -> StepOutcome {
     match step_result {
@@ -668,7 +682,7 @@ fn apply_step_result(
             state.events.extend(step_events);
 
             // Check workflow-level auto_resolve conditions after each step.
-            let resolved = if let Some(ref ar) = workflow.auto_resolve {
+            let resolved = if let Some(ar) = auto_resolve {
                 auto_resolve_matches(&result.output, ar)
             } else {
                 None
@@ -854,7 +868,12 @@ pub async fn run_steps(
                 })
         };
 
-        match apply_step_result(step, step_result, workflow, &mut state) {
+        match apply_step_result(
+            step,
+            step_result,
+            workflow.auto_resolve.as_ref(),
+            &mut state,
+        ) {
             StepOutcome::Continue => {}
             StepOutcome::AutoResolved => break,
             StepOutcome::HardError(e) => return Err(e),

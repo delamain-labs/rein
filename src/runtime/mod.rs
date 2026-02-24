@@ -270,6 +270,7 @@ impl RunTrace {
         let mut llm_calls = 0u64;
         let mut tool_calls = 0u64;
         let mut tool_denied = 0u64;
+        let mut timeout_count = 0u64;
         let has_real_timestamps = self.timestamps_ms.len() == self.events.len();
 
         let events: Vec<TimestampedEvent> = self
@@ -294,6 +295,9 @@ impl RunTrace {
                         } else {
                             tool_denied += 1;
                         }
+                    }
+                    RunEvent::StageTimeout { .. } => {
+                        timeout_count += 1;
                     }
                     _ => {}
                 }
@@ -322,6 +326,7 @@ impl RunTrace {
                 tool_calls,
                 tool_calls_denied: tool_denied,
                 duration_ms,
+                timeout_count,
             },
             is_partial: false,
         }
@@ -554,6 +559,12 @@ pub struct TraceStats {
     pub tool_calls: u64,
     pub tool_calls_denied: u64,
     pub duration_ms: u64,
+    /// Number of `StageTimeout` events in the trace.
+    ///
+    /// A non-zero value indicates the agent hit the `stage_timeout_secs` limit
+    /// at least once during the run; useful for alerting on timeout rate.
+    #[serde(default)]
+    pub timeout_count: u64,
 }
 
 /// Errors that can occur during an agent run.
