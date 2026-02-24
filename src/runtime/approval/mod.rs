@@ -7,6 +7,22 @@ use crate::runtime::audit::{self, AuditKind, AuditLog};
 #[cfg(test)]
 mod tests;
 
+/// Maximum byte length of `agent_output` forwarded in approval payloads and
+/// recorded in audit entries.
+///
+/// Outputs longer than this limit are truncated and the `agent_output_truncated`
+/// field in audit metadata is set to `true`. All handlers and tests reference
+/// this constant so the limit has a single source of truth.
+pub const AGENT_OUTPUT_PREVIEW_LIMIT: usize = 512;
+
+/// Suffix appended to `agent_output` when truncation occurs.
+///
+/// The `agent_output_truncated` bool is the machine-readable signal; this
+/// marker is the human-readable companion. Tests should compute expected
+/// maximum lengths using `AGENT_OUTPUT_PREVIEW_LIMIT + TRUNCATION_MARKER.len()`
+/// rather than hardcoding the combined value.
+pub const TRUNCATION_MARKER: &str = "… (truncated)";
+
 /// The result of an approval request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApprovalStatus {
@@ -64,11 +80,10 @@ impl ApprovalHandler for CliApprovalHandler {
         }
         eprintln!("╠══════════════════════════════════════════╣");
         eprintln!("║  Agent output:");
-        for line in agent_output.lines().take(10) {
+        // Cap at AGENT_OUTPUT_PREVIEW_LIMIT bytes — consistent with webhook/Slack/audit (#514).
+        let preview = truncate_agent_output(agent_output);
+        for line in preview.lines() {
             eprintln!("║  {line}");
-        }
-        if agent_output.lines().count() > 10 {
-            eprintln!("║  ... ({} more lines)", agent_output.lines().count() - 10);
         }
         eprintln!("╚══════════════════════════════════════════╝");
         eprintln!();
@@ -150,20 +165,16 @@ pub fn parse_timeout(s: &str) -> Option<u64> {
     }
 }
 
-/// Truncate `output` to [`AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT`] bytes,
-/// appending [`AuditingApprovalHandler::TRUNCATION_MARKER`] when a cut is made.
+/// Truncate `output` to [`AGENT_OUTPUT_PREVIEW_LIMIT`] bytes, appending
+/// [`TRUNCATION_MARKER`] when a cut is made.
 ///
 /// Returns a borrowed `Cow` (no allocation) when the output is within the limit;
 /// returns an owned `Cow` (one allocation) only when truncation is required.
+/// Callers can detect truncation via `matches!(result, Cow::Owned(_))`.
 fn truncate_agent_output(output: &str) -> Cow<'_, str> {
-    let limit = AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT;
-    if output.len() > limit {
-        let cut = output.floor_char_boundary(limit);
-        Cow::Owned(format!(
-            "{}{}",
-            &output[..cut],
-            AuditingApprovalHandler::TRUNCATION_MARKER
-        ))
+    if output.len() > AGENT_OUTPUT_PREVIEW_LIMIT {
+        let cut = output.floor_char_boundary(AGENT_OUTPUT_PREVIEW_LIMIT);
+        Cow::Owned(format!("{}{}", &output[..cut], TRUNCATION_MARKER))
     } else {
         Cow::Borrowed(output)
     }
@@ -320,21 +331,6 @@ pub struct AuditingApprovalHandler {
 }
 
 impl AuditingApprovalHandler {
-    /// Maximum byte length of `agent_output` recorded in `ApprovalRequested` audit entries.
-    ///
-    /// Outputs longer than this limit are truncated and the `agent_output_truncated` field
-    /// in the audit metadata is set to `true`. Tests and downstream tooling should reference
-    /// this constant rather than hardcoding `512` to ensure they stay in sync with the limit.
-    pub const AGENT_OUTPUT_PREVIEW_LIMIT: usize = 512;
-
-    /// Suffix appended to `agent_output` in the audit record when the output is truncated.
-    ///
-    /// The `agent_output_truncated` bool in the audit metadata is the machine-readable
-    /// truncation signal; this marker is the human-readable companion. Tests should compute
-    /// expected maximum lengths using `AGENT_OUTPUT_PREVIEW_LIMIT + TRUNCATION_MARKER.len()`
-    /// rather than hardcoding the combined value.
-    pub const TRUNCATION_MARKER: &'static str = "… (truncated)";
-
     #[must_use]
     pub fn new(inner: Arc<dyn ApprovalHandler>, log: Arc<AuditLog>) -> Self {
         Self {
@@ -393,8 +389,9 @@ impl ApprovalHandler for AuditingApprovalHandler {
         // Truncate agent_output to AGENT_OUTPUT_PREVIEW_LIMIT bytes to avoid unbounded audit
         // log growth. floor_char_boundary (inside truncate_agent_output) ensures the slice
         // ends on a valid UTF-8 boundary even when the input contains multibyte characters.
-        let truncated = agent_output.len() > Self::AGENT_OUTPUT_PREVIEW_LIMIT;
+        // `truncated` is derived from the Cow variant — Owned means a cut was made (#519).
         let output_preview = truncate_agent_output(agent_output);
+        let truncated = matches!(output_preview, Cow::Owned(_));
         let mut req_meta = serde_json::json!({
             "channel": approval.channel,
             "agent_output": &*output_preview,

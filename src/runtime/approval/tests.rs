@@ -507,8 +507,8 @@ async fn approval_requested_truncates_long_agent_output() {
     let recorded = entries[0].metadata["agent_output"].as_str().unwrap();
     // The maximum recorded length is AGENT_OUTPUT_PREVIEW_LIMIT bytes + TRUNCATION_MARKER.
     // Both constants are on AuditingApprovalHandler so they stay in sync with production.
-    let max_expected = AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT
-        + AuditingApprovalHandler::TRUNCATION_MARKER.len();
+    let max_expected = AGENT_OUTPUT_PREVIEW_LIMIT
+        + TRUNCATION_MARKER.len();
     assert!(
         recorded.len() <= max_expected,
         "truncated output must be <= {} chars (limit + marker), got {}",
@@ -516,7 +516,7 @@ async fn approval_requested_truncates_long_agent_output() {
         recorded.len()
     );
     assert!(
-        recorded.ends_with(AuditingApprovalHandler::TRUNCATION_MARKER),
+        recorded.ends_with(TRUNCATION_MARKER),
         "truncated output must end with TRUNCATION_MARKER, got: {recorded}"
     );
     assert_eq!(
@@ -543,7 +543,7 @@ async fn approval_requested_truncates_multibyte_boundary_safely() {
     // 510 ASCII 'a' chars (510 bytes) + enough emoji to push well past 512 bytes.
     let mut multibyte_output = "a".repeat(510);
     multibyte_output.push_str(&"🦀".repeat(50)); // each 🦀 is 4 bytes
-    assert!(multibyte_output.len() > AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT);
+    assert!(multibyte_output.len() > AGENT_OUTPUT_PREVIEW_LIMIT);
 
     handler
         .request_approval("deploy", &multibyte_output, &approval)
@@ -554,8 +554,8 @@ async fn approval_requested_truncates_multibyte_boundary_safely() {
     let recorded = entries[0].metadata["agent_output"].as_str().unwrap();
     // Must be valid UTF-8 (guaranteed by the str type), within the bound, and end
     // with the truncation marker.
-    let max_expected = AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT
-        + AuditingApprovalHandler::TRUNCATION_MARKER.len();
+    let max_expected = AGENT_OUTPUT_PREVIEW_LIMIT
+        + TRUNCATION_MARKER.len();
     assert!(
         recorded.len() <= max_expected,
         "multibyte truncation must be <= {} bytes, got {}",
@@ -563,7 +563,7 @@ async fn approval_requested_truncates_multibyte_boundary_safely() {
         recorded.len()
     );
     assert!(
-        recorded.ends_with(AuditingApprovalHandler::TRUNCATION_MARKER),
+        recorded.ends_with(TRUNCATION_MARKER),
         "multibyte truncation must end with TRUNCATION_MARKER"
     );
     assert_eq!(
@@ -633,7 +633,7 @@ async fn webhook_handler_truncates_long_agent_output_in_payload() {
 
     // The sent output must not exceed the preview limit + marker.
     let max_len =
-        AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT + AuditingApprovalHandler::TRUNCATION_MARKER.len();
+        AGENT_OUTPUT_PREVIEW_LIMIT + TRUNCATION_MARKER.len();
     assert!(
         sent_output.len() <= max_len,
         "webhook agent_output must be truncated; got {} bytes (limit {})",
@@ -641,7 +641,7 @@ async fn webhook_handler_truncates_long_agent_output_in_payload() {
         max_len
     );
     assert!(
-        sent_output.ends_with(AuditingApprovalHandler::TRUNCATION_MARKER),
+        sent_output.ends_with(TRUNCATION_MARKER),
         "webhook agent_output must end with TRUNCATION_MARKER; got: {sent_output:?}"
     );
 }
@@ -676,7 +676,7 @@ async fn slack_handler_truncates_long_agent_output_in_message() {
     let text = body["text"].as_str().expect("text field must be present");
 
     let max_len =
-        AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT + AuditingApprovalHandler::TRUNCATION_MARKER.len();
+        AGENT_OUTPUT_PREVIEW_LIMIT + TRUNCATION_MARKER.len();
     // The Slack text ends with "\n{output_preview}"; extract the output portion
     // after the fixed prefix and assert its length directly.
     let output_portion = text
@@ -690,7 +690,7 @@ async fn slack_handler_truncates_long_agent_output_in_message() {
         output_portion.len()
     );
     assert!(
-        output_portion.ends_with(AuditingApprovalHandler::TRUNCATION_MARKER),
+        output_portion.ends_with(TRUNCATION_MARKER),
         "slack agent_output portion must end with TRUNCATION_MARKER; got: {output_portion:?}"
     );
 }
@@ -727,7 +727,7 @@ async fn webhook_handler_short_agent_output_not_truncated() {
         "short output must be forwarded verbatim — no truncation marker"
     );
     assert!(
-        !sent_output.contains(AuditingApprovalHandler::TRUNCATION_MARKER),
+        !sent_output.contains(TRUNCATION_MARKER),
         "short output must not contain TRUNCATION_MARKER"
     );
 }
@@ -768,7 +768,100 @@ async fn slack_handler_short_agent_output_not_truncated() {
         "short output must appear verbatim in Slack message — no truncation marker"
     );
     assert!(
-        !output_portion.contains(AuditingApprovalHandler::TRUNCATION_MARKER),
+        !output_portion.contains(TRUNCATION_MARKER),
         "short output must not contain TRUNCATION_MARKER in Slack message"
+    );
+}
+
+/// #516: WebhookApprovalHandler must not panic when byte AGENT_OUTPUT_PREVIEW_LIMIT
+/// falls inside a multibyte codepoint; truncation must end on a valid UTF-8 boundary.
+#[tokio::test]
+async fn webhook_handler_truncates_multibyte_boundary_safely() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/approval"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let url = format!("{}/approval", server.uri());
+    let handler = WebhookApprovalHandler::new(url.clone());
+    let approval = make_approval_for_channel("webhook", &url);
+
+    // 510 ASCII 'a' bytes + enough 4-byte emoji (🦀) to push past 512 bytes.
+    // Byte 512 will land inside a 4-byte codepoint, exercising floor_char_boundary.
+    let mut multibyte_output = "a".repeat(510);
+    multibyte_output.push_str(&"🦀".repeat(50));
+    assert!(multibyte_output.len() > AGENT_OUTPUT_PREVIEW_LIMIT);
+
+    handler
+        .request_approval("deploy", &multibyte_output, &approval)
+        .await;
+
+    let received = server.received_requests().await.unwrap();
+    let body: serde_json::Value =
+        serde_json::from_slice(&received[0].body).expect("body must be valid JSON");
+    let sent_output = body["agent_output"].as_str().expect("agent_output must be present");
+
+    let max_len = AGENT_OUTPUT_PREVIEW_LIMIT + TRUNCATION_MARKER.len();
+    assert!(
+        sent_output.len() <= max_len,
+        "multibyte truncation must be <= {max_len} bytes, got {}",
+        sent_output.len()
+    );
+    assert!(
+        sent_output.ends_with(TRUNCATION_MARKER),
+        "multibyte truncation must end with TRUNCATION_MARKER; got: {sent_output:?}"
+    );
+}
+
+/// #516: SlackApprovalHandler must not panic when byte AGENT_OUTPUT_PREVIEW_LIMIT
+/// falls inside a multibyte codepoint; truncation must end on a valid UTF-8 boundary.
+#[tokio::test]
+async fn slack_handler_truncates_multibyte_boundary_safely() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/slack"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let url = format!("{}/slack", server.uri());
+    let handler = SlackApprovalHandler::new(url.clone());
+    let approval = make_approval_for_channel("slack", &url);
+
+    // Same multibyte boundary setup as webhook test above.
+    let mut multibyte_output = "a".repeat(510);
+    multibyte_output.push_str(&"🦀".repeat(50));
+    assert!(multibyte_output.len() > AGENT_OUTPUT_PREVIEW_LIMIT);
+
+    handler
+        .request_approval("notify", &multibyte_output, &approval)
+        .await;
+
+    let received = server.received_requests().await.unwrap();
+    let body: serde_json::Value =
+        serde_json::from_slice(&received[0].body).expect("body must be valid JSON");
+    let text = body["text"].as_str().expect("text field must be present");
+
+    let output_portion = text
+        .split("\n\nAgent output:\n")
+        .nth(1)
+        .expect("text must contain 'Agent output:' section");
+    let max_len = AGENT_OUTPUT_PREVIEW_LIMIT + TRUNCATION_MARKER.len();
+    assert!(
+        output_portion.len() <= max_len,
+        "slack multibyte truncation must be <= {max_len} bytes, got {}",
+        output_portion.len()
+    );
+    assert!(
+        output_portion.ends_with(TRUNCATION_MARKER),
+        "slack multibyte truncation must end with TRUNCATION_MARKER; got: {output_portion:?}"
     );
 }
