@@ -289,3 +289,26 @@ fn run_stage_timeout_flag_accepted() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+#[test]
+fn run_run_timeout_flag_accepted() {
+    // Verify that --run-timeout is a recognised flag (not an "unexpected argument")
+    // by running with --demo (mock provider, no API key) + --dry-run so no LLM call.
+    let out = Command::new(rein_bin())
+        .args([
+            "run",
+            "--demo",
+            "--dry-run",
+            "--run-timeout",
+            "60",
+            example("basic.rein").to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to spawn rein");
+    assert_ne!(
+        out.status.code(),
+        Some(2),
+        "--run-timeout should not produce a clap parse error (exit 2); stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
