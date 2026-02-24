@@ -139,6 +139,11 @@ pub enum RunEvent {
         condition: String,
     },
     /// A workflow step is about to begin execution.
+    ///
+    /// `index` is the **topological execution order** (0-based), which may differ
+    /// from the step's declaration order in the `.rein` file when `depends_on` is
+    /// used. Skipped steps do not emit `StepStarted`, so `index` values in a trace
+    /// may not be contiguous.
     StepStarted {
         step: String,
         index: usize,

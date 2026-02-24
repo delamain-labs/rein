@@ -201,6 +201,14 @@ impl AuditLog {
     /// Combines a nanosecond wall-clock timestamp with a process-local atomic
     /// sequence number so IDs remain unique even when two events are generated
     /// within the same nanosecond (e.g. in parallel workflow steps or tests).
+    ///
+    /// **Clock-before-epoch fallback:** if the system clock is set before the
+    /// Unix epoch (e.g. RTC not set, certain CI containers), `duration_since`
+    /// returns an error and `unwrap_or_default()` substitutes 0 nanoseconds.
+    /// IDs remain unique because the atomic sequence counter still increments,
+    /// but the hex timestamp prefix will be `0` rather than a real timestamp.
+    /// Compliance consumers that parse the prefix for time ordering should treat
+    /// `audit-0-N` IDs as having unknown wall-clock time.
     pub fn generate_id() -> String {
         use std::time::{SystemTime, UNIX_EPOCH};
         let nanos = SystemTime::now()
