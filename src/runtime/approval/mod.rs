@@ -294,6 +294,13 @@ pub struct AuditingApprovalHandler {
 }
 
 impl AuditingApprovalHandler {
+    /// Maximum byte length of `agent_output` recorded in `ApprovalRequested` audit entries.
+    ///
+    /// Outputs longer than this limit are truncated and the `agent_output_truncated` field
+    /// in the audit metadata is set to `true`. Tests and downstream tooling should reference
+    /// this constant rather than hardcoding `512` to ensure they stay in sync with the limit.
+    pub const AGENT_OUTPUT_PREVIEW_LIMIT: usize = 512;
+
     #[must_use]
     pub fn new(inner: Arc<dyn ApprovalHandler>, log: Arc<AuditLog>) -> Self {
         Self {
@@ -341,9 +348,6 @@ impl ApprovalHandler for AuditingApprovalHandler {
         agent_output: &str,
         approval: &ApprovalDef,
     ) -> ApprovalStatus {
-        // Truncate agent_output at 512 bytes to avoid unbounded audit log growth.
-        // The truncation marker makes it clear the record is incomplete.
-        const OUTPUT_PREVIEW_LIMIT: usize = 512;
         // Emit ApprovalRequested before delegating.
         let mut requested = audit::entry(
             AuditKind::ApprovalRequested,
@@ -352,10 +356,11 @@ impl ApprovalHandler for AuditingApprovalHandler {
         requested.step = Some(step_name.to_string());
         requested.workflow = self.workflow_name.clone();
         requested.agent = self.agent_name.clone();
-        // floor_char_boundary ensures the slice ends on a valid UTF-8 boundary
+        // Truncate agent_output to AGENT_OUTPUT_PREVIEW_LIMIT bytes to avoid unbounded audit
+        // log growth. floor_char_boundary ensures the slice ends on a valid UTF-8 boundary
         // even when the input contains multibyte characters.
-        let cut = agent_output.floor_char_boundary(OUTPUT_PREVIEW_LIMIT);
-        let truncated = agent_output.len() > OUTPUT_PREVIEW_LIMIT;
+        let cut = agent_output.floor_char_boundary(Self::AGENT_OUTPUT_PREVIEW_LIMIT);
+        let truncated = agent_output.len() > Self::AGENT_OUTPUT_PREVIEW_LIMIT;
         let output_preview = if truncated {
             format!("{}… (truncated)", &agent_output[..cut])
         } else {

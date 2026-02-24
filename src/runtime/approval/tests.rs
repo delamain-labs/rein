@@ -479,6 +479,10 @@ async fn approval_requested_includes_agent_output_in_metadata() {
         entries[0].metadata["agent_output"], "Agent produced this output for review",
         "agent_output must match what was passed to request_approval"
     );
+    assert_eq!(
+        entries[0].metadata["agent_output_truncated"], false,
+        "agent_output_truncated must be false when output is within limit"
+    );
 }
 
 // #463: Long agent_output must be truncated at 512 chars in the audit record.
@@ -501,14 +505,23 @@ async fn approval_requested_truncates_long_agent_output() {
     let entries = log.read_all().unwrap();
     assert_eq!(entries[0].kind, AuditKind::ApprovalRequested);
     let recorded = entries[0].metadata["agent_output"].as_str().unwrap();
+    // The maximum recorded length is AGENT_OUTPUT_PREVIEW_LIMIT bytes + the truncation
+    // marker suffix "… (truncated)" (~15 UTF-8 bytes). Use the constant so this stays
+    // in sync if the limit changes.
+    let max_expected = AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT + "… (truncated)".len();
     assert!(
-        recorded.len() <= 600,
-        "truncated output must be <= ~600 chars (512 + truncation marker), got {}",
+        recorded.len() <= max_expected,
+        "truncated output must be <= {} chars (limit + marker), got {}",
+        max_expected,
         recorded.len()
     );
     assert!(
         recorded.contains("…") || recorded.contains("(truncated)"),
         "truncated output must include truncation marker, got: {recorded}"
+    );
+    assert_eq!(
+        entries[0].metadata["agent_output_truncated"], true,
+        "agent_output_truncated must be true when output exceeds limit"
     );
 }
 
