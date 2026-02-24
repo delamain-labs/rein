@@ -3,12 +3,100 @@ use std::time::Instant;
 
 use rein::runtime::workflow::{RunOptions, StageResult};
 
-// This function is inherently sequential setup code (parse → validate →
-// build provider → attach engine extensions → dispatch). Extracting it
-// further would require artificial helpers with awkward return types.
-// TODO(#460): refactor into named setup phases to remove this suppression.
-// TODO(#440): extract RunOptions struct to reduce parameter count.
-#[allow(clippy::too_many_lines, clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
+/// Parse a `.rein` file and run all validators. Returns the parsed `ReinFile`
+/// or an exit code.
+///
+/// Factored out of `run_agent` so the sequential setup phases are individually
+/// nameable (#460). This phase has no I/O side effects beyond reading the file
+/// and printing diagnostics to stderr.
+fn load_and_validate(path: &std::path::Path) -> Result<rein::ast::ReinFile, i32> {
+    let filename = path.to_string_lossy();
+    let source = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: cannot read '{filename}': {e}");
+            return Err(1);
+        }
+    };
+    let file = match rein::parser::parse(&source) {
+        Ok(f) => f,
+        Err(e) => {
+            rein::error::report_parse_error(&filename, &source, &e);
+            return Err(1);
+        }
+    };
+    let diags = rein::validator::validate(&file);
+    let has_errors = diags.iter().any(rein::validator::Diagnostic::is_error);
+    for diag in &diags {
+        rein::error::report_diagnostic(&filename, &source, diag);
+    }
+    if has_errors {
+        return Err(1);
+    }
+    Ok(file)
+}
+
+/// Attach all optional engine extensions (guardrails, circuit breaker, secrets,
+/// policy, OTEL) to a freshly constructed `AgentEngine`.
+///
+/// Returns the collected `SecretFallback` events (one per vault→env fallback)
+/// so the caller can prepend them to the run trace. Fails fast with an exit
+/// code if any extension setup is unrecoverable (e.g. strict-secrets violation).
+///
+/// Factored out of `run_agent` so the sequential setup phases are individually
+/// nameable (#460).
+fn configure_engine<'a>(
+    engine: rein::runtime::engine::AgentEngine<'a>,
+    agent: &'a rein::ast::AgentDef,
+    file: &'a rein::ast::ReinFile,
+    strict_secrets: bool,
+    otel: bool,
+) -> Result<(rein::runtime::engine::AgentEngine<'a>, Vec<rein::runtime::RunEvent>), i32> {
+    let mut engine = engine;
+    let mut secret_fallback_events: Vec<rein::runtime::RunEvent> = Vec::new();
+
+    if let Some(ref guardrails_def) = agent.guardrails {
+        let guardrail_engine = rein::runtime::guardrails::GuardrailEngine::from_def(guardrails_def);
+        engine = engine.with_guardrails(guardrail_engine);
+    }
+    if let Some(cb_def) = file.circuit_breakers.first() {
+        let cb = rein::runtime::circuit_breaker::CircuitBreaker::from_def(cb_def);
+        engine = engine.with_circuit_breaker(cb);
+    }
+    if !file.secrets.is_empty() {
+        match resolve_secrets(&file.secrets, strict_secrets) {
+            Ok((map, events)) => {
+                engine = engine.with_secrets(map);
+                secret_fallback_events = events;
+            }
+            Err(code) => return Err(code),
+        }
+    }
+    if let Some(policy_def) = file.policies.first() {
+        let policy = rein::runtime::policy::PolicyEngine::from_def(policy_def);
+        eprintln!(
+            "Policy: starting at tier '{}' ({} tiers defined)",
+            policy.current_tier(),
+            policy.tier_count()
+        );
+        engine = engine.with_policy(policy);
+    }
+    // Resolve OTEL mode from an observe block (matched by agent name, falling
+    // back to first) or the --otel flag.
+    let obs = file
+        .observes
+        .iter()
+        .find(|o| o.name == agent.name)
+        .or_else(|| file.observes.first());
+    let otel_mode = resolve_otel_mode(obs, otel);
+    engine = engine
+        .with_otel_mode(otel_mode)
+        .with_agent_name(agent.name.clone());
+
+    Ok((engine, secret_fallback_events))
+}
+
+#[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 pub fn run_agent(
     path: &std::path::Path,
     message: Option<&str>,
@@ -20,39 +108,16 @@ pub fn run_agent(
     run_timeout_secs: Option<u64>,
     strict_secrets: bool,
 ) -> i32 {
-    let filename = path.to_string_lossy();
-
-    let source = match std::fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("error: cannot read '{filename}': {e}");
-            return 1;
-        }
-    };
-
-    let file = match rein::parser::parse(&source) {
+    let file = match load_and_validate(path) {
         Ok(f) => f,
-        Err(e) => {
-            rein::error::report_parse_error(&filename, &source, &e);
-            return 1;
-        }
+        Err(code) => return code,
     };
-
-    let diags = rein::validator::validate(&file);
-    let has_errors = diags.iter().any(rein::validator::Diagnostic::is_error);
-
-    for diag in &diags {
-        rein::error::report_diagnostic(&filename, &source, diag);
-    }
-
-    if has_errors {
-        return 1;
-    }
 
     if dry_run {
         return print_execution_plan(&file, message);
     }
 
+    let filename = path.to_string_lossy();
     let Some(agent) = file.agents.first() else {
         eprintln!("error: no agents defined in '{filename}'");
         return 1;
@@ -70,10 +135,7 @@ pub fn run_agent(
         }
     };
 
-    // Build permission registry from agent capabilities.
     let registry = rein::runtime::permissions::ToolRegistry::from_agent(agent);
-
-    // Build run config. CLI flag takes precedence over DSL field.
     let resolved_stage_timeout = stage_timeout_secs.or(agent.stage_timeout_secs);
     let config = rein::runtime::engine::RunConfig {
         system_prompt: None,
@@ -82,10 +144,8 @@ pub fn run_agent(
         stage_timeout_secs: resolved_stage_timeout,
         run_timeout_secs,
     };
-
-    // Build engine with enforcement.
     let executor = rein::runtime::executor::NoopExecutor;
-    let mut engine = rein::runtime::engine::AgentEngine::new(
+    let engine = rein::runtime::engine::AgentEngine::new(
         provider.as_ref(),
         &executor,
         &registry,
@@ -94,54 +154,11 @@ pub fn run_agent(
     )
     .with_stream(Box::new(rein::runtime::engine::StdoutStream));
 
-    // Attach guardrails if defined.
-    if let Some(ref guardrails_def) = agent.guardrails {
-        let guardrail_engine = rein::runtime::guardrails::GuardrailEngine::from_def(guardrails_def);
-        engine = engine.with_guardrails(guardrail_engine);
-    }
-
-    // Attach circuit breaker if defined.
-    if let Some(cb_def) = file.circuit_breakers.first() {
-        let cb = rein::runtime::circuit_breaker::CircuitBreaker::from_def(cb_def);
-        engine = engine.with_circuit_breaker(cb);
-    }
-
-    // Resolve and inject secrets if defined. Collect any vault-fallback events
-    // so they can be prepended to the run trace for structured tracing / OTEL.
-    let mut secret_fallback_events: Vec<rein::runtime::RunEvent> = Vec::new();
-    if !file.secrets.is_empty() {
-        match resolve_secrets(&file.secrets, strict_secrets) {
-            Ok((map, events)) => {
-                engine = engine.with_secrets(map);
-                secret_fallback_events = events;
-            }
+    let (engine, secret_fallback_events) =
+        match configure_engine(engine, agent, &file, strict_secrets, otel) {
+            Ok(r) => r,
             Err(code) => return code,
-        }
-    }
-
-    // Attach policy engine if defined.
-    if let Some(policy_def) = file.policies.first() {
-        let policy = rein::runtime::policy::PolicyEngine::from_def(policy_def);
-        eprintln!(
-            "Policy: starting at tier '{}' ({} tiers defined)",
-            policy.current_tier(),
-            policy.tier_count()
-        );
-        engine = engine.with_policy(policy);
-    }
-
-    // Resolve OTEL mode from an observe block (matched by agent name, falling back to first)
-    // or the --otel flag. `observe` blocks are file-level so we prefer the one whose name
-    // matches the running agent; if none match, we take the first block as a file-wide default.
-    let obs = file
-        .observes
-        .iter()
-        .find(|o| o.name == agent.name)
-        .or_else(|| file.observes.first());
-    let otel_mode = resolve_otel_mode(obs, otel);
-    engine = engine
-        .with_otel_mode(otel_mode)
-        .with_agent_name(agent.name.clone());
+        };
 
     // `--audit-log` is only meaningful for workflow runs. Guard here — before
     // the workflow dispatch branch — so the error fires whether or not a
@@ -155,7 +172,6 @@ pub fn run_agent(
         return 1;
     }
 
-    // If the file has workflows, run the first workflow instead of single-agent execution.
     if let Some(workflow) = file.workflows.first() {
         let budget_cents = agent.budget.as_ref().map_or(0, |b| b.amount);
         return run_workflow_mode(
