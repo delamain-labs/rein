@@ -8,7 +8,7 @@ use rein::runtime::workflow::StageResult;
 // further would require artificial helpers with awkward return types.
 // TODO(#460): refactor into named setup phases to remove this suppression.
 // TODO(#440): extract RunOptions struct to reduce parameter count.
-#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines, clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 pub fn run_agent(
     path: &std::path::Path,
     message: Option<&str>,
@@ -18,6 +18,7 @@ pub fn run_agent(
     audit_log: Option<&std::path::Path>,
     stage_timeout_secs: Option<u64>,
     run_timeout_secs: Option<u64>,
+    strict_secrets: bool,
 ) -> i32 {
     let filename = path.to_string_lossy();
 
@@ -109,7 +110,7 @@ pub fn run_agent(
     // so they can be prepended to the run trace for structured tracing / OTEL.
     let mut secret_fallback_events: Vec<rein::runtime::RunEvent> = Vec::new();
     if !file.secrets.is_empty() {
-        match resolve_secrets(&file.secrets) {
+        match resolve_secrets(&file.secrets, strict_secrets) {
             Ok((map, events)) => {
                 engine = engine.with_secrets(map);
                 secret_fallback_events = events;
@@ -415,12 +416,17 @@ fn resolve_otel_mode(
 /// Fails fast on the first unresolvable binding — subsequent bindings are not
 /// checked. This is intentional to keep startup errors actionable one at a time.
 ///
+/// When `strict_secrets` is `true`, any `vault:` binding that falls back to a
+/// `VAULT_*` env var is treated as an error (exit code 1). This enforces that
+/// real Vault is configured — env var fallbacks are not acceptable in strict mode.
+///
 /// Returns a flat `HashMap<name, value>` paired with any `SecretFallback` events
 /// (one per vault-sourced binding that fell back to a `VAULT_*` env var).
 /// Callers should prepend the returned events to the run trace for structured
 /// tracing and OTEL export.
 fn resolve_secrets(
     defs: &[rein::ast::SecretsDef],
+    strict_secrets: bool,
 ) -> Result<(std::collections::HashMap<String, String>, Vec<rein::runtime::RunEvent>), i32> {
     use rein::ast::SecretSource;
     use rein::runtime::secrets::{SecretError, SecretResolver};
@@ -438,6 +444,18 @@ fn resolve_secrets(
                             def.bindings.iter().find(|b| b.name == *name)
                         && let SecretSource::Vault { path } = &binding_def.source
                     {
+                        if strict_secrets {
+                            let env_key = rein::runtime::secrets::vault_env_key(path);
+                            eprintln!(
+                                "error: --strict-secrets: vault path '{path}' is not configured; \
+                                 env var fallback '{env_key}' is not acceptable in strict mode."
+                            );
+                            eprintln!(
+                                "hint: Configure real Vault, or rewrite the binding to \
+                                 use `env: {env_key}` and remove --strict-secrets."
+                            );
+                            return Err(1);
+                        }
                         let env_key = rein::runtime::secrets::vault_env_key(path);
                         fallback_events.push(rein::runtime::RunEvent::SecretFallback {
                             binding: name.clone(),
@@ -690,10 +708,52 @@ mod tests {
             Some(audit_path.path()),
             None,
             None,
+            false, // strict_secrets
         );
         assert_eq!(
             code, 1,
             "--audit-log on a single-agent run must exit 1, got {code}"
+        );
+    }
+
+    // #385: --strict-secrets must reject vault: sources that would fall back to
+    // a VAULT_* env var, even when the env var is present and resolution would
+    // succeed without strict mode.
+    #[test]
+    #[serial_test::serial]
+    fn run_agent_strict_secrets_rejects_vault_fallback() {
+        use std::io::Write;
+        // Minimal .rein file with a vault: secret source.
+        let mut tmp = tempfile::NamedTempFile::new().expect("temp .rein file");
+        writeln!(
+            tmp,
+            "agent deploy {{\n  model: \"claude-opus-4-6\"\n  goal: \"test\"\n}}\n\
+             secrets {{\n  bind db_pass from vault: \"secret/prod/db\"\n}}"
+        )
+        .expect("write");
+
+        // Set the fallback env var so non-strict mode would succeed via fallback.
+        // Strict mode must reject the vault: source regardless.
+        let env_key = "VAULT_SECRET_PROD_DB";
+        unsafe { std::env::set_var(env_key, "test-value") };
+
+        let code = run_agent(
+            tmp.path(),
+            None,
+            false,
+            true,  // demo mode — no API key needed
+            false,
+            None,
+            None,
+            None,
+            true, // strict_secrets
+        );
+
+        unsafe { std::env::remove_var(env_key) };
+
+        assert_eq!(
+            code, 1,
+            "--strict-secrets must exit 1 when vault: source would use env var fallback"
         );
     }
 
