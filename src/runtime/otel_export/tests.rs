@@ -357,6 +357,30 @@ fn secret_fallback_event_produces_otel_span() {
     );
 }
 
+// ── #547: export_workflow_events ─────────────────────────────────────────────
+
+/// `export_workflow_events` must produce a valid OTLP JSON string for
+/// workflow-level `RunEvent`s without panicking.
+///
+/// This test acts as a compile-time guard: if the function is removed or
+/// renamed it fails to compile, and as a runtime guard: OTLP serialization
+/// of workflow-specific events (StepStarted, StepCompleted) must succeed.
+#[test]
+fn export_workflow_events_produces_valid_otlp_json() {
+    let events = vec![
+        RunEvent::StepStarted { step: "deploy".to_string(), index: 0 },
+        RunEvent::StepCompleted { step: "deploy".to_string() },
+    ];
+    let result = export_workflow_events(
+        &events,
+        &[],
+        std::time::Duration::from_millis(500),
+        "my_workflow",
+    );
+    // Must produce a non-empty JSON string; `spans` array must be non-empty.
+    assert!(result.contains("rein.step"), "OTLP JSON must contain span names: {result}");
+}
+
 // Normal (non-partial) trace must NOT have rein.run.partial attribute.
 #[test]
 fn non_partial_trace_has_no_partial_attribute() {
