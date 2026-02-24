@@ -40,6 +40,7 @@ mod permissions_tests {
             cannot,
             budget: None,
             guardrails: None,
+            stage_timeout_secs: None,
             span: span(),
         }
     }

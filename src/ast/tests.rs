@@ -91,6 +91,7 @@ fn agent_def_full_serializes() {
             span: dummy_span(),
         }),
         guardrails: None,
+        stage_timeout_secs: None,
         span: dummy_span(),
     };
     let json = serde_json::to_value(&agent).unwrap();
@@ -127,6 +128,7 @@ fn rein_file_roundtrips_via_json() {
             cannot: vec![],
             budget: None,
             guardrails: None,
+            stage_timeout_secs: None,
             span: dummy_span(),
         }],
         workflows: vec![],
@@ -147,6 +149,7 @@ fn agent_def_minimal_model_none() {
         cannot: vec![],
         budget: None,
         guardrails: None,
+        stage_timeout_secs: None,
         span: dummy_span(),
     };
     let json = serde_json::to_value(&agent).unwrap();

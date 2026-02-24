@@ -13,6 +13,7 @@ fn make_agent(can: Vec<Capability>, cannot: Vec<Capability>) -> AgentDef {
         cannot,
         budget: None,
         guardrails: None,
+        stage_timeout_secs: None,
         span: Span { start: 0, end: 10 },
     }
 }

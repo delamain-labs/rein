@@ -4,6 +4,12 @@ use crate::ast::{
 };
 use crate::lexer::TokenKind;
 
+/// Parse a `<N>s` or `<N>` duration token and return the value in whole seconds.
+fn parse_secs_from_duration(s: &str) -> Option<u64> {
+    let s = s.trim_end_matches('s');
+    s.parse::<u64>().ok()
+}
+
 use super::{ParseError, Parser};
 
 impl Parser {
@@ -15,7 +21,8 @@ impl Parser {
         let (name, _) = self.expect_ident()?;
         self.expect(&TokenKind::LBrace)?;
 
-        let (model, can, cannot, budget, guardrails) = self.parse_agent_body(&name)?;
+        let (model, can, cannot, budget, guardrails, stage_timeout_secs) =
+            self.parse_agent_body(&name)?;
 
         let end = self.current_span().end;
         self.advance(); // consume RBrace
@@ -27,6 +34,7 @@ impl Parser {
             cannot,
             budget,
             guardrails,
+            stage_timeout_secs,
             span: Span::new(start, end),
         })
     }
@@ -49,7 +57,8 @@ impl Parser {
 
         self.expect(&TokenKind::LBrace)?;
 
-        let (model, can, cannot, budget, guardrails) = self.parse_agent_body(&name)?;
+        let (model, can, cannot, budget, guardrails, stage_timeout_secs) =
+            self.parse_agent_body(&name)?;
 
         let end = self.current_span().end;
         self.advance(); // consume RBrace
@@ -62,6 +71,7 @@ impl Parser {
             cannot,
             budget,
             guardrails,
+            stage_timeout_secs,
             span: Span::new(start, end),
         })
     }
@@ -69,7 +79,7 @@ impl Parser {
     /// Parse the body fields shared by both `agent` and `archetype` blocks.
     /// Expects the opening `{` has already been consumed.
     /// Returns when `}` is encountered (but does NOT consume it).
-    #[allow(clippy::type_complexity)]
+    #[allow(clippy::type_complexity, clippy::too_many_lines)]
     fn parse_agent_body(
         &mut self,
         name: &str,
@@ -80,6 +90,7 @@ impl Parser {
             Vec<Capability>,
             Option<Budget>,
             Option<GuardrailsDef>,
+            Option<u64>,
         ),
         ParseError,
     > {
@@ -88,15 +99,16 @@ impl Parser {
         let mut cannot: Vec<Capability> = Vec::new();
         let mut budget: Option<Budget> = None;
         let mut guardrails: Option<GuardrailsDef> = None;
+        let mut stage_timeout_secs: Option<u64> = None;
 
         let (mut seen_model, mut seen_can, mut seen_cannot) = (false, false, false);
-        let (mut seen_budget, mut seen_guardrails) = (false, false);
+        let (mut seen_budget, mut seen_guardrails, mut seen_stage_timeout) = (false, false, false);
 
         loop {
             self.skip_comments();
             match self.peek().clone() {
                 TokenKind::RBrace => {
-                    return Ok((model, can, cannot, budget, guardrails));
+                    return Ok((model, can, cannot, budget, guardrails, stage_timeout_secs));
                 }
                 TokenKind::Model => {
                     if seen_model {
@@ -153,6 +165,28 @@ impl Parser {
                     }
                     seen_guardrails = true;
                     guardrails = Some(self.parse_guardrails()?);
+                }
+                TokenKind::Stage => {
+                    if seen_stage_timeout {
+                        return Err(ParseError::new(
+                            format!("duplicate field 'stage timeout' in '{name}'"),
+                            self.current_span(),
+                        ));
+                    }
+                    seen_stage_timeout = true;
+                    self.advance(); // consume `stage`
+                    self.expect(&TokenKind::Timeout)?;
+                    self.expect(&TokenKind::Colon)?;
+                    let duration_str = self.parse_duration_token()?;
+                    let secs = parse_secs_from_duration(&duration_str).ok_or_else(|| {
+                        ParseError::new(
+                            format!(
+                                "invalid stage timeout '{duration_str}': expected an integer number of seconds, e.g. 30s"
+                            ),
+                            self.current_span(),
+                        )
+                    })?;
+                    stage_timeout_secs = Some(secs);
                 }
                 TokenKind::Eof => {
                     return Err(ParseError::new(

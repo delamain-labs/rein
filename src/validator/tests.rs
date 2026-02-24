@@ -107,6 +107,7 @@ fn zero_budget_detected() {
                 span: Span::new(0, 1),
             }),
             guardrails: None,
+            stage_timeout_secs: None,
             span: Span::new(0, 1),
         }],
         workflows: vec![],
@@ -421,4 +422,43 @@ fn model_without_slash_no_provider_warning() {
     );
     let w006: Vec<_> = diags.iter().filter(|d| d.code == "W006").collect();
     assert!(w006.is_empty());
+}
+
+// ── #378: W007 — stage timeout without budget ─────────────────────────────
+
+#[test]
+fn stage_timeout_without_budget_warns() {
+    let diags = validate_src(
+        r#"agent bot {
+            model: openai
+            stage timeout: 30s
+        }"#,
+    );
+    let w007: Vec<_> = diags.iter().filter(|d| d.code == "W007").collect();
+    assert_eq!(w007.len(), 1, "expected W007 warning, got: {diags:?}");
+    assert!(
+        w007[0].message.contains("budget"),
+        "message should mention budget, got: {}",
+        w007[0].message
+    );
+}
+
+#[test]
+fn stage_timeout_with_budget_no_warning() {
+    let diags = validate_src(
+        r#"agent bot {
+            model: openai
+            budget: $0.05 per ticket
+            stage timeout: 30s
+        }"#,
+    );
+    let w007: Vec<_> = diags.iter().filter(|d| d.code == "W007").collect();
+    assert!(w007.is_empty(), "no W007 expected when budget is set");
+}
+
+#[test]
+fn no_stage_timeout_no_w007() {
+    let diags = validate_src("agent bot { model: openai }");
+    let w007: Vec<_> = diags.iter().filter(|d| d.code == "W007").collect();
+    assert!(w007.is_empty());
 }

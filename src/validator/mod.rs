@@ -58,6 +58,7 @@ pub fn validate(file: &ReinFile) -> Vec<Diagnostic> {
         check_constraint_amounts(agent, &mut diags);
         check_duplicate_capabilities(agent, &mut diags);
         check_model_present(agent, &mut diags);
+        check_stage_timeout_without_budget(agent, &mut diags);
     }
     check_agent_model_provider_refs(file, &mut diags);
     check_duplicate_workflow_names(file, &mut diags);
@@ -376,6 +377,22 @@ fn check_agent_model_provider_refs(file: &ReinFile, diags: &mut Vec<Diagnostic>)
                 agent.span.clone(),
             ));
         }
+    }
+}
+
+/// W007: agent sets `stage timeout` without a `budget` — a timeout alone does not cap cost.
+fn check_stage_timeout_without_budget(agent: &AgentDef, diags: &mut Vec<Diagnostic>) {
+    if agent.stage_timeout_secs.is_some() && agent.budget.is_none() {
+        diags.push(Diagnostic::warning(
+            "W007",
+            format!(
+                "agent '{}' sets a stage timeout but has no budget: \
+                 a timeout limits wall-clock time but not cost; \
+                 consider adding a budget to cap spending",
+                agent.name
+            ),
+            agent.span.clone(),
+        ));
     }
 }
 

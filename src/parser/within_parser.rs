@@ -62,7 +62,7 @@ impl Parser {
     }
 
     /// Parse a duration-like token: `2s`, `500ms`, a number followed by ident.
-    fn parse_duration_token(&mut self) -> Result<String, ParseError> {
+    pub(super) fn parse_duration_token(&mut self) -> Result<String, ParseError> {
         if let TokenKind::StringLiteral(s) = self.peek().clone() {
             self.advance();
             return Ok(s);
