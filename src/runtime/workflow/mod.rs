@@ -1102,18 +1102,19 @@ async fn run_step_for_each(
     let mut events: Vec<super::RunEvent> = Vec::new();
 
     for (index, item) in items.iter().enumerate() {
-        // Augment soft errors with iteration context so a `StepFailed` event
-        // identifies which item caused the abort. The `stage` field is set to
-        // `"<step> (iteration N of M)"` so the Display output — and therefore
-        // the `StepFailed.reason` in the event trace — includes the iteration
-        // number. Hard errors (e.g. `ApprovalRejected`) propagate unchanged.
+        // #408: soft errors (AgentNotFound, StageFailed) skip the failing
+        // iteration and continue with the remaining ones rather than aborting.
+        // Hard errors (ApprovalRejected, StageTimedOut, etc.) still propagate.
         let (result, fallback_used) = match run_step_with_fallback(step, item, ctx).await {
             Ok(r) => r,
-            Err(WorkflowError::StageFailed { error, .. }) => {
-                return Err(WorkflowError::StageFailed {
-                    stage: format!("{} (iteration {} of {})", step.name, index + 1, total),
-                    error,
+            Err(e) if !e.is_hard_error() => {
+                events.push(super::RunEvent::ForEachIterationFailed {
+                    step: step.name.clone(),
+                    index,
+                    total,
+                    reason: e.to_string(),
                 });
+                continue;
             }
             Err(e) => return Err(e),
         };

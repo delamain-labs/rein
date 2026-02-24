@@ -3235,12 +3235,16 @@ async fn for_each_step_failure_cascades_to_dependent() {
     );
 }
 
-/// #363/#374 — Partial `for_each` failure: iteration 0 succeeds, iteration 1
-/// fails (provider queue empty → `ProviderError::Api`). The whole step must be
-/// recorded as `StepFailed` and partial results from iteration 0 must be
-/// discarded. All-or-nothing semantics are required by the `for_each` contract.
+/// #363/#374 (updated for #408) — Partial `for_each` failure: iteration 0
+/// succeeds, iteration 1 fails (provider queue empty → `ProviderError::Api`).
+///
+/// Under the #408 per-iteration soft-failure model, the step continues after
+/// a failing iteration rather than aborting. The aggregated output contains
+/// only the successful iterations, and a `ForEachIterationFailed` event is
+/// emitted for the failed one. The step as a whole completes as `Executed`
+/// with the partial output.
 #[tokio::test]
-async fn for_each_partial_failure_discards_completed_iterations() {
+async fn for_each_partial_failure_keeps_successful_iterations() {
     let file = parse_file(r#"agent bot { model: openai }"#);
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
@@ -3274,49 +3278,40 @@ async fn for_each_partial_failure_discards_completed_iterations() {
         workflow_name: None,
     };
 
-    // run_steps returns Ok (soft error), but the step is recorded as failed.
     let (results, events, _) = run_steps(&workflow, &ctx)
         .await
         .expect("soft error must not abort run_steps");
 
-    // The step must be marked as failed, not completed.
     assert_eq!(results.len(), 1);
+    // #408: step is Executed with partial output (not Failed/empty).
     assert_eq!(
         results[0].status,
-        StageResultStatus::Failed,
-        "partial for_each failure must have status Failed"
+        StageResultStatus::Executed,
+        "#408: partial for_each failure must have status Executed"
     );
-    // Partial output from iteration 0 must be discarded.
+    // Output should contain the successful iteration's output.
     assert!(
-        results[0].output.is_empty(),
-        "partial for_each results must be discarded; got: {:?}",
+        results[0].output.contains("iter0_output"),
+        "#408: output must contain successful iteration result; got: {:?}",
         results[0].output
     );
-    // A StepFailed event must be emitted with a non-empty reason and error_kind
-    // "stage_failed". The for_each path wraps iteration errors as
-    // WorkflowError::StageFailed before calling apply_step_result.
+
+    // #408: ForEachIterationFailed event emitted for the failing iteration (index 1).
     assert!(
         events.iter().any(|e| matches!(
             e,
-            crate::runtime::RunEvent::StepFailed { step, reason, .. }
-            if step == "batch" && !reason.is_empty()
+            crate::runtime::RunEvent::ForEachIterationFailed { step, index, .. }
+            if step == "batch" && *index == 1
         )),
-        "expected StepFailed for 'batch' with non-empty reason; events: {events:?}"
+        "#408: expected ForEachIterationFailed for index 1; events: {events:?}"
     );
+
+    // StepCompleted is emitted (the step ran to completion despite one bad iteration).
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            crate::runtime::RunEvent::StepFailed { step, error_kind, .. }
-            if step == "batch" && *error_kind == crate::runtime::StepErrorKind::StageFailed
-        )),
-        "for_each failure must produce error_kind \"stage_failed\"; events: {events:?}"
-    );
-    // No StepCompleted event for the step (it did not complete).
-    assert!(
-        !events.iter().any(
+        events.iter().any(
             |e| matches!(e, crate::runtime::RunEvent::StepCompleted { step } if step == "batch")
         ),
-        "StepCompleted must not be emitted when for_each fails; events: {events:?}"
+        "#408: StepCompleted must be emitted after partial for_each; events: {events:?}"
     );
 }
 
@@ -4514,5 +4509,147 @@ async fn when_skipped_step_does_not_cascade_block_dependents() {
         }),
         "step_c should execute despite step_b being when:-skipped; got events: {:?}",
         result.events
+    );
+}
+
+// ── #408: for_each per-iteration soft failure ─────────────────────────────────
+
+/// #408: When one iteration of a for_each step fails with a soft error
+/// (AgentNotFound), remaining iterations must still execute. The aggregated
+/// result should contain only the outputs from successful iterations.
+#[tokio::test]
+async fn for_each_one_iteration_fails_softly_rest_continue() {
+    // "ghost" agent does not exist (soft error); "bot" succeeds for items b and c.
+    let file = parse_file(r"agent bot { model: openai }");
+    let provider = MockProvider::new();
+    // Only 2 responses — for items b and c (item a uses ghost → AgentNotFound).
+    provider.push_response(simple_response("processed b"));
+    provider.push_response(simple_response("processed c"));
+    let executor = MockExecutor::new();
+
+    // Step uses "ghost" agent — will fail with AgentNotFound for each item.
+    // But wait, we need a step that fails on one item and succeeds on others.
+    // The simplest way: use a step whose agent doesn't exist → all fail.
+    // Better: use a MockProvider that fails on the first call only.
+    // Since AgentNotFound is checked before the provider, use a ghost agent
+    // for all items — they all fail. That tests the "all fail" path.
+    //
+    // To test "one fails, rest continue", we need AgentNotFound on one item
+    // only, which requires the agent to sometimes not exist. Instead, use
+    // a provider that errors on the first call — but StageFailed from provider
+    // errors is also a soft error. Use MockProvider::push_error for the first call.
+    let provider2 = MockProvider::new();
+    provider2.push_error("simulated provider error"); // item a → provider error → StageFailed (soft)
+    provider2.push_response(simple_response("processed b"));
+    provider2.push_response(simple_response("processed c"));
+
+    let step = make_step_for_each("process_items", "bot", "items");
+    let workflow = WorkflowDef {
+        name: "wf".to_string(),
+        trigger: r#"{"items": ["a", "b", "c"]}"#.to_string(),
+        stages: vec![],
+        steps: vec![step],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider2,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    // #408: must succeed (not abort) even though one iteration fails.
+    let (results, events, _) = run_steps(&workflow, &ctx)
+        .await
+        .expect("#408: for_each soft iteration failure must not abort the workflow");
+
+    // Should have one aggregated result.
+    assert_eq!(results.len(), 1, "one aggregated result");
+
+    // Output should contain successful iterations but not the failed one.
+    let output = &results[0].output;
+    assert!(output.contains("processed b"), "missing output for item b");
+    assert!(output.contains("processed c"), "missing output for item c");
+
+    // #408: must emit a ForEachIterationFailed event for the failed iteration.
+    let iter_failed = events.iter().any(|e| {
+        matches!(
+            e,
+            crate::runtime::RunEvent::ForEachIterationFailed { step, index, .. }
+            if step == "process_items" && *index == 0
+        )
+    });
+    assert!(
+        iter_failed,
+        "#408: expected ForEachIterationFailed for index 0; got events: {:?}",
+        events
+    );
+}
+
+/// #408: When ALL iterations of a for_each step fail softly, the step result
+/// must still be Executed with an empty output, and every iteration must
+/// emit ForEachIterationFailed.
+#[tokio::test]
+async fn for_each_all_iterations_fail_softly() {
+    // "ghost" agent doesn't exist → AgentNotFound for every item.
+    let file = parse_file(r"/* no agents */");
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    let step = make_step_for_each("process_items", "ghost", "items");
+    let workflow = WorkflowDef {
+        name: "wf".to_string(),
+        trigger: r#"{"items": ["x", "y"]}"#.to_string(),
+        stages: vec![],
+        steps: vec![step],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let (results, events, _) = run_steps(&workflow, &ctx)
+        .await
+        .expect("#408: all-fail for_each must not abort workflow");
+
+    assert_eq!(results.len(), 1);
+    // With all iterations failing, output should be an empty JSON array.
+    assert_eq!(
+        results[0].output, "[]",
+        "all-fail for_each output must be empty JSON array"
+    );
+
+    // Two ForEachIterationFailed events — one per item.
+    let failed_count = events
+        .iter()
+        .filter(|e| matches!(e, crate::runtime::RunEvent::ForEachIterationFailed { .. }))
+        .count();
+    assert_eq!(
+        failed_count, 2,
+        "#408: expected 2 ForEachIterationFailed events; got events: {:?}",
+        events
     );
 }

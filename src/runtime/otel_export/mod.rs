@@ -394,6 +394,20 @@ fn event_to_span_data(event: &super::RunEvent) -> (String, Vec<OtelAttribute>) {
                 attr_int("rein.step.total", i64::try_from(*total).unwrap_or(-1)),
             ],
         ),
+        RunEvent::ForEachIterationFailed {
+            step,
+            index,
+            total,
+            reason,
+        } => (
+            "rein.step.for_each.iteration_failed".to_string(),
+            vec![
+                attr_str("rein.step.name", step),
+                attr_int("rein.step.index", i64::try_from(*index).unwrap_or(-1)),
+                attr_int("rein.step.total", i64::try_from(*total).unwrap_or(-1)),
+                attr_str("rein.step.reason", reason),
+            ],
+        ),
         RunEvent::AutoResolved { step, condition } => (
             "rein.workflow.auto_resolved".to_string(),
             vec![

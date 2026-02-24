@@ -144,6 +144,20 @@ pub enum RunEvent {
         index: usize,
         total: usize,
     },
+    /// A single iteration of a `for each` step failed with a soft error.
+    ///
+    /// Emitted when `run_step_for_each` skips a failing iteration rather than
+    /// aborting the entire step. Remaining iterations continue to execute.
+    ForEachIterationFailed {
+        /// Name of the `for each` step.
+        step: String,
+        /// Zero-based index of the failed iteration.
+        index: usize,
+        /// Total number of iterations.
+        total: usize,
+        /// Human-readable reason for the failure.
+        reason: String,
+    },
     /// A workflow's `auto resolve` conditions were met; remaining steps skipped.
     AutoResolved {
         step: String,
@@ -566,6 +580,17 @@ fn summarize_event(event: &RunEvent, lines: &mut Vec<String>, turn: &mut usize) 
         RunEvent::ForEachIteration { step, index, total } => {
             lines.push(format!(
                 "  ↻ for each: step '{step}' iteration {}/{total}",
+                index + 1
+            ));
+        }
+        RunEvent::ForEachIterationFailed {
+            step,
+            index,
+            total,
+            reason,
+        } => {
+            lines.push(format!(
+                "  ✗ for each: step '{step}' iteration {}/{total} failed: {reason}",
                 index + 1
             ));
         }
