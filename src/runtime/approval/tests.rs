@@ -865,3 +865,106 @@ async fn slack_handler_truncates_multibyte_boundary_safely() {
         "slack multibyte truncation must end with TRUNCATION_MARKER; got: {output_portion:?}"
     );
 }
+
+// --- #511: resolve_approval_handler webhook/slack in AuditingApprovalHandler path ---
+
+/// #511: When approval_handler is None and channel is "webhook", resolve_approval_handler
+/// must return a WebhookApprovalHandler that, when wrapped by AuditingApprovalHandler,
+/// emits ApprovalRequested + ApprovalResolved audit entries on a successful 2xx response.
+#[tokio::test]
+async fn resolve_handler_webhook_with_audit_log_emits_audit_entries_on_2xx() {
+    use crate::runtime::audit::{AuditKind, AuditLog};
+    use std::sync::Arc;
+    use tempfile::TempDir;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/approval"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let tmp = TempDir::new().unwrap();
+    let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
+
+    // Resolve webhook handler the same way run_step does when approval_handler is None.
+    let url = format!("{}/approval", server.uri());
+    let approval = make_approval_for_channel("webhook", &url);
+    let inner = resolve_approval_handler(&approval);
+    let handler = AuditingApprovalHandler::new(Arc::from(inner), Arc::clone(&log));
+
+    let status = handler
+        .request_approval("deploy", "Agent output here", &approval)
+        .await;
+
+    assert_eq!(
+        status,
+        ApprovalStatus::Approved,
+        "resolved webhook handler must approve on 2xx; got {status:?}"
+    );
+
+    let entries = log.read_all().unwrap();
+    assert_eq!(
+        entries.len(),
+        2,
+        "expected ApprovalRequested + ApprovalResolved; got {} entries",
+        entries.len()
+    );
+    assert_eq!(entries[0].kind, AuditKind::ApprovalRequested);
+    assert_eq!(entries[0].step.as_deref(), Some("deploy"), "step must be set on ApprovalRequested");
+    assert_eq!(entries[1].kind, AuditKind::ApprovalResolved);
+    assert_eq!(entries[1].step.as_deref(), Some("deploy"), "step must be set on ApprovalResolved");
+    assert_eq!(entries[1].metadata["decision"], "approved");
+}
+
+/// #511: When approval_handler is None and channel is "slack", resolve_approval_handler
+/// must return a SlackApprovalHandler that, when wrapped by AuditingApprovalHandler,
+/// emits ApprovalRequested + ApprovalResolved audit entries (slack auto-approves on success).
+#[tokio::test]
+async fn resolve_handler_slack_with_audit_log_emits_audit_entries_on_2xx() {
+    use crate::runtime::audit::{AuditKind, AuditLog};
+    use std::sync::Arc;
+    use tempfile::TempDir;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/slack"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let tmp = TempDir::new().unwrap();
+    let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
+
+    let url = format!("{}/slack", server.uri());
+    let approval = make_approval_for_channel("slack", &url);
+    let inner = resolve_approval_handler(&approval);
+    let handler = AuditingApprovalHandler::new(Arc::from(inner), Arc::clone(&log));
+
+    let status = handler
+        .request_approval("notify", "Agent output here", &approval)
+        .await;
+
+    assert_eq!(
+        status,
+        ApprovalStatus::Approved,
+        "resolved slack handler must auto-approve on 2xx; got {status:?}"
+    );
+
+    let entries = log.read_all().unwrap();
+    assert_eq!(
+        entries.len(),
+        2,
+        "expected ApprovalRequested + ApprovalResolved; got {} entries",
+        entries.len()
+    );
+    assert_eq!(entries[0].kind, AuditKind::ApprovalRequested);
+    assert_eq!(entries[0].step.as_deref(), Some("notify"), "step must be set on ApprovalRequested");
+    assert_eq!(entries[1].kind, AuditKind::ApprovalResolved);
+    assert_eq!(entries[1].step.as_deref(), Some("notify"), "step must be set on ApprovalResolved");
+    assert_eq!(entries[1].metadata["decision"], "approved");
+}

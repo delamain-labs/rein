@@ -273,34 +273,40 @@ impl RunTrace {
         let mut timeout_count = 0u64;
         let has_real_timestamps = self.timestamps_ms.len() == self.events.len();
 
+        // First pass: accumulate counters. Using an explicit `for` loop rather than
+        // a side-effectful `.map()` keeps the counter mutation intent visible (#503).
+        for e in &self.events {
+            match e {
+                RunEvent::LlmCall {
+                    input_tokens,
+                    output_tokens,
+                    cost_cents,
+                    ..
+                } => {
+                    llm_calls += 1;
+                    total_tokens += input_tokens + output_tokens;
+                    total_cost += cost_cents;
+                }
+                RunEvent::ToolCallAttempt { allowed, .. } => {
+                    if *allowed {
+                        tool_calls += 1;
+                    } else {
+                        tool_denied += 1;
+                    }
+                }
+                RunEvent::StageTimeout { .. } => {
+                    timeout_count += 1;
+                }
+                _ => {}
+            }
+        }
+
+        // Second pass: build timestamped events (pure transformation).
         let events: Vec<TimestampedEvent> = self
             .events
             .iter()
             .enumerate()
             .map(|(i, e)| {
-                match e {
-                    RunEvent::LlmCall {
-                        input_tokens,
-                        output_tokens,
-                        cost_cents,
-                        ..
-                    } => {
-                        llm_calls += 1;
-                        total_tokens += input_tokens + output_tokens;
-                        total_cost += cost_cents;
-                    }
-                    RunEvent::ToolCallAttempt { allowed, .. } => {
-                        if *allowed {
-                            tool_calls += 1;
-                        } else {
-                            tool_denied += 1;
-                        }
-                    }
-                    RunEvent::StageTimeout { .. } => {
-                        timeout_count += 1;
-                    }
-                    _ => {}
-                }
                 let offset_ms = if has_real_timestamps {
                     self.timestamps_ms[i]
                 } else {
