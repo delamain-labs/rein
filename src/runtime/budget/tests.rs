@@ -152,6 +152,27 @@ fn multiple_recordings() {
     assert_eq!(tracker.spent_cents(), 90); // unchanged on error
 }
 
+// ── #390: BudgetExceeded struct carries both spent_cents and limit_cents ──
+// These are the exact field values that get written into RunEvent::BudgetUpdate
+// on the exceeded path inside AgentEngine::check_budget().
+
+#[test]
+fn budget_exceeded_carries_spent_and_limit_cents() {
+    let mut tracker = BudgetTracker::new(50);
+    // Push spend close to limit
+    tracker.record_usage(40).expect("ok");
+    // Exceed by 20 (40 spent + 20 new = 60 > 50 limit)
+    let err = tracker.record_usage(20).unwrap_err();
+    assert_eq!(
+        err.limit_cents, 50,
+        "limit_cents must equal the configured budget limit"
+    );
+    assert_eq!(
+        err.spent_cents, 60,
+        "spent_cents must equal the would-be total after the overage"
+    );
+}
+
 #[test]
 fn alert_triggers_at_threshold() {
     let mut tracker = BudgetTracker::with_thresholds(100, vec![50, 80]);

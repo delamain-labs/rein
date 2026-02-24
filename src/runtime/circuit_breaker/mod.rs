@@ -126,6 +126,18 @@ impl CircuitBreaker {
         &self.name
     }
 
+    /// Current failure count within the rolling window.
+    #[must_use]
+    pub fn failure_count(&self) -> u32 {
+        self.count_recent_failures()
+    }
+
+    /// The configured failure threshold at which the breaker trips open.
+    #[must_use]
+    pub fn threshold(&self) -> u32 {
+        self.failure_threshold
+    }
+
     /// Count failures within the current window.
     fn count_recent_failures(&self) -> u32 {
         self.failures.len().try_into().unwrap_or(u32::MAX)

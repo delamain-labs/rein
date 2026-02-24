@@ -524,11 +524,42 @@ pub struct TraceStats {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunError {
-    BudgetExceeded,
+    /// Budget exhausted. Contains events up to and including the final
+    /// `BudgetUpdate` event so callers can inspect exact spent/limit values.
+    ///
+    /// `partial_trace` carries `#[serde(skip)]` — in-process only; wire
+    /// consumers see `{"budget_exceeded": {}}`.
+    ///
+    /// # BREAKING CHANGE
+    /// Prior to adding `partial_trace`, this variant was a unit variant and
+    /// serialized as the bare string `"budget_exceeded"`. It now serializes as
+    /// `{"budget_exceeded": {}}` (an object with an empty body) because serde
+    /// treats struct variants differently from unit variants even when all
+    /// fields are skipped. Consumers that pattern-match on the raw JSON shape
+    /// must update their deserialization logic.
+    BudgetExceeded {
+        #[serde(skip)]
+        partial_trace: RunTrace,
+    },
     PermissionDenied,
     ProviderError,
     ConfigError,
-    CircuitBreakerOpen,
+    /// Circuit breaker tripped. Contains events up to and including the
+    /// `CircuitBreakerTripped` event so callers can inspect failures/threshold.
+    ///
+    /// `partial_trace` carries `#[serde(skip)]` — in-process only; wire
+    /// consumers see `{"circuit_breaker_open": {}}`.
+    ///
+    /// # BREAKING CHANGE
+    /// Prior to adding `partial_trace`, this variant was a unit variant and
+    /// serialized as the bare string `"circuit_breaker_open"`. It now
+    /// serializes as `{"circuit_breaker_open": {}}` (an object with an empty
+    /// body). Consumers that pattern-match on the raw JSON shape must update
+    /// their deserialization logic.
+    CircuitBreakerOpen {
+        #[serde(skip)]
+        partial_trace: RunTrace,
+    },
     GuardrailBlocked,
     EvalFailed,
     /// Provider call exceeded `stage_timeout_secs`. Contains events emitted
@@ -537,6 +568,12 @@ pub enum RunError {
     ///
     /// `partial_trace` carries `#[serde(skip)]` — it is in-process only and
     /// must not appear on the wire. Wire consumers see `{"timeout": {}}`.
+    ///
+    /// # BREAKING CHANGE
+    /// Prior to adding `#[serde(skip)]` to `partial_trace`, this variant
+    /// serialized its events on the wire as `{"timeout": {"events": [...]}}`.
+    /// It now serializes as `{"timeout": {}}` (empty object). Consumers that
+    /// deserialize the raw JSON shape must update their logic.
     Timeout {
         #[serde(skip)]
         partial_trace: RunTrace,
@@ -546,17 +583,19 @@ pub enum RunError {
 impl std::fmt::Display for RunError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::BudgetExceeded => write!(f, "budget exceeded"),
+            Self::BudgetExceeded { .. } => write!(f, "budget exceeded"),
             Self::PermissionDenied => write!(f, "permission denied"),
             Self::ProviderError => write!(f, "provider error"),
             Self::ConfigError => write!(f, "configuration error"),
-            Self::CircuitBreakerOpen => write!(f, "circuit breaker open"),
+            Self::CircuitBreakerOpen { .. } => write!(f, "circuit breaker open"),
             Self::GuardrailBlocked => write!(f, "guardrail blocked"),
             Self::EvalFailed => write!(f, "eval failed"),
             Self::Timeout { .. } => write!(f, "provider timed out"),
         }
     }
 }
+
+impl std::error::Error for RunError {}
 
 #[cfg(test)]
 mod tests;

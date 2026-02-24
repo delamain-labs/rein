@@ -93,3 +93,42 @@ fn threshold_of_one_trips_immediately() {
     cb.record_failure();
     assert_eq!(cb.state(), BreakerState::Open);
 }
+
+// ── #389: failure_count() and threshold() accessors feed CircuitBreakerTripped event ──
+
+#[test]
+fn failure_count_returns_recent_failure_count() {
+    let mut cb = CircuitBreaker::new("svc", 5, 10, 1);
+    assert_eq!(cb.failure_count(), 0);
+    cb.record_failure();
+    assert_eq!(cb.failure_count(), 1);
+    cb.record_failure();
+    assert_eq!(cb.failure_count(), 2);
+}
+
+#[test]
+fn threshold_returns_configured_threshold() {
+    let cb = CircuitBreaker::new("svc", 7, 10, 1);
+    assert_eq!(cb.threshold(), 7);
+}
+
+#[test]
+fn failure_count_and_threshold_match_event_fields_when_tripped() {
+    // Simulates the values that would be written into CircuitBreakerTripped { failures, threshold }
+    let mut cb = CircuitBreaker::new("payments", 3, 10, 1);
+    cb.record_failure();
+    cb.record_failure();
+    cb.record_failure(); // trips at threshold=3
+    assert_eq!(cb.state(), BreakerState::Open);
+    // These are the exact values that would go into the event payload.
+    assert_eq!(
+        cb.failure_count(),
+        3,
+        "failures field must equal recent failure count"
+    );
+    assert_eq!(
+        cb.threshold(),
+        3,
+        "threshold field must equal configured threshold"
+    );
+}
