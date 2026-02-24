@@ -64,6 +64,8 @@ async fn single_stage_workflow() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_response(simple_response("Triaged: low priority"));
@@ -95,6 +97,8 @@ async fn two_stage_pipeline_passes_output() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     // Stage 1: triage
@@ -142,6 +146,8 @@ async fn three_stage_pipeline() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_response(simple_response("output_a"));
@@ -169,6 +175,8 @@ async fn unknown_agent_returns_error() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_response(simple_response("ok"));
@@ -191,6 +199,8 @@ async fn stage_failure_returns_error() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_error("provider down");
@@ -222,6 +232,8 @@ async fn parallel_workflow_runs_all_stages() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_response(simple_response("output_a"));
@@ -251,6 +263,8 @@ async fn parallel_unknown_agent_errors() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     // Queue response for agent "a" so it doesn't fail first
@@ -285,6 +299,8 @@ async fn parallel_workflow_preserves_stage_order() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_response(simple_response("first"));
@@ -315,6 +331,8 @@ async fn run_workflow_dispatches_by_mode() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     // Sequential
@@ -396,6 +414,8 @@ async fn conditional_routes_to_then_stage() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     // triage → escalate (conditional match) → respond (Next from escalate)
@@ -424,6 +444,8 @@ async fn conditional_routes_to_else_stage() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_response(simple_response("Priority: low. Simple question."));
@@ -487,6 +509,8 @@ async fn conditional_no_else_ends_workflow() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_response(simple_response("needs_action: no. All clear."));
@@ -517,6 +541,8 @@ async fn resumable_fresh_run_no_checkpoint() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_response(simple_response("output_a"));
@@ -556,6 +582,8 @@ async fn resumable_resumes_after_first_stage() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     // Only stage b gets a response — if stage a runs it would consume this
@@ -617,6 +645,8 @@ async fn resumable_resumes_mid_pipeline() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     // Only c and d get responses — a and b are replayed from the checkpoint.
@@ -682,6 +712,8 @@ async fn resumable_different_workflow_name_restarts_fresh() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     // Both stages must run — the checkpoint is for a different workflow.
@@ -728,6 +760,8 @@ async fn resumable_conditional_routing_on_resume() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     // Triage is in the checkpoint; only escalate and respond need responses.
@@ -780,6 +814,8 @@ async fn resumable_corrupt_checkpoint_returns_persistence_error() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     let tmp = NamedTempFile::new().unwrap();
@@ -906,6 +942,8 @@ async fn conditional_route_to_nonexistent_stage_errors() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
     provider.push_response(simple_response("priority: high"));
 
@@ -973,6 +1011,8 @@ async fn circular_route_returns_error() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
     provider.push_response(simple_response("go: yes"));
     provider.push_response(simple_response("go: yes"));
@@ -1034,6 +1074,8 @@ async fn step_execution_runs_agent_with_goal() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_response(simple_response("Draft complete!"));
@@ -1105,6 +1147,8 @@ async fn step_with_auto_approve_proceeds() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: Some(Arc::new(AutoApproveHandler)),
+        audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_response(simple_response("Draft approved and complete"));
@@ -1171,6 +1215,8 @@ async fn step_with_auto_reject_returns_error() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: Some(Arc::new(AutoRejectHandler::new("test rejection"))),
+        audit_log: None,
+        workflow_name: None,
     };
 
     let result = run_workflow(&workflow, &ctx).await;
@@ -1230,12 +1276,290 @@ async fn step_without_approval_def_skips_handler() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     provider.push_response(simple_response("Done without approval"));
 
     let result = run_workflow(&workflow, &ctx).await.unwrap();
     assert_eq!(result.final_output, "Done without approval");
+}
+
+// --- #358 Audit log wiring tests ---
+
+#[tokio::test]
+async fn step_with_audit_log_records_approval_events() {
+    use crate::ast::{ApprovalDef, ApprovalKind, Span as AstSpan};
+    use crate::runtime::approval::AutoApproveHandler;
+    use crate::runtime::audit::{AuditKind, AuditLog};
+    use std::sync::Arc;
+
+    let tmp = tempfile::NamedTempFile::new().expect("temp file");
+    let log = Arc::new(AuditLog::new(tmp.path()).expect("AuditLog::new"));
+
+    let file = parse_file(r#"agent writer { model: openai }"#);
+    let workflow = WorkflowDef {
+        name: "audit_test_workflow".to_string(),
+        trigger: "start".to_string(),
+        stages: vec![],
+        steps: vec![crate::ast::StepDef {
+            name: "gated_step".to_string(),
+            agent: "writer".to_string(),
+            goal: None,
+            input: None,
+            output_constraints: vec![],
+            depends_on: vec![],
+            when: None,
+            on_failure: None,
+            send_to: None,
+            fallback: None,
+            for_each: None,
+            typed_input: None,
+            typed_outputs: vec![],
+            escalate: None,
+            approval: Some(ApprovalDef {
+                kind: ApprovalKind::Approve,
+                channel: "cli".to_string(),
+                destination: "#ops".to_string(),
+                timeout: None,
+                mode: None,
+                span: AstSpan::new(0, 1),
+            }),
+            span: AstSpan::new(0, 1),
+        }],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("approved output"));
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: Some(Arc::new(AutoApproveHandler)),
+        audit_log: Some(Arc::clone(&log)),
+        workflow_name: Some("audit_test_workflow".to_string()),
+    };
+
+    let result = run_workflow(&workflow, &ctx)
+        .await
+        .expect("workflow should succeed");
+    assert_eq!(result.final_output, "approved output");
+
+    // The audit log must contain exactly two entries: ApprovalRequested + ApprovalResolved.
+    let entries = log.read_all().expect("read audit log");
+    assert_eq!(
+        entries.len(),
+        2,
+        "expected 2 audit entries, got: {entries:#?}"
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.kind == AuditKind::ApprovalRequested),
+        "missing ApprovalRequested entry"
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.kind == AuditKind::ApprovalResolved),
+        "missing ApprovalResolved entry"
+    );
+    // Both entries must reference the correct workflow and step.
+    for entry in &entries {
+        assert_eq!(entry.workflow.as_deref(), Some("audit_test_workflow"));
+        assert_eq!(entry.step.as_deref(), Some("gated_step"));
+    }
+}
+
+/// #358 — When `audit_log` is `Some` but `workflow_name` is `None`, the audit
+/// entries must have `workflow == None`, not `workflow == Some("")`. An empty
+/// string in the `workflow` field would cause compliance consumers to treat
+/// "no workflow" as a real (but unnamed) workflow.
+#[tokio::test]
+async fn step_with_audit_log_and_no_workflow_name_omits_workflow_field() {
+    use crate::ast::{ApprovalDef, ApprovalKind, Span as AstSpan};
+    use crate::runtime::approval::AutoApproveHandler;
+    use crate::runtime::audit::AuditLog;
+    use std::sync::Arc;
+
+    let tmp = tempfile::NamedTempFile::new().expect("temp file");
+    let log = Arc::new(AuditLog::new(tmp.path()).expect("AuditLog::new"));
+
+    let file = parse_file(r#"agent writer { model: openai }"#);
+    let workflow = WorkflowDef {
+        name: "no_name_workflow".to_string(),
+        trigger: "start".to_string(),
+        stages: vec![],
+        steps: vec![crate::ast::StepDef {
+            name: "gated_step".to_string(),
+            agent: "writer".to_string(),
+            goal: None,
+            input: None,
+            output_constraints: vec![],
+            depends_on: vec![],
+            when: None,
+            on_failure: None,
+            send_to: None,
+            fallback: None,
+            for_each: None,
+            typed_input: None,
+            typed_outputs: vec![],
+            escalate: None,
+            approval: Some(ApprovalDef {
+                kind: ApprovalKind::Approve,
+                channel: "cli".to_string(),
+                destination: "#ops".to_string(),
+                timeout: None,
+                mode: None,
+                span: AstSpan::new(0, 1),
+            }),
+            span: AstSpan::new(0, 1),
+        }],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("output"));
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: Some(Arc::new(AutoApproveHandler)),
+        audit_log: Some(Arc::clone(&log)),
+        workflow_name: None, // intentionally absent
+    };
+
+    run_workflow(&workflow, &ctx)
+        .await
+        .expect("workflow should succeed");
+
+    let entries = log.read_all().expect("read audit log");
+    assert_eq!(
+        entries.len(),
+        2,
+        "expected ApprovalRequested + ApprovalResolved"
+    );
+    for entry in &entries {
+        assert!(
+            entry.workflow.is_none(),
+            "workflow field must be None when workflow_name is not set, got: {:?}",
+            entry.workflow
+        );
+    }
+}
+
+/// #358 — When `audit_log` is `None`, the inner handler is called exactly once.
+/// This pins the no-audit code path: `run_step` must not wrap the handler or
+/// call it more than once when no audit log is configured.
+#[tokio::test]
+async fn step_without_audit_log_calls_handler_exactly_once() {
+    use crate::ast::{ApprovalDef, ApprovalKind, Span as AstSpan};
+    use crate::runtime::approval::{ApprovalHandler, ApprovalStatus};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingHandler(Arc<AtomicUsize>);
+
+    #[async_trait::async_trait]
+    impl ApprovalHandler for CountingHandler {
+        async fn request_approval(
+            &self,
+            _step: &str,
+            _output: &str,
+            _approval: &crate::ast::ApprovalDef,
+        ) -> ApprovalStatus {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            ApprovalStatus::Approved
+        }
+    }
+
+    let call_count = Arc::new(AtomicUsize::new(0));
+    let handler: Arc<dyn ApprovalHandler> = Arc::new(CountingHandler(Arc::clone(&call_count)));
+
+    let file = parse_file(r#"agent writer { model: openai }"#);
+    let workflow = WorkflowDef {
+        name: "no_audit_workflow".to_string(),
+        trigger: "start".to_string(),
+        stages: vec![],
+        steps: vec![crate::ast::StepDef {
+            name: "gated_step".to_string(),
+            agent: "writer".to_string(),
+            goal: None,
+            input: None,
+            output_constraints: vec![],
+            depends_on: vec![],
+            when: None,
+            on_failure: None,
+            send_to: None,
+            fallback: None,
+            for_each: None,
+            typed_input: None,
+            typed_outputs: vec![],
+            escalate: None,
+            approval: Some(ApprovalDef {
+                kind: ApprovalKind::Approve,
+                channel: "cli".to_string(),
+                destination: String::new(),
+                timeout: None,
+                mode: None,
+                span: AstSpan::new(0, 1),
+            }),
+            span: AstSpan::new(0, 1),
+        }],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("done"));
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: Some(handler),
+        audit_log: None, // no audit log — no AuditingApprovalHandler wrapping
+        workflow_name: None,
+    };
+
+    run_workflow(&workflow, &ctx)
+        .await
+        .expect("workflow should succeed");
+
+    // The handler must be called exactly once — not zero times (skipped) or
+    // twice (double-delegation bug).
+    assert_eq!(
+        call_count.load(Ordering::Relaxed),
+        1,
+        "inner handler must be called exactly once when audit_log is None"
+    );
 }
 
 // --- #303 DAG depends_on Tests ---
@@ -1352,6 +1676,8 @@ async fn workflow_steps_respect_depends_on_order() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     // a runs first, b runs second
@@ -1457,6 +1783,8 @@ async fn step_fallback_runs_on_primary_failure() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     let (results, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
@@ -1499,6 +1827,8 @@ async fn step_without_fallback_propagates_error() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     let err = run_steps(&workflow, &ctx).await.unwrap_err();
@@ -1540,6 +1870,8 @@ async fn step_for_each_iterates_over_array() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     // Input with a JSON array keyed by "items".
@@ -1614,6 +1946,8 @@ async fn workflow_auto_resolve_short_circuits_on_condition_met() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     let (results, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
@@ -1675,6 +2009,8 @@ async fn workflow_auto_resolve_does_not_short_circuit_when_condition_unmet() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     let (results, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
@@ -1738,6 +2074,8 @@ async fn auto_resolve_empty_conditions_does_not_short_circuit() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
 
     let (results, events) = run_steps(&workflow, &ctx)
@@ -1778,6 +2116,8 @@ async fn run_sequential_populates_events() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
     provider.push_response(simple_response("done"));
 
@@ -1817,6 +2157,8 @@ async fn run_parallel_populates_events() {
         tool_defs: &[],
         config: &RunConfig::default(),
         approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
     };
     provider.push_response(simple_response("from_a"));
     provider.push_response(simple_response("from_b"));

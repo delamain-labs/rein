@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use crate::ast::{ApprovalDef, ApprovalKind};
+use crate::runtime::audit::{self, AuditKind, AuditLog};
 
 #[cfg(test)]
 mod tests;
@@ -268,6 +271,171 @@ impl ApprovalHandler for SlackApprovalHandler {
 
         // MVP: notify-and-auto-approve. Interactive callbacks are v2.
         ApprovalStatus::Approved
+    }
+}
+
+/// Wraps any `ApprovalHandler` (as an `Arc<dyn ApprovalHandler>`) and emits
+/// `ApprovalRequested` / `ApprovalResolved` audit entries before and after
+/// each approval decision.
+///
+/// Accepting `Arc<dyn ApprovalHandler>` directly (rather than a generic `H:
+/// ApprovalHandler`) eliminates the blanket impl on `Arc<dyn ApprovalHandler>`
+/// that would have been required to bridge the generic and the trait-object
+/// injection site in `run_step`. Callers wrap concrete handlers with
+/// `Arc::new(handler)` before passing them here.
+///
+/// This is the canonical way to add audit trails to approval flows — callers
+/// construct the appropriate inner handler and wrap it here.
+pub struct AuditingApprovalHandler {
+    inner: Arc<dyn ApprovalHandler>,
+    log: Arc<AuditLog>,
+    workflow_name: Option<String>,
+    agent_name: Option<String>,
+}
+
+impl AuditingApprovalHandler {
+    #[must_use]
+    pub fn new(inner: Arc<dyn ApprovalHandler>, log: Arc<AuditLog>) -> Self {
+        Self {
+            inner,
+            log,
+            workflow_name: None,
+            agent_name: None,
+        }
+    }
+
+    /// Attach a workflow name to every audit entry emitted by this handler.
+    #[must_use]
+    pub fn with_workflow(mut self, name: impl Into<String>) -> Self {
+        self.workflow_name = Some(name.into());
+        self
+    }
+
+    /// Attach an agent name to every audit entry emitted by this handler.
+    #[must_use]
+    pub fn with_agent(mut self, name: impl Into<String>) -> Self {
+        self.agent_name = Some(name.into());
+        self
+    }
+}
+
+#[async_trait::async_trait]
+impl ApprovalHandler for AuditingApprovalHandler {
+    async fn request_approval(
+        &self,
+        step_name: &str,
+        agent_output: &str,
+        approval: &ApprovalDef,
+    ) -> ApprovalStatus {
+        // Emit ApprovalRequested before delegating.
+        let mut requested = audit::entry(
+            AuditKind::ApprovalRequested,
+            format!("Approval requested for step '{step_name}'"),
+        );
+        requested.step = Some(step_name.to_string());
+        requested.workflow = self.workflow_name.clone();
+        requested.agent = self.agent_name.clone();
+        let mut req_meta = serde_json::json!({
+            "channel": approval.channel,
+        });
+        if let Some(ref t) = approval.timeout {
+            req_meta["timeout"] = serde_json::Value::String(t.clone());
+        }
+        requested.metadata = req_meta;
+        if let Err(e) = self.log.append(&requested) {
+            // TODO(#377): replace with tracing::warn! once the `tracing` crate
+            // is added to Cargo.toml.
+            eprintln!(
+                "rein[audit]: warning: could not write ApprovalRequested entry \
+                 (step='{}', workflow='{}'): {e}",
+                step_name,
+                self.workflow_name.as_deref().unwrap_or("<none>")
+            );
+        }
+        // Start the clock after writing ApprovalRequested so elapsed_ms
+        // captures only the gate-open time: from the moment the approval is
+        // visible to the handler until it returns its decision. Including the
+        // I/O write time would misrepresent the approval latency for compliance
+        // consumers that compare elapsed_ms against SLA thresholds.
+        let start = std::time::Instant::now();
+        let status = self
+            .inner
+            .request_approval(step_name, agent_output, approval)
+            .await;
+
+        // Saturate at u64::MAX rather than failing; a run long enough to
+        // overflow (~585 million years) is not realistic in practice.
+        #[allow(clippy::cast_possible_truncation)]
+        let elapsed_ms = start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+        let decision = match &status {
+            ApprovalStatus::Approved => "approved",
+            ApprovalStatus::Rejected { .. } => "rejected",
+            // Both TimedOut and Pending are raised as WorkflowError::ApprovalTimedOut
+            // by the workflow engine (see workflow/mod.rs — the match arm that handles
+            // ApprovalStatus::TimedOut | ApprovalStatus::Pending). Recording "timed_out"
+            // for both ensures compliance consumers do not incorrectly infer the workflow
+            // is still running when it has already been terminated. The raw handler status
+            // is preserved in the "original_status" field (see below) so operators can
+            // distinguish a genuine timeout from a Pending return without affecting
+            // compliance parsers. If the engine ever adds a resume path for Pending, this
+            // mapping must be revisited.
+            ApprovalStatus::TimedOut | ApprovalStatus::Pending => "timed_out",
+        };
+        // Record the raw handler status separately from the compliance-stable
+        // `decision` field. This preserves diagnostic fidelity: an operator can
+        // distinguish a genuine timeout from a `Pending` return (e.g. a
+        // misconfigured async handler) without affecting compliance parsers.
+        let original_status = match &status {
+            ApprovalStatus::Approved => "approved",
+            ApprovalStatus::Rejected { .. } => "rejected",
+            ApprovalStatus::TimedOut => "timed_out",
+            ApprovalStatus::Pending => "pending",
+        };
+        // Capture the rejection reason if present so the audit record can
+        // reconstruct _why_ an approval was rejected (not just that it was).
+        let rejection_reason = match &status {
+            ApprovalStatus::Rejected { reason } => Some(reason.as_str()),
+            _ => None,
+        };
+
+        // Emit ApprovalResolved after delegating.
+        let mut resolved = audit::entry(
+            AuditKind::ApprovalResolved,
+            format!("Approval resolved for step '{step_name}': {decision}"),
+        );
+        resolved.step = Some(step_name.to_string());
+        resolved.workflow.clone_from(&self.workflow_name);
+        resolved.agent.clone_from(&self.agent_name);
+        let mut meta = serde_json::json!({
+            "channel": approval.channel,
+            "decision": decision,
+            "elapsed_ms": elapsed_ms,
+        });
+        // Only include "reason" for rejected decisions; omitting the key for
+        // approved/timed-out outcomes avoids a noisy `null` in audit records.
+        if let Some(r) = rejection_reason {
+            meta["reason"] = serde_json::Value::String(r.to_string());
+        }
+        // Include "original_status" only when it diverges from "decision" —
+        // i.e., when the handler returned Pending but the compliance field
+        // shows "timed_out". This allows operators to diagnose handler
+        // misconfigurations without disrupting compliance consumers.
+        if original_status != decision {
+            meta["original_status"] = serde_json::Value::String(original_status.to_string());
+        }
+        resolved.metadata = meta;
+        if let Err(e) = self.log.append(&resolved) {
+            // TODO(#377): replace with tracing::warn! once the `tracing` crate
+            // is added to Cargo.toml.
+            eprintln!(
+                "rein[audit]: warning: could not write ApprovalResolved entry \
+                 (step='{}', workflow='{}', decision='{decision}'): {e}",
+                step_name,
+                self.workflow_name.as_deref().unwrap_or("<none>")
+            );
+        }
+
+        status
     }
 }
 

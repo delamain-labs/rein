@@ -83,6 +83,9 @@ enum Command {
         /// Output trace as OpenTelemetry-compatible JSON
         #[arg(long)]
         otel: bool,
+        /// Write approval audit events to a JSONL file at the given path
+        #[arg(long)]
+        audit_log: Option<std::path::PathBuf>,
     },
     /// Run scenario and eval blocks in a .rein file
     ///
@@ -145,9 +148,16 @@ async fn main() {
             dry_run,
             demo,
             otel,
+            audit_log,
         } => {
-            let exit_code =
-                commands::run::run_agent(&file, message.as_deref(), dry_run, demo, otel);
+            let exit_code = commands::run::run_agent(
+                &file,
+                message.as_deref(),
+                dry_run,
+                demo,
+                otel,
+                audit_log.as_deref(),
+            );
             process::exit(exit_code);
         }
         Command::Eval {
