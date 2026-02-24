@@ -418,6 +418,11 @@ fn event_to_span_data(event: &super::RunEvent) -> (String, Vec<OtelAttribute>) {
         RunEvent::StageTimeout { turn, timeout_secs } => (
             "rein.stage.timeout".to_string(),
             vec![
+                // `rein.stage.turn` is intentionally 0-indexed — it stores the
+                // raw loop-counter value for machine consumers (OTEL dashboards,
+                // alerting rules). The human-readable summary adds +1 for display
+                // (see `summarize_event`). Do not change this to 1-indexed: it
+                // would break existing OTEL queries.
                 // -1 signals overflow (same convention as rein.step.index): both
                 // turn and timeout_secs are non-negative in domain, so -1 is
                 // clearly out-of-range and distinguishable from a legitimate value.
