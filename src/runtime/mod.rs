@@ -174,8 +174,20 @@ pub enum RunEvent {
         /// `"stage_failed"`). Mapped from the underlying `WorkflowError` variant at
         /// the emit site. OTEL dashboards and alerting rules should use this field
         /// rather than parsing `reason` with regex.
+        ///
+        /// Defaults to `"unknown"` when deserializing JSON produced before this field
+        /// was added, so consumers can replay persisted event streams without errors.
+        #[serde(default = "default_error_kind")]
         error_kind: String,
     },
+}
+
+/// Default value for `StepFailed::error_kind` when deserializing JSON that predates the field.
+///
+/// Returning `"unknown"` rather than `""` makes it detectable by consumers
+/// (an empty string is ambiguous — was it explicitly set to empty or was it missing?).
+fn default_error_kind() -> String {
+    "unknown".to_string()
 }
 
 /// An ordered log of all events that occurred during a run.

@@ -3295,7 +3295,10 @@ async fn step_failed_carries_error_kind_agent_not_found() {
 #[tokio::test]
 async fn step_failed_carries_error_kind_stage_failed() {
     let file = parse_file("agent worker { model: openai }");
-    // Provider that returns a network error → triggers StageFailed (soft error).
+    // Provider that returns a network error (ProviderError::Network) → run_stage maps it to
+    // RunError::Provider → WorkflowError::StageFailed (the soft-error path). It is NOT a
+    // timeout, so it does not produce WorkflowError::StageTimedOut (hard error). This mapping
+    // is the source of the expected error_kind "stage_failed".
     let provider = MockProvider::new();
     provider.push_error("simulated network failure");
     let executor = MockExecutor::new();
