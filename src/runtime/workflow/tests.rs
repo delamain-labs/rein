@@ -3833,6 +3833,8 @@ async fn soft_error_does_not_emit_workflow_aborted() {
     use crate::runtime::RunEvent;
 
     // "nonexistent" agent → AgentNotFound → soft error (run_steps returns Ok)
+    // `agent bot` is defined so the file parses successfully; the step
+    // deliberately references "nonexistent" (absent) to trigger AgentNotFound.
     let file = parse_file(r#"agent bot { model: openai }"#);
     let workflow = make_workflow_steps(
         "soft_wf",
@@ -3860,5 +3862,88 @@ async fn soft_error_does_not_emit_workflow_aborted() {
             .iter()
             .any(|e| matches!(e, RunEvent::WorkflowAborted { .. })),
         "WorkflowAborted must NOT be emitted for soft errors; events: {events:?}"
+    );
+}
+
+/// #506: Stage-based hard errors (e.g. CircularRoute from run_sequential) must
+/// also produce a WorkflowAborted event so OTEL consumers see the abort cause
+/// symmetrically with step-based hard errors.
+#[tokio::test]
+async fn run_workflow_emits_workflow_aborted_on_stage_hard_error() {
+    use crate::runtime::RunEvent;
+
+    let file = parse_file(
+        r"
+        agent a { model: openai }
+        agent b { model: openai }
+    ",
+    );
+
+    // a routes to b, b routes back to a → CircularRoute hard error
+    let workflow = WorkflowDef {
+        name: "circular".to_string(),
+        trigger: "event".to_string(),
+        stages: vec![
+            Stage {
+                name: "a".to_string(),
+                agent: "a".to_string(),
+                route: RouteRule::Conditional {
+                    field: "go".to_string(),
+                    matcher: ConditionMatcher::Equals("yes".to_string()),
+                    then_stage: "b".to_string(),
+                    else_stage: None,
+                },
+                span: Span::new(0, 1),
+            },
+            Stage {
+                name: "b".to_string(),
+                agent: "b".to_string(),
+                route: RouteRule::Conditional {
+                    field: "go".to_string(),
+                    matcher: ConditionMatcher::Equals("yes".to_string()),
+                    then_stage: "a".to_string(),
+                    else_stage: None,
+                },
+                span: Span::new(0, 1),
+            },
+        ],
+        steps: vec![],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+    provider.push_response(simple_response("go: yes"));
+    provider.push_response(simple_response("go: yes"));
+
+    let (err, partial_events) = run_workflow(&workflow, &ctx)
+        .await
+        .expect_err("CircularRoute must cause run_workflow to return Err");
+
+    assert!(
+        matches!(err, WorkflowError::CircularRoute(_)),
+        "expected CircularRoute; got: {err:?}"
+    );
+    assert!(
+        partial_events
+            .iter()
+            .any(|e| matches!(e, RunEvent::WorkflowAborted { .. })),
+        "WorkflowAborted must be emitted for stage-based hard errors; events: {partial_events:?}"
     );
 }

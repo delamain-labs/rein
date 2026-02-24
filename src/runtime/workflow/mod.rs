@@ -1135,10 +1135,20 @@ pub async fn run_workflow(
     ctx: &WorkflowContext<'_>,
 ) -> Result<WorkflowResult, (WorkflowError, Vec<super::RunEvent>)> {
     let mut result = match workflow.mode {
-        ExecutionMode::Sequential => run_sequential(workflow, ctx)
-            .await
-            .map_err(|e| (e, vec![]))?,
-        ExecutionMode::Parallel => run_parallel(workflow, ctx).await.map_err(|e| (e, vec![]))?,
+        ExecutionMode::Sequential => run_sequential(workflow, ctx).await.map_err(|e| {
+            let aborted = super::RunEvent::WorkflowAborted {
+                error_kind: e.kind_str().to_string(),
+                reason: e.to_string(),
+            };
+            (e, vec![aborted])
+        })?,
+        ExecutionMode::Parallel => run_parallel(workflow, ctx).await.map_err(|e| {
+            let aborted = super::RunEvent::WorkflowAborted {
+                error_kind: e.kind_str().to_string(),
+                reason: e.to_string(),
+            };
+            (e, vec![aborted])
+        })?,
     };
 
     // Execute step blocks if present

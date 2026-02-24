@@ -277,8 +277,16 @@ fn run_workflow_mode(
             // Exit 2: hard abort — see Err arm below.
             i32::from(failed_count > 0 || skipped_count > 0)
         }
-        Err((e, _partial_events)) => {
+        Err((e, partial_events)) => {
             eprintln!("Workflow failed: {e}");
+            // Emit any partial events (e.g. WorkflowAborted) collected before
+            // the abort so users and OTEL consumers can see the abort cause.
+            if !partial_events.is_empty() {
+                eprintln!(
+                    "{}",
+                    rein::runtime::RunTrace::summarize_events(&partial_events)
+                );
+            }
             // Exit 2: hard abort (policy rejection, cyclic deps, infra failure).
             // Distinct from exit 1 (partial success) so shell consumers can
             // tell whether the workflow completed with some failures vs. was
