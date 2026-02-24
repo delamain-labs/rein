@@ -345,7 +345,12 @@ impl ApprovalHandler for AuditingApprovalHandler {
         if let Err(e) = self.log.append(&requested) {
             // TODO(#377): replace with tracing::warn! once the `tracing` crate
             // is added to Cargo.toml.
-            eprintln!("rein[audit]: warning: could not write ApprovalRequested entry: {e}");
+            eprintln!(
+                "rein[audit]: warning: could not write ApprovalRequested entry \
+                 (step='{}', workflow='{}'): {e}",
+                step_name,
+                self.workflow_name.as_deref().unwrap_or("<none>")
+            );
         }
         // Start the clock after writing ApprovalRequested so elapsed_ms
         // captures only the gate-open time: from the moment the approval is
@@ -422,7 +427,12 @@ impl ApprovalHandler for AuditingApprovalHandler {
         if let Err(e) = self.log.append(&resolved) {
             // TODO(#377): replace with tracing::warn! once the `tracing` crate
             // is added to Cargo.toml.
-            eprintln!("rein[audit]: warning: could not write ApprovalResolved entry: {e}");
+            eprintln!(
+                "rein[audit]: warning: could not write ApprovalResolved entry \
+                 (step='{}', workflow='{}', decision='{decision}'): {e}",
+                step_name,
+                self.workflow_name.as_deref().unwrap_or("<none>")
+            );
         }
 
         status

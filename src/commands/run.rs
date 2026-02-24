@@ -63,13 +63,17 @@ pub fn run_agent(
         }
     };
 
+    // Build permission registry from agent capabilities.
     let registry = rein::runtime::permissions::ToolRegistry::from_agent(agent);
+
+    // Build run config.
     let config = rein::runtime::engine::RunConfig {
         system_prompt: None,
         max_turns: 10,
         budget_cents: agent.budget.as_ref().map_or(0, |b| b.amount),
     };
 
+    // Build engine with enforcement.
     let executor = rein::runtime::executor::NoopExecutor;
     let mut engine = rein::runtime::engine::AgentEngine::new(
         provider.as_ref(),
@@ -80,16 +84,19 @@ pub fn run_agent(
     )
     .with_stream(Box::new(rein::runtime::engine::StdoutStream));
 
+    // Attach guardrails if defined.
     if let Some(ref guardrails_def) = agent.guardrails {
         let guardrail_engine = rein::runtime::guardrails::GuardrailEngine::from_def(guardrails_def);
         engine = engine.with_guardrails(guardrail_engine);
     }
 
+    // Attach circuit breaker if defined.
     if let Some(cb_def) = file.circuit_breakers.first() {
         let cb = rein::runtime::circuit_breaker::CircuitBreaker::from_def(cb_def);
         engine = engine.with_circuit_breaker(cb);
     }
 
+    // Resolve and inject secrets if defined.
     if !file.secrets.is_empty() {
         match resolve_secrets(&file.secrets) {
             Ok(map) => engine = engine.with_secrets(map),
@@ -101,14 +108,16 @@ pub fn run_agent(
     if let Some(policy_def) = file.policies.first() {
         let policy = rein::runtime::policy::PolicyEngine::from_def(policy_def);
         eprintln!(
-            "Policy: tier '{}' ({} total)",
+            "Policy: starting at tier '{}' ({} tiers defined)",
             policy.current_tier(),
             policy.tier_count()
         );
         engine = engine.with_policy(policy);
     }
 
-    // Prefer the observe block matching the agent name; fall back to the first.
+    // Resolve OTEL mode from an observe block (matched by agent name, falling back to first)
+    // or the --otel flag. `observe` blocks are file-level so we prefer the one whose name
+    // matches the running agent; if none match, we take the first block as a file-wide default.
     let obs = file
         .observes
         .iter()

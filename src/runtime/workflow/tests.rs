@@ -1382,6 +1382,92 @@ async fn step_with_audit_log_records_approval_events() {
     }
 }
 
+/// #358 — When `audit_log` is `Some` but `workflow_name` is `None`, the audit
+/// entries must have `workflow == None`, not `workflow == Some("")`. An empty
+/// string in the `workflow` field would cause compliance consumers to treat
+/// "no workflow" as a real (but unnamed) workflow.
+#[tokio::test]
+async fn step_with_audit_log_and_no_workflow_name_omits_workflow_field() {
+    use crate::ast::{ApprovalDef, ApprovalKind, Span as AstSpan};
+    use crate::runtime::approval::AutoApproveHandler;
+    use crate::runtime::audit::AuditLog;
+    use std::sync::Arc;
+
+    let tmp = tempfile::NamedTempFile::new().expect("temp file");
+    let log = Arc::new(AuditLog::new(tmp.path()).expect("AuditLog::new"));
+
+    let file = parse_file(r#"agent writer { model: openai }"#);
+    let workflow = WorkflowDef {
+        name: "no_name_workflow".to_string(),
+        trigger: "start".to_string(),
+        stages: vec![],
+        steps: vec![crate::ast::StepDef {
+            name: "gated_step".to_string(),
+            agent: "writer".to_string(),
+            goal: None,
+            input: None,
+            output_constraints: vec![],
+            depends_on: vec![],
+            when: None,
+            on_failure: None,
+            send_to: None,
+            fallback: None,
+            for_each: None,
+            typed_input: None,
+            typed_outputs: vec![],
+            escalate: None,
+            approval: Some(ApprovalDef {
+                kind: ApprovalKind::Approve,
+                channel: "cli".to_string(),
+                destination: "#ops".to_string(),
+                timeout: None,
+                mode: None,
+                span: AstSpan::new(0, 1),
+            }),
+            span: AstSpan::new(0, 1),
+        }],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("output"));
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: Some(Arc::new(AutoApproveHandler)),
+        audit_log: Some(Arc::clone(&log)),
+        workflow_name: None, // intentionally absent
+    };
+
+    run_workflow(&workflow, &ctx)
+        .await
+        .expect("workflow should succeed");
+
+    let entries = log.read_all().expect("read audit log");
+    assert_eq!(
+        entries.len(),
+        2,
+        "expected ApprovalRequested + ApprovalResolved"
+    );
+    for entry in &entries {
+        assert!(
+            entry.workflow.is_none(),
+            "workflow field must be None when workflow_name is not set, got: {:?}",
+            entry.workflow
+        );
+    }
+}
+
 /// #358 — When `audit_log` is `None`, the inner handler is called exactly once.
 /// This pins the no-audit code path: `run_step` must not wrap the handler or
 /// call it more than once when no audit log is configured.
