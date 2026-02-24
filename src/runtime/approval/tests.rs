@@ -1089,3 +1089,75 @@ async fn resolve_handler_slack_with_audit_log_emits_audit_entries_on_2xx() {
     );
     assert_eq!(entries[1].metadata["decision"], "approved");
 }
+
+/// #527: with_workflow and with_agent must propagate to all audit entries
+/// emitted through the resolve_approval_handler path.
+#[tokio::test]
+async fn resolve_handler_webhook_with_workflow_and_agent_propagates_to_audit_entries() {
+    use crate::runtime::audit::{AuditKind, AuditLog};
+    use std::sync::Arc;
+    use tempfile::TempDir;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/approval"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let tmp = TempDir::new().unwrap();
+    let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
+
+    let url = format!("{}/approval", server.uri());
+    let approval = make_approval_for_channel("webhook", &url);
+    let inner = resolve_approval_handler(&approval);
+    let handler = AuditingApprovalHandler::new(Arc::from(inner), Arc::clone(&log))
+        .with_workflow("my_workflow")
+        .with_agent("deployer");
+
+    let status = handler
+        .request_approval("deploy", "Agent output here", &approval)
+        .await;
+
+    assert_eq!(
+        status,
+        ApprovalStatus::Approved,
+        "handler must approve on 2xx; got {status:?}"
+    );
+
+    let entries = log.read_all().unwrap();
+    assert_eq!(
+        entries.len(),
+        2,
+        "expected ApprovalRequested + ApprovalResolved; got {} entries",
+        entries.len()
+    );
+
+    // Both entries must carry the workflow and agent set via the builder.
+    assert_eq!(entries[0].kind, AuditKind::ApprovalRequested);
+    assert_eq!(
+        entries[0].workflow.as_deref(),
+        Some("my_workflow"),
+        "ApprovalRequested must carry workflow from with_workflow()"
+    );
+    assert_eq!(
+        entries[0].agent.as_deref(),
+        Some("deployer"),
+        "ApprovalRequested must carry agent from with_agent()"
+    );
+
+    assert_eq!(entries[1].kind, AuditKind::ApprovalResolved);
+    assert_eq!(
+        entries[1].workflow.as_deref(),
+        Some("my_workflow"),
+        "ApprovalResolved must carry workflow from with_workflow()"
+    );
+    assert_eq!(
+        entries[1].agent.as_deref(),
+        Some("deployer"),
+        "ApprovalResolved must carry agent from with_agent()"
+    );
+    assert_eq!(entries[1].metadata["decision"], "approved");
+}
