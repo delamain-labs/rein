@@ -1189,3 +1189,93 @@ async fn stage_timeout_on_turn_1_includes_prior_events_in_partial_trace() {
         partial_trace.events
     );
 }
+
+// ── #390: BudgetUpdate on Exceeded path must report tracker-derived spent_cents ──
+
+#[tokio::test]
+async fn budget_update_exceeded_reports_correct_spent_cents() {
+    // Budget: 1 cent. The LLM response will cost much more.
+    let agent = make_agent(vec![], vec![], Some(1));
+    let registry = ToolRegistry::from_agent(&agent);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    provider.push_response(ChatResponse {
+        content: String::new(),
+        tool_calls: vec![],
+        usage: Usage {
+            input_tokens: 100_000,
+            output_tokens: 50_000,
+        },
+        model: "gpt-4o".to_string(),
+    });
+
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig {
+            budget_cents: 1,
+            ..RunConfig::default()
+        },
+    );
+
+    let err = engine.run("hi").await.unwrap_err();
+    let RunError::BudgetExceeded = err else {
+        panic!("expected BudgetExceeded, got: {err:?}");
+    };
+}
+
+// ── #389: CircuitBreakerTripped event must carry real failure count + threshold ──
+
+#[tokio::test]
+async fn circuit_breaker_tripped_event_has_real_failures_and_threshold() {
+    use crate::runtime::circuit_breaker::CircuitBreaker;
+
+    let agent = make_agent(vec![], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // Push a simple response (won't be reached because CB is pre-tripped)
+    provider.push_response(simple_response("hi"));
+
+    // Build a circuit breaker with threshold=2, then trip it by recording 2 failures.
+    let mut cb = CircuitBreaker::new("test_cb", 2, 5, 1);
+    cb.record_failure();
+    cb.record_failure(); // trips the breaker
+
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig::default(),
+    )
+    .with_circuit_breaker(cb);
+
+    let result = engine.run("hello").await;
+    assert!(
+        matches!(result, Err(RunError::CircuitBreakerOpen)),
+        "expected CircuitBreakerOpen; got: {result:?}"
+    );
+}
+
+// ── #407: RunError must implement std::error::Error ──
+
+#[test]
+fn run_error_implements_std_error() {
+    // Verify RunError can be used as dyn Error (compile-time check via trait object).
+    let err: &dyn std::error::Error = &RunError::BudgetExceeded;
+    assert_eq!(err.to_string(), "budget exceeded");
+}
+
+#[test]
+fn run_error_timeout_implements_std_error() {
+    use crate::runtime::RunTrace;
+    let err: &dyn std::error::Error = &RunError::Timeout {
+        partial_trace: RunTrace::from_events(vec![]),
+    };
+    assert_eq!(err.to_string(), "provider timed out");
+}

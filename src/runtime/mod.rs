@@ -558,5 +558,7 @@ impl std::fmt::Display for RunError {
     }
 }
 
+impl std::error::Error for RunError {}
+
 #[cfg(test)]
 mod tests;

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use super::budget::{BudgetTracker, calculate_cost};
+use super::budget::{BudgetExceeded, BudgetTracker, calculate_cost};
 use super::circuit_breaker::CircuitBreaker;
 use super::executor::{Secrets, ToolExecutor};
 use super::guardrails::GuardrailEngine;
@@ -277,8 +277,8 @@ impl<'a> AgentEngine<'a> {
                 if let Err(_reason) = cb.check() {
                     state.push(RunEvent::CircuitBreakerTripped {
                         name: cb.name().to_string(),
-                        failures: 0,
-                        threshold: 0,
+                        failures: cb.failure_count(),
+                        threshold: cb.threshold(),
                     });
                     return Err(RunError::CircuitBreakerOpen);
                 }
@@ -317,7 +317,7 @@ impl<'a> AgentEngine<'a> {
                 cost_cents: cost,
             });
 
-            self.check_budget(&mut state, cost)?;
+            Self::check_budget(&mut state, cost)?;
 
             self.evaluate_policy(&mut state);
 
@@ -414,7 +414,7 @@ impl<'a> AgentEngine<'a> {
     }
 
     /// Check budget and record the cost. Returns `Err` if exceeded.
-    fn check_budget(&self, state: &mut RunState, cost: u64) -> Result<(), RunError> {
+    fn check_budget(state: &mut RunState, cost: u64) -> Result<(), RunError> {
         /// Outcome of a single budget check, carrying the event to emit.
         enum BudgetOutcome {
             /// Budget updated and still within limit.
@@ -426,16 +426,18 @@ impl<'a> AgentEngine<'a> {
         }
 
         let outcome = if let Some(ref mut tracker) = state.budget {
-            if tracker.record_usage(cost).is_err() {
-                BudgetOutcome::Exceeded(RunEvent::BudgetUpdate {
-                    spent_cents: state.total_cost_cents,
-                    limit_cents: self.config.budget_cents,
-                })
-            } else {
-                BudgetOutcome::WithinLimit(RunEvent::BudgetUpdate {
+            match tracker.record_usage(cost) {
+                Err(BudgetExceeded {
+                    spent_cents,
+                    limit_cents,
+                }) => BudgetOutcome::Exceeded(RunEvent::BudgetUpdate {
+                    spent_cents,
+                    limit_cents,
+                }),
+                Ok(()) => BudgetOutcome::WithinLimit(RunEvent::BudgetUpdate {
                     spent_cents: tracker.spent_cents(),
                     limit_cents: tracker.limit_cents(),
-                })
+                }),
             }
         } else {
             BudgetOutcome::NoBudget
