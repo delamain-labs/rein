@@ -1601,10 +1601,12 @@ async fn step_with_audit_log_and_no_injected_handler_uses_resolved_handler() {
             escalate: None,
             approval: Some(ApprovalDef {
                 kind: ApprovalKind::Approve,
-                // "cli" routes through resolve_approval_handler → CliApprovalHandler,
-                // which auto-approves in test environments.
+                // "cli" routes through resolve_approval_handler → CliApprovalHandler.
+                // CliApprovalHandler reads stdin; in non-interactive CI stdin is EOF
+                // so it returns ApprovalRejected. That is expected — the test goal is
+                // to confirm the Arc::from + AuditingApprovalHandler wrapping path.
                 channel: "cli".to_string(),
-                destination: "".to_string(),
+                destination: "#ops".to_string(),
                 timeout: None,
                 mode: None,
                 span: AstSpan::new(0, 1),
@@ -1635,12 +1637,27 @@ async fn step_with_audit_log_and_no_injected_handler_uses_resolved_handler() {
         workflow_name: Some("no_handler_wf".to_string()),
     };
 
-    // The resolved CliApprovalHandler reads stdin; in a non-interactive test,
-    // stdin is empty so it rejects. That is expected — the goal of this test is
-    // not to verify approval outcome but to confirm:
+    // The resolved CliApprovalHandler reads stdin; in non-interactive CI, stdin
+    // is EOF so read_line returns Ok(0) → empty string → Rejected. Wrap in a
+    // timeout so the test fails fast (with a clear message) rather than hanging
+    // if stdin is not closed in some CI configurations.
+    //
+    // The goal is not to verify approval outcome but to confirm:
     //   (a) no panic from the Arc::from(Box<dyn ApprovalHandler>) conversion,
     //   (b) AuditingApprovalHandler wraps the resolved handler and writes entries.
-    let _ = run_workflow(&workflow, &ctx).await;
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        run_workflow(&workflow, &ctx),
+    )
+    .await
+    .expect("test timed out — CliApprovalHandler may be blocking on stdin");
+
+    // CliApprovalHandler rejects on EOF stdin; assert the specific error so a
+    // failure here (e.g., AgentNotFound before approval) surfaces clearly.
+    assert!(
+        matches!(result, Err(WorkflowError::ApprovalRejected { .. })),
+        "expected ApprovalRejected from CliApprovalHandler on empty stdin; got: {result:?}"
+    );
 
     // Both audit entries must be present even on rejection: AuditingApprovalHandler
     // writes ApprovalRequested before delegating and ApprovalResolved after.
