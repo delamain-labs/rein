@@ -58,8 +58,9 @@ fn collect_traces_from_dir(dir: &Path) -> Result<Vec<StructuredTrace>, std::io::
 }
 
 fn print_summary(traces: &[StructuredTrace]) {
-    // Errors writing to stdout are unrecoverable in a CLI context — unwrap.
-    print_summary_to(traces, &mut io::stdout().lock()).unwrap();
+    // Errors writing to stdout are unrecoverable in a CLI context.
+    print_summary_to(traces, &mut io::stdout().lock())
+        .expect("failed to write cost summary to stdout");
 }
 
 /// Write the cost summary to `out`.
@@ -204,7 +205,9 @@ mod tests {
     /// so scripted consumers see a stable output shape.
     #[test]
     fn print_summary_always_includes_stage_timeouts_when_zero() {
-        let traces = vec![make_trace("bot", 100, 500)]; // timeout_count = 0
+        let mut trace = make_trace("bot", 100, 500);
+        trace.stats.timeout_count = 0; // explicit, not relying on make_trace default
+        let traces = vec![trace];
         let mut buf = Vec::new();
         print_summary_to(&traces, &mut buf).unwrap();
         let output = String::from_utf8(buf).unwrap();
@@ -229,6 +232,7 @@ mod tests {
     }
 
     /// #510: run_cost must succeed (exit 0) when traces include StageTimeout events.
+    /// Stage timeouts: N is now always printed regardless of count (#520).
     #[test]
     fn test_run_cost_with_timeouts_exits_zero() {
         let tmp = TempDir::new().unwrap();
