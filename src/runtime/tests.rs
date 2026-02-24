@@ -819,7 +819,7 @@ fn structured_trace_has_stats() {
         "2024-01-01T00:01:00Z",
         60000,
     );
-    assert_eq!(structured.version, "1.0");
+    assert_eq!(structured.version, crate::runtime::TRACE_SCHEMA_VERSION);
     assert_eq!(structured.agent, "test_agent");
     assert_eq!(structured.stats.total_tokens, 150);
     assert_eq!(structured.stats.total_cost_cents, 2);
@@ -834,7 +834,7 @@ fn structured_trace_serializes_to_json() {
     let trace = RunTrace::from_events(vec![]);
     let structured = trace.to_structured("agent", "t0", "t1", 0);
     let json = serde_json::to_string(&structured).unwrap();
-    assert!(json.contains("\"version\":\"1.0\""));
+    assert!(json.contains(&format!("\"version\":\"{}\"", crate::runtime::TRACE_SCHEMA_VERSION)));
     assert!(json.contains("\"agent\":\"agent\""));
 }
 
@@ -1145,4 +1145,31 @@ fn step_error_kind_deserializes_unknown_to_unknown() {
     use crate::runtime::StepErrorKind;
     let kind: StepErrorKind = serde_json::from_str("\"future_variant\"").unwrap();
     assert_eq!(kind, StepErrorKind::Unknown, "unknown strings must map to Unknown");
+}
+
+/// #392: RunTrace.to_structured must use the public TRACE_SCHEMA_VERSION constant,
+/// not a hardcoded string literal.
+#[test]
+fn structured_trace_version_matches_schema_constant() {
+    let trace = RunTrace::default();
+    let structured = trace.to_structured("agent", "t0", "t1", 0);
+    assert_eq!(
+        structured.version,
+        crate::runtime::TRACE_SCHEMA_VERSION,
+        "StructuredTrace.version must equal TRACE_SCHEMA_VERSION constant"
+    );
+}
+
+/// #392: TRACE_SCHEMA_VERSION must be a valid semver string (major.minor.patch).
+#[test]
+fn trace_schema_version_is_semver() {
+    let v = crate::runtime::TRACE_SCHEMA_VERSION;
+    let parts: Vec<&str> = v.split('.').collect();
+    assert_eq!(parts.len(), 3, "TRACE_SCHEMA_VERSION must be major.minor.patch; got: {v}");
+    for part in parts {
+        assert!(
+            part.parse::<u32>().is_ok(),
+            "each semver part must be a non-negative integer; got: {part}"
+        );
+    }
 }

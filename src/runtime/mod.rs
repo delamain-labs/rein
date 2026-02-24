@@ -31,6 +31,17 @@ pub mod workflow;
 
 use serde::{Deserialize, Serialize};
 
+/// Schema version for [`StructuredTrace`] JSON output.
+///
+/// Increment the **minor** component when new `RunEvent` variants or
+/// `TraceStats` fields are added (additive, backwards-compatible).
+/// Increment the **major** component when existing fields are removed,
+/// renamed, or their semantics change in a breaking way.
+///
+/// Downstream consumers can inspect `StructuredTrace::version` to select
+/// a compatible parser and emit a clear error for unsupported versions.
+pub const TRACE_SCHEMA_VERSION: &str = "1.1.0";
+
 /// A tool invocation requested by the agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
@@ -384,7 +395,7 @@ impl RunTrace {
             .collect();
 
         StructuredTrace {
-            version: "1.0".to_string(),
+            version: TRACE_SCHEMA_VERSION.to_string(),
             started_at: started_at.to_string(),
             completed_at: completed_at.to_string(),
             agent: agent_name.to_string(),
