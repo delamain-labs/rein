@@ -568,6 +568,12 @@ pub enum RunError {
     ///
     /// `partial_trace` carries `#[serde(skip)]` — it is in-process only and
     /// must not appear on the wire. Wire consumers see `{"timeout": {}}`.
+    ///
+    /// # BREAKING CHANGE
+    /// Prior to adding `#[serde(skip)]` to `partial_trace`, this variant
+    /// serialized its events on the wire as `{"timeout": {"events": [...]}}`.
+    /// It now serializes as `{"timeout": {}}` (empty object). Consumers that
+    /// deserialize the raw JSON shape must update their logic.
     Timeout {
         #[serde(skip)]
         partial_trace: RunTrace,

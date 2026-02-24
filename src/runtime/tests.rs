@@ -456,6 +456,16 @@ fn run_error_budget_exceeded_roundtrips() {
         partial_trace: RunTrace::from_events(vec![]),
     };
     let json = serde_json::to_string(&err).expect("serialize");
+    let v: serde_json::Value = serde_json::from_str(&json).expect("parse");
+    assert!(
+        v["budget_exceeded"].is_object(),
+        "expected {{\"budget_exceeded\": {{}}}} shape, got: {v}"
+    );
+    // partial_trace must NOT appear on the wire.
+    assert!(
+        v["budget_exceeded"].get("partial_trace").is_none(),
+        "partial_trace must not be serialized; got: {v}"
+    );
     let back: RunError = serde_json::from_str(&json).expect("deserialize");
     assert!(matches!(back, RunError::BudgetExceeded { .. }));
 }
