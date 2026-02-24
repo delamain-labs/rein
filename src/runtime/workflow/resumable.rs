@@ -87,19 +87,21 @@ pub async fn run_sequential_resumable(
     let mut visited: HashSet<&str> = skip_stages.iter().map(String::as_str).collect();
     let mut current_stage = find_resume_start(workflow, checkpoint.as_ref(), &skip_stages)?;
     let mut all_events: Vec<super::super::RunEvent> = Vec::new();
+    let mut all_timestamps: Vec<u64> = Vec::new();
 
     while let Some(stage) = current_stage {
         if !visited.insert(&stage.name) {
             return Err(WorkflowError::CircularRoute(stage.name.clone()));
         }
 
-        let (result, stage_events) =
+        let (result, stage_events, stage_timestamps) =
             run_stage(&stage.name, &stage.agent, &current_input, ctx).await?;
 
         current_input.clone_from(&result.output);
         let output = result.output.clone();
         stage_results.push(result);
         all_events.extend(stage_events);
+        all_timestamps.extend(stage_timestamps);
 
         let state = WorkflowState {
             version: persistence::WORKFLOW_STATE_VERSION,
@@ -129,5 +131,10 @@ pub async fn run_sequential_resumable(
         .map(|r| r.output.clone())
         .unwrap_or_default();
 
-    Ok(build_result(stage_results, final_output, all_events))
+    Ok(build_result(
+        stage_results,
+        final_output,
+        all_events,
+        all_timestamps,
+    ))
 }

@@ -312,6 +312,14 @@ async fn integration_sequential_workflow() {
     assert_eq!(result.stage_results[0].agent_name, "classifier");
     assert_eq!(result.stage_results[1].agent_name, "responder");
     assert!(result.final_output.contains("billing issue"));
+
+    // #388: event_timestamps_ms must be parallel to events — no silent drop of
+    // timing data when events flow through WorkflowResult.
+    assert_eq!(
+        result.event_timestamps_ms.len(),
+        result.events.len(),
+        "event_timestamps_ms must have one entry per event"
+    );
 }
 
 #[tokio::test]
