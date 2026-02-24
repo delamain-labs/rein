@@ -475,6 +475,18 @@ fn event_to_span_data(event: &super::RunEvent) -> (String, Vec<OtelAttribute>) {
                 attr_str("rein.step.error_kind", &error_kind.to_string()),
             ],
         ),
+        RunEvent::SecretFallback {
+            binding,
+            vault_path,
+            fallback_env_var,
+        } => (
+            "rein.secret.fallback".to_string(),
+            vec![
+                attr_str("rein.secret.binding", binding),
+                attr_str("rein.secret.vault_path", vault_path),
+                attr_str("rein.secret.fallback_env_var", fallback_env_var),
+            ],
+        ),
         RunEvent::WorkflowAborted {
             error_kind, reason, ..
         } => (

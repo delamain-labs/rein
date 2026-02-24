@@ -1160,6 +1160,44 @@ fn structured_trace_version_matches_schema_constant() {
     );
 }
 
+// --- #384: SecretFallback event ---
+
+/// #384: SecretFallback must serialize with `"type": "secret_fallback"` and
+/// all three fields (binding, vault_path, fallback_env_var) present.
+#[test]
+fn secret_fallback_event_serializes_with_type_tag() {
+    let event = RunEvent::SecretFallback {
+        binding: "api_key".to_string(),
+        vault_path: "secret/api".to_string(),
+        fallback_env_var: "VAULT_SECRET_API".to_string(),
+    };
+    let v: serde_json::Value = serde_json::to_value(&event).expect("serialize");
+    assert_eq!(v["type"], "secret_fallback");
+    assert_eq!(v["binding"], "api_key");
+    assert_eq!(v["vault_path"], "secret/api");
+    assert_eq!(v["fallback_env_var"], "VAULT_SECRET_API");
+}
+
+/// #384: summarize_events must mention the binding name and the fallback env var
+/// so operators scanning the trace can identify which secret used a fallback.
+#[test]
+fn secret_fallback_event_summarizes_with_binding_and_env_var() {
+    let event = RunEvent::SecretFallback {
+        binding: "db_pass".to_string(),
+        vault_path: "secret/prod/db".to_string(),
+        fallback_env_var: "VAULT_SECRET_PROD_DB".to_string(),
+    };
+    let summary = RunTrace::summarize_events(&[event]);
+    assert!(
+        summary.contains("db_pass"),
+        "summary must mention binding name; got: {summary}"
+    );
+    assert!(
+        summary.contains("VAULT_SECRET_PROD_DB"),
+        "summary must mention fallback env var; got: {summary}"
+    );
+}
+
 /// #392: TRACE_SCHEMA_VERSION must be a valid semver string (major.minor.patch).
 #[test]
 fn trace_schema_version_is_semver() {
