@@ -195,17 +195,23 @@ pub(crate) fn write_cli_prompt(
     }
     writeln!(out, "╠══════════════════════════════════════════╣")?;
     writeln!(out, "║  Agent output:")?;
-    // Cap at AGENT_OUTPUT_PREVIEW_LIMIT bytes — consistent with webhook/Slack/audit (#514).
-    let preview = truncate_agent_output(agent_output);
-    for line in preview.lines() {
+    // Truncate for display without appending TRUNCATION_MARKER so the notice
+    // below is the single, explicit truncation signal rather than two overlapping
+    // ones ("… (truncated)" in content AND a separate notice line).
+    let truncated = agent_output.len() > AGENT_OUTPUT_PREVIEW_LIMIT;
+    let display = if truncated {
+        let cut = agent_output.floor_char_boundary(AGENT_OUTPUT_PREVIEW_LIMIT);
+        &agent_output[..cut]
+    } else {
+        agent_output
+    };
+    for line in display.lines() {
         writeln!(out, "║  {line}")?;
     }
     writeln!(out, "╚══════════════════════════════════════════╝")?;
-    // INVARIANT: truncate_agent_output returns Cow::Owned only when a cut was made.
-    // If that function is ever changed to return Owned for other reasons (e.g. normalisation),
-    // this detection would silently lie — update both the detection and this comment then.
-    // The notice is printed outside the box to avoid overflowing the fixed-width border (#522).
-    if matches!(preview, Cow::Owned(_)) {
+    // Print the notice outside the box so it does not overflow the fixed-width
+    // border (#522). This is the sole truncation signal in the CLI path.
+    if truncated {
         writeln!(
             out,
             "  [output truncated — {AGENT_OUTPUT_PREVIEW_LIMIT} bytes shown of {} total]",
