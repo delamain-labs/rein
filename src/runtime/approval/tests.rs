@@ -404,10 +404,11 @@ async fn auditing_handler_records_pending_decision() {
     let entries = log.read_all().unwrap();
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[1].kind, AuditKind::ApprovalResolved);
-    // Pending maps to "timed_out" in the audit record because the workflow
-    // engine terminates Pending the same way as TimedOut (ApprovalTimedOut error).
-    // Recording "pending" would mislead compliance consumers into thinking the
-    // workflow is still running when it has already been terminated.
+    // Pending maps to "timed_out" in the audit record for compliance-field
+    // stability. As of #419, Pending maps to WorkflowError::ApprovalPending
+    // (not ApprovalTimedOut as before). The audit record still writes "timed_out"
+    // so compliance consumers are not disrupted; the actual handler status is
+    // preserved in the separate "original_status" field (see assertion below).
     assert_eq!(
         entries[1].metadata["decision"], "timed_out",
         "pending decision must be recorded as timed_out in metadata"

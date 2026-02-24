@@ -132,6 +132,14 @@ pub enum WorkflowError {
     ApprovalRejected { step: String, reason: String },
     /// A step's approval gate timed out.
     ApprovalTimedOut { step: String },
+    /// A step's approval gate returned `Pending` (deferred / async approval).
+    ///
+    /// `Pending` means the approval has been dispatched to an async channel
+    /// (e.g. Slack Block Kit, webhook) but no synchronous answer was received.
+    /// The workflow cannot continue without a decision, so it aborts
+    /// immediately. Callers should surface the step name so the operator can
+    /// resubmit once the external approval is resolved.
+    ApprovalPending { step: String },
     /// A cyclic dependency was detected in step `depends_on` declarations.
     CyclicDependency(String),
 }
@@ -154,6 +162,12 @@ impl std::fmt::Display for WorkflowError {
             }
             Self::ApprovalTimedOut { step } => {
                 write!(f, "approval timed out for step '{step}'")
+            }
+            Self::ApprovalPending { step } => {
+                write!(
+                    f,
+                    "approval pending for step '{step}' - workflow aborted; retry after external approval is resolved"
+                )
             }
             Self::CyclicDependency(detail) => {
                 write!(f, "Cycle detected in workflow step dependencies: {detail}")
@@ -189,6 +203,7 @@ impl WorkflowError {
             // next stage too — abort early rather than silently continuing.
             Self::ApprovalRejected { .. }
             | Self::ApprovalTimedOut { .. }
+            | Self::ApprovalPending { .. }
             | Self::CyclicDependency(_)
             | Self::CircularRoute(_)
             | Self::PersistenceFailure(_)
@@ -534,8 +549,13 @@ pub async fn run_step(
                     reason,
                 });
             }
-            ApprovalStatus::TimedOut | ApprovalStatus::Pending => {
+            ApprovalStatus::TimedOut => {
                 return Err(WorkflowError::ApprovalTimedOut {
+                    step: step.name.clone(),
+                });
+            }
+            ApprovalStatus::Pending => {
+                return Err(WorkflowError::ApprovalPending {
                     step: step.name.clone(),
                 });
             }
@@ -696,7 +716,7 @@ fn apply_step_result(
 ///   dependent steps are skipped; hard errors abort the workflow.
 /// - If `workflow.auto_resolve` conditions are met after a step, remaining
 ///   steps are short-circuited.
-/// - Hard errors (`ApprovalRejected`, `ApprovalTimedOut`, `CyclicDependency`)
+/// - Hard errors (`ApprovalRejected`, `ApprovalTimedOut`, `ApprovalPending`, `CyclicDependency`)
 ///   abort the workflow immediately. Soft errors record the failure and continue.
 ///
 /// # Errors
