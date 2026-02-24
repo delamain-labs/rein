@@ -423,6 +423,16 @@ Guardrails use named sections (e.g., `output_filter`, `safety`) containing key-v
 
 ✅ Enforced at runtime. Output is checked after each LLM response; matching content is blocked or redacted.
 
+> **Security notice — guardrails are heuristics, not classifiers.**
+>
+> `pii_detection`, `toxicity`, and `prompt_injection` are implemented using keyword and pattern matching. They are **not** ML classifiers and can be evaded by:
+> - Rephrasing or misspelling trigger terms
+> - Using synonyms, leetspeak, or Unicode homoglyphs
+> - Splitting sensitive content across multiple responses
+> - Encoding content in base64 or other encodings
+>
+> Do not rely on Rein guardrails as your sole security control in production. For adversarial or high-stakes environments, supplement with an LLM-based content classifier (e.g., a dedicated safety model or moderation API call) that runs on the raw output before it reaches downstream systems.
+
 ---
 
 ## Circuit Breaker
