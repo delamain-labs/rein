@@ -326,18 +326,19 @@ impl<'a> AgentEngine<'a> {
                 cost_cents: cost,
             });
 
-            if let Err(e) = Self::check_budget(&mut state, cost) {
-                // Export partial OTEL trace on budget exhaustion so
-                // observability hooks capture the partial run (#479).
-                if let RunError::BudgetExceeded { ref partial_trace } = e {
-                    self.export_partial(
-                        partial_trace,
-                        state.total_tokens,
-                        state.total_cost_cents,
-                        run_start.elapsed(),
-                    );
-                }
-                return Err(e);
+            if Self::check_budget(&mut state, cost).is_err() {
+                // Build partial trace and export OTEL snapshot before returning,
+                // consistent with the CircuitBreakerOpen and Timeout error paths.
+                let partial = RunTrace::from_events(std::mem::take(&mut state.events));
+                self.export_partial(
+                    &partial,
+                    state.total_tokens,
+                    state.total_cost_cents,
+                    run_start.elapsed(),
+                );
+                return Err(RunError::BudgetExceeded {
+                    partial_trace: partial,
+                });
             }
 
             self.evaluate_policy(&mut state);
@@ -434,8 +435,15 @@ impl<'a> AgentEngine<'a> {
         }
     }
 
-    /// Check budget and record the cost. Returns `Err` if exceeded.
-    fn check_budget(state: &mut RunState, cost: u64) -> Result<(), RunError> {
+    /// Check budget and record the cost.
+    ///
+    /// Pushes a [`RunEvent::BudgetUpdate`] to `state` then returns `Err(())`
+    /// if the budget is exhausted. The caller is responsible for snapshotting
+    /// `state.events` into a `RunTrace`, calling [`Self::export_partial`], and
+    /// constructing the [`RunError::BudgetExceeded`] — keeping this function a
+    /// pure validator consistent with the `CircuitBreakerOpen` and `Timeout`
+    /// error paths in [`Self::run`].
+    fn check_budget(state: &mut RunState, cost: u64) -> Result<(), ()> {
         /// Outcome of a single budget check, carrying the event to emit.
         enum BudgetOutcome {
             /// Budget updated and still within limit.
@@ -466,10 +474,7 @@ impl<'a> AgentEngine<'a> {
         match outcome {
             BudgetOutcome::Exceeded(event) => {
                 state.push(event);
-                let partial = RunTrace::from_events(std::mem::take(&mut state.events));
-                return Err(RunError::BudgetExceeded {
-                    partial_trace: partial,
-                });
+                return Err(());
             }
             BudgetOutcome::WithinLimit(event) => state.push(event),
             BudgetOutcome::NoBudget => {}

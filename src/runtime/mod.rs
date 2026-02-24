@@ -529,6 +529,14 @@ pub enum RunError {
     ///
     /// `partial_trace` carries `#[serde(skip)]` — in-process only; wire
     /// consumers see `{"budget_exceeded": {}}`.
+    ///
+    /// # BREAKING CHANGE
+    /// Prior to adding `partial_trace`, this variant was a unit variant and
+    /// serialized as the bare string `"budget_exceeded"`. It now serializes as
+    /// `{"budget_exceeded": {}}` (an object with an empty body) because serde
+    /// treats struct variants differently from unit variants even when all
+    /// fields are skipped. Consumers that pattern-match on the raw JSON shape
+    /// must update their deserialization logic.
     BudgetExceeded {
         #[serde(skip)]
         partial_trace: RunTrace,
@@ -541,6 +549,13 @@ pub enum RunError {
     ///
     /// `partial_trace` carries `#[serde(skip)]` — in-process only; wire
     /// consumers see `{"circuit_breaker_open": {}}`.
+    ///
+    /// # BREAKING CHANGE
+    /// Prior to adding `partial_trace`, this variant was a unit variant and
+    /// serialized as the bare string `"circuit_breaker_open"`. It now
+    /// serializes as `{"circuit_breaker_open": {}}` (an object with an empty
+    /// body). Consumers that pattern-match on the raw JSON shape must update
+    /// their deserialization logic.
     CircuitBreakerOpen {
         #[serde(skip)]
         partial_trace: RunTrace,

@@ -121,6 +121,14 @@ fn failure_count_and_threshold_match_event_fields_when_tripped() {
     cb.record_failure(); // trips at threshold=3
     assert_eq!(cb.state(), BreakerState::Open);
     // These are the exact values that would go into the event payload.
-    assert_eq!(cb.failure_count(), 3, "failures field must equal recent failure count");
-    assert_eq!(cb.threshold(), 3, "threshold field must equal configured threshold");
+    assert_eq!(
+        cb.failure_count(),
+        3,
+        "failures field must equal recent failure count"
+    );
+    assert_eq!(
+        cb.threshold(),
+        3,
+        "threshold field must equal configured threshold"
+    );
 }

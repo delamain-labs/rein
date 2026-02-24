@@ -163,8 +163,14 @@ fn budget_exceeded_carries_spent_and_limit_cents() {
     tracker.record_usage(40).expect("ok");
     // Exceed by 20 (40 spent + 20 new = 60 > 50 limit)
     let err = tracker.record_usage(20).unwrap_err();
-    assert_eq!(err.limit_cents, 50, "limit_cents must equal the configured budget limit");
-    assert_eq!(err.spent_cents, 60, "spent_cents must equal the would-be total after the overage");
+    assert_eq!(
+        err.limit_cents, 50,
+        "limit_cents must equal the configured budget limit"
+    );
+    assert_eq!(
+        err.spent_cents, 60,
+        "spent_cents must equal the would-be total after the overage"
+    );
 }
 
 #[test]
