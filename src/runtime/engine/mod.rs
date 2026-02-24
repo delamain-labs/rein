@@ -281,6 +281,12 @@ impl<'a> AgentEngine<'a> {
                         threshold: cb.threshold(),
                     });
                     let partial = RunTrace::from_events(std::mem::take(&mut state.events));
+                    self.export_partial(
+                        &partial,
+                        state.total_tokens,
+                        state.total_cost_cents,
+                        run_start.elapsed(),
+                    );
                     return Err(RunError::CircuitBreakerOpen {
                         partial_trace: partial,
                     });
@@ -320,7 +326,19 @@ impl<'a> AgentEngine<'a> {
                 cost_cents: cost,
             });
 
-            Self::check_budget(&mut state, cost)?;
+            if let Err(e) = Self::check_budget(&mut state, cost) {
+                // Export partial OTEL trace on budget exhaustion so
+                // observability hooks capture the partial run (#479).
+                if let RunError::BudgetExceeded { ref partial_trace } = e {
+                    self.export_partial(
+                        partial_trace,
+                        state.total_tokens,
+                        state.total_cost_cents,
+                        run_start.elapsed(),
+                    );
+                }
+                return Err(e);
+            }
 
             self.evaluate_policy(&mut state);
 

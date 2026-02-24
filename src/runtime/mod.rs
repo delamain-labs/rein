@@ -526,7 +526,11 @@ pub struct TraceStats {
 pub enum RunError {
     /// Budget exhausted. Contains events up to and including the final
     /// `BudgetUpdate` event so callers can inspect exact spent/limit values.
+    ///
+    /// `partial_trace` carries `#[serde(skip)]` — in-process only; wire
+    /// consumers see `{"budget_exceeded": {}}`.
     BudgetExceeded {
+        #[serde(skip)]
         partial_trace: RunTrace,
     },
     PermissionDenied,
@@ -534,7 +538,11 @@ pub enum RunError {
     ConfigError,
     /// Circuit breaker tripped. Contains events up to and including the
     /// `CircuitBreakerTripped` event so callers can inspect failures/threshold.
+    ///
+    /// `partial_trace` carries `#[serde(skip)]` — in-process only; wire
+    /// consumers see `{"circuit_breaker_open": {}}`.
     CircuitBreakerOpen {
+        #[serde(skip)]
         partial_trace: RunTrace,
     },
     GuardrailBlocked,

@@ -487,8 +487,9 @@ fn run_error_config_error_roundtrips() {
 #[test]
 fn run_error_serializes_as_snake_case() {
     // Unit variants use #[serde(rename_all = "snake_case")] and serialize as
-    // bare strings, preserving the existing wire format. Struct variants
-    // (`BudgetExceeded`, `CircuitBreakerOpen`, `Timeout`) serialize as objects.
+    // bare strings. Struct variants (`BudgetExceeded`, `CircuitBreakerOpen`,
+    // `Timeout`) serialize as `{"variant": {}}` — empty object because
+    // partial_trace carries #[serde(skip)].
     let v: serde_json::Value = serde_json::to_value(RunError::BudgetExceeded {
         partial_trace: RunTrace::from_events(vec![]),
     })
@@ -542,6 +543,28 @@ fn run_error_timeout_partial_trace_not_on_wire() {
             .is_none(),
         "partial_trace must not appear in serialized RunError; got: {v}"
     );
+}
+
+// #479: CircuitBreakerOpen must roundtrip through serde.
+// partial_trace carries #[serde(skip)] so it is not present on the wire.
+#[test]
+fn run_error_circuit_breaker_open_roundtrips() {
+    let err = RunError::CircuitBreakerOpen {
+        partial_trace: RunTrace::from_events(vec![]),
+    };
+    let json = serde_json::to_string(&err).expect("serialize");
+    let v: serde_json::Value = serde_json::from_str(&json).expect("parse");
+    assert!(
+        v["circuit_breaker_open"].is_object(),
+        "expected {{\"circuit_breaker_open\": {{}}}} shape, got: {v}"
+    );
+    // partial_trace must NOT appear on the wire.
+    assert!(
+        v["circuit_breaker_open"].get("partial_trace").is_none(),
+        "partial_trace must not be serialized; got: {v}"
+    );
+    let back: RunError = serde_json::from_str(&json).expect("deserialize");
+    assert!(matches!(back, RunError::CircuitBreakerOpen { .. }));
 }
 
 // ── RunTrace output ────────────────────────────────────────────────────────
