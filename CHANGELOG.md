@@ -62,6 +62,15 @@ grouped by type: **Breaking**, **Added**, **Changed**, **Fixed**, **Removed**.
 - Partial OTEL traces from timed-out stages now carry
   `rein.run.partial = "true"` on the root span. (#430)
 
+- `RunEvent::StepFailed` now carries an `error_kind: String` field — a
+  stable `snake_case` identifier for the failure mode (e.g.
+  `"agent_not_found"`, `"stage_failed"`). OTEL dashboards and alerting
+  rules can filter on the new `rein.step.error_kind` span attribute
+  instead of parsing the human-readable `reason` string with regex.
+
+  Deserializes as `"unknown"` from JSON produced before this field was
+  added, so replaying persisted event streams does not break. (#452)
+
 ### Fixed
 
 - `StageTimeout` display now uses 1-indexed turn numbers (consistent with

@@ -61,7 +61,7 @@ pub struct ToolResult {
 /// fn handle(event: RunEvent) {
 ///     match event {
 ///         RunEvent::LlmCall { cost_cents, .. } => { /* ... */ }
-///         RunEvent::StepFailed { step, reason } => { /* ... */ }
+///         RunEvent::StepFailed { step, error_kind, .. } => { /* ... */ }
 ///         _ => {} // required — new variants may be added in minor versions
 ///     }
 /// }
@@ -175,7 +175,24 @@ pub enum RunEvent {
         step: String,
         /// Human-readable error description.
         reason: String,
+        /// Machine-parseable error category in `snake_case` (e.g. `"agent_not_found"`,
+        /// `"stage_failed"`). Mapped from the underlying `WorkflowError` variant at
+        /// the emit site. OTEL dashboards and alerting rules should use this field
+        /// rather than parsing `reason` with regex.
+        ///
+        /// Defaults to `"unknown"` when deserializing JSON produced before this field
+        /// was added, so consumers can replay persisted event streams without errors.
+        #[serde(default = "default_error_kind")]
+        error_kind: String,
     },
+}
+
+/// Default value for `StepFailed::error_kind` when deserializing JSON that predates the field.
+///
+/// Returning `"unknown"` rather than `""` makes it detectable by consumers
+/// (an empty string is ambiguous — was it explicitly set to empty or was it missing?).
+fn default_error_kind() -> String {
+    "unknown".to_string()
 }
 
 /// An ordered log of all events that occurred during a run.
@@ -477,7 +494,7 @@ fn summarize_event(event: &RunEvent, lines: &mut Vec<String>, turn: &mut usize) 
         RunEvent::StepCompleted { step } => {
             lines.push(format!("  ✓ step '{step}' completed"));
         }
-        RunEvent::StepFailed { step, reason } => {
+        RunEvent::StepFailed { step, reason, .. } => {
             lines.push(format!("  ✗ step '{step}' failed: {reason}"));
         }
         RunEvent::StageTimeout { turn, timeout_secs } => {
