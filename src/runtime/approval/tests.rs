@@ -1262,7 +1262,10 @@ fn byte_truncation_cut_returns_valid_char_boundary_for_multibyte_input() {
     let prefix_len = AGENT_OUTPUT_PREVIEW_LIMIT - 1;
     let prefix = "a".repeat(prefix_len);
     let long = format!("{prefix}中extra");
-    assert!(long.len() > AGENT_OUTPUT_PREVIEW_LIMIT, "test string must exceed limit");
+    assert!(
+        long.len() > AGENT_OUTPUT_PREVIEW_LIMIT,
+        "test string must exceed limit"
+    );
     let cut = byte_truncation_cut(&long).expect("must return Some for overlong input");
     // The cut must be at a valid char boundary.
     assert!(
@@ -1279,5 +1282,163 @@ fn byte_truncation_cut_returns_valid_char_boundary_for_multibyte_input() {
     assert_eq!(
         cut, prefix_len,
         "cut must land at the start of the multibyte codepoint, not mid-codepoint"
+    );
+}
+
+// --- #526: notification_status field in ApprovalResolved for Slack ---
+
+/// #526: When SlackApprovalHandler POSTs to a 2xx endpoint, the ApprovalResolved
+/// audit entry must include `notification_status: "ok"` in its metadata so
+/// compliance consumers can distinguish a successful notification from a failed one.
+#[tokio::test]
+async fn slack_audit_entry_includes_notification_status_ok_on_2xx() {
+    use crate::runtime::audit::{AuditKind, AuditLog};
+    use std::sync::Arc;
+    use tempfile::TempDir;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/slack"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let tmp = TempDir::new().unwrap();
+    let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
+
+    let url = format!("{}/slack", server.uri());
+    let approval = make_approval_for_channel("slack", &url);
+    let inner = resolve_approval_handler(&approval);
+    let handler = AuditingApprovalHandler::new(Arc::from(inner), Arc::clone(&log));
+
+    let status = handler
+        .request_approval("notify", "Agent output here", &approval)
+        .await;
+    assert_eq!(status, ApprovalStatus::Approved);
+
+    let entries = log.read_all().unwrap();
+    let resolved = entries
+        .iter()
+        .find(|e| e.kind == AuditKind::ApprovalResolved)
+        .expect("ApprovalResolved entry must be present");
+    assert_eq!(
+        resolved.metadata["notification_status"],
+        serde_json::json!("ok"),
+        "ApprovalResolved metadata must include notification_status=ok on 2xx; got: {:?}",
+        resolved.metadata
+    );
+}
+
+/// #526: When SlackApprovalHandler POSTs and the endpoint returns a non-2xx
+/// status, the ApprovalResolved audit entry must include
+/// `notification_status: "http_error"` so compliance consumers can detect
+/// Slack delivery failures.
+#[tokio::test]
+async fn slack_audit_entry_includes_notification_status_http_error_on_non_2xx() {
+    use crate::runtime::audit::{AuditKind, AuditLog};
+    use std::sync::Arc;
+    use tempfile::TempDir;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/slack"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+
+    let tmp = TempDir::new().unwrap();
+    let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
+
+    let url = format!("{}/slack", server.uri());
+    let approval = make_approval_for_channel("slack", &url);
+    let inner = resolve_approval_handler(&approval);
+    let handler = AuditingApprovalHandler::new(Arc::from(inner), Arc::clone(&log));
+
+    let status = handler
+        .request_approval("notify", "Agent output here", &approval)
+        .await;
+    // Slack auto-approves even on failure (v1 MVP behaviour).
+    assert_eq!(status, ApprovalStatus::Approved);
+
+    let entries = log.read_all().unwrap();
+    let resolved = entries
+        .iter()
+        .find(|e| e.kind == AuditKind::ApprovalResolved)
+        .expect("ApprovalResolved entry must be present");
+    assert_eq!(
+        resolved.metadata["notification_status"],
+        serde_json::json!("http_error"),
+        "ApprovalResolved metadata must include notification_status=http_error on non-2xx; got: {:?}",
+        resolved.metadata
+    );
+}
+
+/// #526: When the Slack POST fails with a connection error (bad URL),
+/// the ApprovalResolved audit entry must include
+/// `notification_status: "connection_error"`.
+#[tokio::test]
+async fn slack_audit_entry_includes_notification_status_connection_error_on_network_failure() {
+    use crate::runtime::audit::{AuditKind, AuditLog};
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
+
+    // Port 1 is reserved and will always refuse connections.
+    let approval = make_approval_for_channel("slack", "http://127.0.0.1:1/dead");
+    let inner = resolve_approval_handler(&approval);
+    let handler = AuditingApprovalHandler::new(Arc::from(inner), Arc::clone(&log));
+
+    let status = handler
+        .request_approval("notify", "Agent output here", &approval)
+        .await;
+    assert_eq!(status, ApprovalStatus::Approved);
+
+    let entries = log.read_all().unwrap();
+    let resolved = entries
+        .iter()
+        .find(|e| e.kind == AuditKind::ApprovalResolved)
+        .expect("ApprovalResolved entry must be present");
+    assert_eq!(
+        resolved.metadata["notification_status"],
+        serde_json::json!("connection_error"),
+        "ApprovalResolved metadata must include notification_status=connection_error on network failure; got: {:?}",
+        resolved.metadata
+    );
+}
+
+/// #526: Non-Slack handlers (e.g. AutoApproveHandler) must NOT produce a
+/// `notification_status` field in the ApprovalResolved metadata — the field
+/// is Slack-specific and must not bleed into other handler paths.
+#[tokio::test]
+async fn non_slack_audit_entry_omits_notification_status() {
+    use crate::runtime::audit::{AuditKind, AuditLog};
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
+
+    let approval = make_approval();
+    let handler = AuditingApprovalHandler::new(Arc::new(AutoApproveHandler), Arc::clone(&log));
+
+    handler
+        .request_approval("deploy", "Agent output", &approval)
+        .await;
+
+    let entries = log.read_all().unwrap();
+    let resolved = entries
+        .iter()
+        .find(|e| e.kind == AuditKind::ApprovalResolved)
+        .expect("ApprovalResolved entry must be present");
+    assert!(
+        resolved.metadata.get("notification_status").is_none(),
+        "non-Slack handlers must NOT include notification_status in audit metadata; got: {:?}",
+        resolved.metadata
     );
 }

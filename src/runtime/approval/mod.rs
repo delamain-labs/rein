@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::io::{self, Write};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::ast::{ApprovalDef, ApprovalKind};
 use crate::runtime::audit::{self, AuditKind, AuditLog};
@@ -49,6 +49,21 @@ pub trait ApprovalHandler: Send + Sync {
         agent_output: &str,
         approval: &ApprovalDef,
     ) -> ApprovalStatus;
+
+    /// Return optional extra metadata to include in the `ApprovalResolved`
+    /// audit entry after `request_approval` completes.
+    ///
+    /// The default implementation returns `None`. Handlers that track
+    /// notification outcomes (e.g. `SlackApprovalHandler`) override this to
+    /// expose them for compliance consumers via the audit trail.
+    ///
+    /// Called by `AuditingApprovalHandler` immediately after
+    /// `request_approval` returns. The returned object's fields are merged
+    /// into the `ApprovalResolved` metadata alongside `decision`,
+    /// `elapsed_ms`, and `channel`.
+    fn notification_metadata(&self) -> Option<serde_json::Value> {
+        None
+    }
 }
 
 /// A CLI-based approval handler that prompts the user interactively.
@@ -309,6 +324,13 @@ impl ApprovalHandler for WebhookApprovalHandler {
 pub struct SlackApprovalHandler {
     webhook_url: String,
     client: reqwest::Client,
+    /// Stores the outcome of the most recent POST attempt so
+    /// `AuditingApprovalHandler` can include it in the `ApprovalResolved`
+    /// metadata via `notification_metadata()`.
+    ///
+    /// `None` before the first request; `Some("ok")`, `Some("http_error")`,
+    /// or `Some("connection_error")` after each call.
+    last_notification_status: Mutex<Option<&'static str>>,
 }
 
 impl SlackApprovalHandler {
@@ -317,6 +339,7 @@ impl SlackApprovalHandler {
         Self {
             webhook_url,
             client: reqwest::Client::new(),
+            last_notification_status: Mutex::new(None),
         }
     }
 }
@@ -338,7 +361,7 @@ impl ApprovalHandler for SlackApprovalHandler {
         );
         let payload = serde_json::json!({ "text": text });
 
-        match self
+        let notification_status: &'static str = match self
             .client
             .post(&self.webhook_url)
             .json(&payload)
@@ -347,21 +370,36 @@ impl ApprovalHandler for SlackApprovalHandler {
         {
             Ok(resp) if resp.status().is_success() => {
                 eprintln!("[slack] Approval notification sent for step '{step_name}'");
+                "ok"
             }
             Ok(resp) => {
                 eprintln!(
                     "[slack] Slack endpoint returned {}: auto-approving step '{step_name}'",
                     resp.status()
                 );
+                "http_error"
             }
             Err(e) => {
                 eprintln!("[slack] Failed to send Slack notification for step '{step_name}': {e}");
                 eprintln!("[slack] Auto-approving to avoid blocking workflow");
+                "connection_error"
             }
-        }
+        };
+        *self
+            .last_notification_status
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(notification_status);
 
         // MVP: notify-and-auto-approve. Interactive callbacks are v2.
         ApprovalStatus::Approved
+    }
+
+    fn notification_metadata(&self) -> Option<serde_json::Value> {
+        let status = (*self
+            .last_notification_status
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner))?;
+        Some(serde_json::json!({ "notification_status": status }))
     }
 }
 
@@ -535,6 +573,17 @@ impl ApprovalHandler for AuditingApprovalHandler {
         // misconfigurations without disrupting compliance consumers.
         if original_status != decision {
             meta["original_status"] = serde_json::Value::String(original_status.to_string());
+        }
+        // Merge handler-specific notification metadata (e.g. Slack notification
+        // outcome) into the ApprovalResolved entry so compliance consumers can
+        // distinguish a successful notification from an HTTP/network failure.
+        // Only Slack overrides notification_metadata(); all other handlers return None.
+        if let Some(extra) = self.inner.notification_metadata()
+            && let (Some(meta_obj), Some(extra_obj)) = (meta.as_object_mut(), extra.as_object())
+        {
+            for (k, v) in extra_obj {
+                meta_obj.insert(k.clone(), v.clone());
+            }
         }
         resolved.metadata = meta;
         if let Err(e) = self.log.append(&resolved) {
