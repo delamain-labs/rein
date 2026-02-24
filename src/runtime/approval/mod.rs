@@ -178,10 +178,20 @@ impl ApprovalHandler for WebhookApprovalHandler {
         agent_output: &str,
         approval: &ApprovalDef,
     ) -> ApprovalStatus {
+        // Cap agent_output to match AuditingApprovalHandler's preview limit so
+        // webhook payloads are consistent with audit records (#500).
+        let limit = AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT;
+        let marker = AuditingApprovalHandler::TRUNCATION_MARKER;
+        let output_preview = if agent_output.len() > limit {
+            let cut = agent_output.floor_char_boundary(limit);
+            format!("{}{}", &agent_output[..cut], marker)
+        } else {
+            agent_output.to_string()
+        };
         let payload = serde_json::json!({
             "step": step_name,
             "channel": approval.channel,
-            "agent_output": agent_output,
+            "agent_output": output_preview,
         });
 
         match self.client.post(&self.url).json(&payload).send().await {
@@ -241,9 +251,19 @@ impl ApprovalHandler for SlackApprovalHandler {
         agent_output: &str,
         approval: &ApprovalDef,
     ) -> ApprovalStatus {
+        // Cap agent_output to match AuditingApprovalHandler's preview limit so
+        // Slack messages are consistent with audit records (#500).
+        let limit = AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT;
+        let marker = AuditingApprovalHandler::TRUNCATION_MARKER;
+        let output_preview = if agent_output.len() > limit {
+            let cut = agent_output.floor_char_boundary(limit);
+            format!("{}{}", &agent_output[..cut], marker)
+        } else {
+            agent_output.to_string()
+        };
         let timeout_str = approval.timeout.as_deref().unwrap_or("no timeout");
         let text = format!(
-            "Approval required: step '{step_name}'\nTimeout: {timeout_str}\n\nAgent output:\n{agent_output}"
+            "Approval required: step '{step_name}'\nTimeout: {timeout_str}\n\nAgent output:\n{output_preview}"
         );
         let payload = serde_json::json!({ "text": text });
 
