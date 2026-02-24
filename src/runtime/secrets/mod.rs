@@ -25,7 +25,9 @@ pub enum SecretError {
     /// Binding name not registered in this resolver's configuration.
     BindingNotFound(String),
     /// Vault path not accessible (placeholder for real vault integration).
-    VaultUnavailable(String),
+    /// Carries both the vault `path` and the computed `env_key` fallback so
+    /// the CLI layer can format the error without re-deriving the key.
+    VaultUnavailable { path: String, env_key: String },
 }
 
 impl std::fmt::Display for SecretError {
@@ -40,10 +42,10 @@ impl std::fmt::Display for SecretError {
                     "secret binding '{name}' is not configured in this resolver"
                 )
             }
-            Self::VaultUnavailable(path) => {
+            Self::VaultUnavailable { path, env_key } => {
                 write!(
                     f,
-                    "vault path '{path}' not accessible (vault integration not configured)"
+                    "vault path '{path}' not accessible; set '{env_key}' as a fallback env var"
                 )
             }
         }
@@ -101,6 +103,23 @@ impl SecretResolver {
     }
 }
 
+/// Convert a vault path to its `VAULT_<KEY>` env var name.
+/// Non-alphanumeric characters are replaced with `_`; the result is uppercased
+/// and prefixed with `VAULT_`. Used both at resolution time and in error messages
+/// so the two sites cannot diverge.
+pub(crate) fn vault_env_key(path: &str) -> String {
+    format!(
+        "VAULT_{}",
+        path.chars()
+            .map(|c| if c.is_ascii_alphanumeric() {
+                c.to_ascii_uppercase()
+            } else {
+                '_'
+            })
+            .collect::<String>()
+    )
+}
+
 fn resolve_source(name: &str, source: &SecretSource) -> Result<ResolvedSecret, SecretError> {
     match source {
         SecretSource::Env { var } => {
@@ -118,22 +137,11 @@ fn resolve_source(name: &str, source: &SecretSource) -> Result<ResolvedSecret, S
         SecretSource::Vault { path } => {
             // Vault integration is a placeholder. In production, this would
             // call the Vault HTTP API. For now, check for a VAULT_* env var fallback.
-            let env_key = format!(
-                "VAULT_{}",
-                path.chars()
-                    .map(|c| if c.is_ascii_alphanumeric() {
-                        c.to_ascii_uppercase()
-                    } else {
-                        '_'
-                    })
-                    .collect::<String>()
-            );
+            let env_key = vault_env_key(path);
             match std::env::var(&env_key) {
                 Ok(value) => {
                     let warn_msg = format!(
-                        "vault path '{path}' is not configured - falling back to \
-                         env var '{env_key}'. Add real Vault integration or use \
-                         `env: {env_key}` explicitly."
+                        "vault path '{path}' not configured; using env var fallback '{env_key}'"
                     );
                     Ok(ResolvedSecret {
                         name: name.to_string(),
@@ -142,7 +150,10 @@ fn resolve_source(name: &str, source: &SecretSource) -> Result<ResolvedSecret, S
                         warning: Some(warn_msg),
                     })
                 }
-                Err(_) => Err(SecretError::VaultUnavailable(path.clone())),
+                Err(_) => Err(SecretError::VaultUnavailable {
+                    path: path.clone(),
+                    env_key,
+                }),
             }
         }
     }

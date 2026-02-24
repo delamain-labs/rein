@@ -241,5 +241,118 @@ fn vault_path_with_non_alphanumeric_chars_maps_to_valid_env_key() {
     let resolver = SecretResolver::from_def(&def);
     let resolved = resolver.resolve_all().unwrap();
     assert_eq!(resolved["svc"].value, "svcval");
+    // #401: assert source and warning fields on vault fallback resolution.
+    assert_eq!(
+        resolved["svc"].source, "vault(secret/my.service@v2)->env(VAULT_SECRET_MY_SERVICE_V2)",
+        "source must encode vault path and fallback env key"
+    );
+    assert!(
+        resolved["svc"].warning.is_some(),
+        "vault fallback must populate warning field"
+    );
     unsafe { std::env::remove_var(expected_env_key) };
+}
+
+// #402: vault_env_key() helper must convert path to VAULT_<UPPERCASE> key.
+#[test]
+fn vault_env_key_helper_converts_path_correctly() {
+    assert_eq!(
+        vault_env_key("secret/my.service@v2"),
+        "VAULT_SECRET_MY_SERVICE_V2"
+    );
+    assert_eq!(vault_env_key("simple"), "VAULT_SIMPLE");
+    assert_eq!(vault_env_key("a/b/c"), "VAULT_A_B_C");
+}
+
+// #393: VaultUnavailable carries the computed env_key so the CLI does not re-derive it.
+#[test]
+#[serial]
+fn vault_unavailable_error_carries_env_key() {
+    unsafe { std::env::remove_var("VAULT_SECRET_REIN_NOKEY") };
+    let def = SecretsDef {
+        bindings: vec![SecretBinding {
+            name: "tok".to_string(),
+            source: SecretSource::Vault {
+                path: "secret/rein/nokey".to_string(),
+            },
+            span: span(),
+        }],
+        span: span(),
+    };
+    let resolver = SecretResolver::from_def(&def);
+    let err = resolver.resolve_all().unwrap_err();
+    match err {
+        SecretError::VaultUnavailable { path, env_key } => {
+            assert_eq!(path, "secret/rein/nokey");
+            assert_eq!(env_key, "VAULT_SECRET_REIN_NOKEY");
+        }
+        other => panic!("expected VaultUnavailable, got {other:?}"),
+    }
+}
+
+// #399: single-secret resolve() path must also work for vault fallback.
+#[test]
+#[serial]
+fn vault_fallback_via_single_secret_resolve() {
+    unsafe { std::env::set_var("VAULT_SECRET_REIN_SINGLE", "single-val") };
+    let def = SecretsDef {
+        bindings: vec![SecretBinding {
+            name: "db_pass".to_string(),
+            source: SecretSource::Vault {
+                path: "secret/rein/single".to_string(),
+            },
+            span: span(),
+        }],
+        span: span(),
+    };
+    let resolver = SecretResolver::from_def(&def);
+    let secret = resolver.resolve("db_pass").unwrap();
+    unsafe { std::env::remove_var("VAULT_SECRET_REIN_SINGLE") };
+    assert_eq!(secret.value, "single-val");
+    assert!(
+        secret.warning.is_some(),
+        "vault fallback via resolve() must set warning"
+    );
+}
+
+// #400: vault fallback warning is factual only — actionable hint lives in CLI layer.
+#[test]
+#[serial]
+fn vault_fallback_warning_is_factual_not_actionable() {
+    unsafe { std::env::set_var("VAULT_SECRET_REIN_FACTUAL", "val") };
+    let def = SecretsDef {
+        bindings: vec![SecretBinding {
+            name: "tok".to_string(),
+            source: SecretSource::Vault {
+                path: "secret/rein/factual".to_string(),
+            },
+            span: span(),
+        }],
+        span: span(),
+    };
+    let resolver = SecretResolver::from_def(&def);
+    let resolved = resolver.resolve_all().unwrap();
+    unsafe { std::env::remove_var("VAULT_SECRET_REIN_FACTUAL") };
+    let warning = resolved["tok"]
+        .warning
+        .as_deref()
+        .expect("warning must be set");
+    // Warning must describe the fallback factually.
+    assert!(
+        warning.contains("secret/rein/factual"),
+        "warning must mention vault path, got: {warning}"
+    );
+    assert!(
+        warning.contains("VAULT_SECRET_REIN_FACTUAL"),
+        "warning must mention fallback env key, got: {warning}"
+    );
+    // Warning must NOT contain actionable instructions — those belong in the CLI layer.
+    assert!(
+        !warning.contains("Add real Vault"),
+        "warning must not contain actionable CLI hint, got: {warning}"
+    );
+    assert!(
+        !warning.contains("explicitly"),
+        "warning must not contain actionable CLI hint, got: {warning}"
+    );
 }

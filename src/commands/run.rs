@@ -382,23 +382,13 @@ fn resolve_secrets(
                             "hint: Check the secrets {{ }} block for a binding named '{name}'"
                         );
                     }
-                    SecretError::VaultUnavailable(path) => {
-                        let env_key = format!(
-                            "VAULT_{}",
-                            path.chars()
-                                .map(|c| if c.is_ascii_alphanumeric() {
-                                    c.to_ascii_uppercase()
-                                } else {
-                                    '_'
-                                })
-                                .collect::<String>()
-                        );
+                    SecretError::VaultUnavailable { path, env_key } => {
                         eprintln!(
                             "error: Vault path '{path}' not reachable and fallback env var '{env_key}' not set."
                         );
                         eprintln!("  → vault path: {path}");
                         eprintln!(
-                            "hint: Set {env_key} as a fallback env var, or rewrite the binding to use env: source"
+                            "hint: Set {env_key} as a fallback env var, or add real Vault integration, or rewrite the binding to use `env: {env_key}`"
                         );
                     }
                 }
