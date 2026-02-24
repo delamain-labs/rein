@@ -89,6 +89,9 @@ enum Command {
         /// Abort any single LLM call that takes longer than this many seconds
         #[arg(long)]
         stage_timeout: Option<u64>,
+        /// Abort the entire run if it exceeds this many seconds (wall clock)
+        #[arg(long)]
+        run_timeout: Option<u64>,
     },
     /// Run scenario and eval blocks in a .rein file
     ///
@@ -153,6 +156,7 @@ async fn main() {
             otel,
             audit_log,
             stage_timeout,
+            run_timeout,
         } => {
             let exit_code = commands::run::run_agent(
                 &file,
@@ -162,6 +166,7 @@ async fn main() {
                 otel,
                 audit_log.as_deref(),
                 stage_timeout,
+                run_timeout,
             );
             process::exit(exit_code);
         }

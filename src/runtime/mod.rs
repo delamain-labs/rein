@@ -157,6 +157,10 @@ pub enum RunEvent {
         turn: usize,
         timeout_secs: u64,
     },
+    /// The entire run exceeded the configured `run_timeout_secs` wall-clock cap.
+    RunTimeout {
+        timeout_secs: u64,
+    },
     /// A step was skipped because one or more of its declared dependencies failed.
     StepSkipped {
         /// Name of the step that was skipped.
@@ -575,6 +579,9 @@ fn summarize_event(event: &RunEvent, lines: &mut Vec<String>, turn: &mut usize) 
                 "  ✗ turn {display_turn} timed out after {timeout_secs}s"
             ));
         }
+        RunEvent::RunTimeout { timeout_secs } => {
+            lines.push(format!("  ✗ run timed out after {timeout_secs}s"));
+        }
         RunEvent::StepSkipped { step, reason, .. } => {
             lines.push(format!("  ⏭ step '{step}' skipped: {reason}"));
         }
@@ -727,6 +734,16 @@ pub enum RunError {
         #[serde(skip)]
         partial_trace: RunTrace,
     },
+    /// The entire run exceeded the configured `run_timeout_secs` wall-clock cap.
+    /// Contains events emitted before the timeout was detected.
+    ///
+    /// `partial_trace` carries `#[serde(skip)]` — in-process only.
+    /// Wire consumers see `{"run_timeout": {}}`.
+    #[non_exhaustive]
+    RunTimeout {
+        #[serde(skip)]
+        partial_trace: RunTrace,
+    },
 }
 
 impl std::fmt::Display for RunError {
@@ -740,6 +757,7 @@ impl std::fmt::Display for RunError {
             Self::GuardrailBlocked { .. } => write!(f, "guardrail blocked"),
             Self::EvalFailed { .. } => write!(f, "eval failed"),
             Self::Timeout { .. } => write!(f, "provider timed out"),
+            Self::RunTimeout { .. } => write!(f, "run timed out"),
         }
     }
 }

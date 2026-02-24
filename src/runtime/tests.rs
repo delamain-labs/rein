@@ -657,6 +657,34 @@ fn run_error_eval_failed_carries_partial_trace() {
     assert!(matches!(back, RunError::EvalFailed { .. }));
 }
 
+// ── #396: RunError::RunTimeout carries partial_trace ─────────────────────
+
+#[test]
+fn run_error_run_timeout_carries_partial_trace() {
+    let err = RunError::RunTimeout {
+        partial_trace: RunTrace::from_events(vec![RunEvent::RunTimeout {
+            timeout_secs: 10,
+        }]),
+    };
+    let RunError::RunTimeout { partial_trace } = &err else {
+        panic!("expected RunTimeout");
+    };
+    assert_eq!(partial_trace.events.len(), 1, "partial_trace must contain 1 event");
+
+    let json = serde_json::to_string(&err).expect("serialize");
+    let v: serde_json::Value = serde_json::from_str(&json).expect("parse");
+    assert!(
+        v["run_timeout"].is_object(),
+        "expected {{\"run_timeout\": {{}}}} shape, got: {v}"
+    );
+    assert!(
+        v["run_timeout"].get("partial_trace").is_none(),
+        "partial_trace must not be serialized; got: {v}"
+    );
+    let back: RunError = serde_json::from_str(&json).expect("deserialize");
+    assert!(matches!(back, RunError::RunTimeout { .. }));
+}
+
 // ── RunTrace output ────────────────────────────────────────────────────────
 
 #[test]

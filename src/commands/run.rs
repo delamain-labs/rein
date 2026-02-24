@@ -7,7 +7,8 @@ use rein::runtime::workflow::StageResult;
 // build provider → attach engine extensions → dispatch). Extracting it
 // further would require artificial helpers with awkward return types.
 // TODO(#460): refactor into named setup phases to remove this suppression.
-#[allow(clippy::too_many_lines)]
+// TODO(#440): extract RunOptions struct to reduce parameter count.
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 pub fn run_agent(
     path: &std::path::Path,
     message: Option<&str>,
@@ -16,6 +17,7 @@ pub fn run_agent(
     otel: bool,
     audit_log: Option<&std::path::Path>,
     stage_timeout_secs: Option<u64>,
+    run_timeout_secs: Option<u64>,
 ) -> i32 {
     let filename = path.to_string_lossy();
 
@@ -77,6 +79,7 @@ pub fn run_agent(
         max_turns: 10,
         budget_cents: agent.budget.as_ref().map_or(0, |b| b.amount),
         stage_timeout_secs: resolved_stage_timeout,
+        run_timeout_secs,
     };
 
     // Build engine with enforcement.
@@ -157,12 +160,15 @@ pub fn run_agent(
             budget_cents,
             audit_log,
             stage_timeout_secs,
+            run_timeout_secs,
         );
     }
 
     run_engine(&engine, user_message)
 }
 
+// TODO(#440): extract RunOptions struct to reduce parameter count.
+#[allow(clippy::too_many_arguments)]
 fn run_workflow_mode(
     workflow: &rein::ast::WorkflowDef,
     file: &rein::ast::ReinFile,
@@ -171,6 +177,7 @@ fn run_workflow_mode(
     budget_cents: u64,
     audit_log_path: Option<&std::path::Path>,
     stage_timeout_secs: Option<u64>,
+    run_timeout_secs: Option<u64>,
 ) -> i32 {
     // Only inject a global handler when env-var overrides are active (CI/testing).
     // In normal runs `approval_handler` is `None` so each step resolves its own
@@ -181,6 +188,7 @@ fn run_workflow_mode(
         max_turns: 10,
         budget_cents,
         stage_timeout_secs,
+        run_timeout_secs,
     };
     // Construct an AuditLog if the caller requested one via --audit-log.
     // Failure is fatal: an operator who explicitly passes --audit-log expects
@@ -620,6 +628,7 @@ mod tests {
             true, // demo mode — no API key needed
             false,
             Some(audit_path.path()),
+            None,
             None,
         );
         assert_eq!(

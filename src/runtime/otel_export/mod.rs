@@ -467,6 +467,13 @@ fn event_to_span_data(event: &super::RunEvent) -> (String, Vec<OtelAttribute>) {
                 attr_str("rein.workflow.reason", reason),
             ],
         ),
+        RunEvent::RunTimeout { timeout_secs } => (
+            "rein.run.timeout".to_string(),
+            vec![attr_int(
+                "rein.run.timeout_secs",
+                (*timeout_secs).cast_signed(),
+            )],
+        ),
     }
 }
 

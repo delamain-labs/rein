@@ -38,6 +38,8 @@ pub struct RunConfig {
     pub budget_cents: u64,
     /// Per-LLM-call timeout in seconds. `None` means no timeout.
     pub stage_timeout_secs: Option<u64>,
+    /// Wall-clock cap on the entire run in seconds. `None` means no run timeout.
+    pub run_timeout_secs: Option<u64>,
 }
 
 impl Default for RunConfig {
@@ -47,6 +49,7 @@ impl Default for RunConfig {
             max_turns: 10,
             budget_cents: 0,
             stage_timeout_secs: None,
+            run_timeout_secs: None,
         }
     }
 }
@@ -246,6 +249,9 @@ impl<'a> AgentEngine<'a> {
         if self.config.stage_timeout_secs == Some(0) {
             return Err(RunError::ConfigError);
         }
+        if self.config.run_timeout_secs == Some(0) {
+            return Err(RunError::ConfigError);
+        }
         Ok(())
     }
 
@@ -284,6 +290,26 @@ impl<'a> AgentEngine<'a> {
         state.messages.push(Message::user(user_message));
 
         for turn in 0..self.config.max_turns {
+            // Wall-clock run timeout check before each turn.
+            if self
+                .config
+                .run_timeout_secs
+                .is_some_and(|secs| run_start.elapsed().as_secs() >= secs)
+            {
+                let secs = self.config.run_timeout_secs.unwrap_or(0);
+                state.push(RunEvent::RunTimeout { timeout_secs: secs });
+                let partial = state.take_partial_trace();
+                self.export_partial(
+                    &partial,
+                    state.total_tokens,
+                    state.total_cost_cents,
+                    run_start.elapsed(),
+                );
+                return Err(RunError::RunTimeout {
+                    partial_trace: partial,
+                });
+            }
+
             // Circuit breaker check before LLM call.
             if let Some(ref cb_mutex) = self.circuit_breaker {
                 let mut cb = cb_mutex.lock().expect("circuit breaker lock");
@@ -306,7 +332,41 @@ impl<'a> AgentEngine<'a> {
                 }
             }
 
-            let response = match self.call_provider_with_timeout(&state.messages).await {
+            // If a run-level wall-clock timeout is configured, race the provider
+            // call against a sleep deadline.  When the sleep wins, emit
+            // RunTimeout and abort rather than waiting for the provider.
+            let provider_result = if let Some(secs) = self.config.run_timeout_secs {
+                let remaining = std::time::Duration::from_secs(secs)
+                    .saturating_sub(run_start.elapsed());
+                tokio::select! {
+                    res = self.call_provider_with_timeout(&state.messages) => {
+                        Some(res)
+                    }
+                    () = tokio::time::sleep(remaining) => {
+                        None
+                    }
+                }
+            } else {
+                Some(self.call_provider_with_timeout(&state.messages).await)
+            };
+
+            let Some(call_result) = provider_result else {
+                // Run-level timeout expired while waiting for the provider.
+                let secs = self.config.run_timeout_secs.unwrap_or(0);
+                state.push(RunEvent::RunTimeout { timeout_secs: secs });
+                let partial = state.take_partial_trace();
+                self.export_partial(
+                    &partial,
+                    state.total_tokens,
+                    state.total_cost_cents,
+                    run_start.elapsed(),
+                );
+                return Err(RunError::RunTimeout {
+                    partial_trace: partial,
+                });
+            };
+
+            let response = match call_result {
                 Ok(r) => r,
                 Err(CallError::Timeout { secs }) => {
                     state.push(RunEvent::StageTimeout {

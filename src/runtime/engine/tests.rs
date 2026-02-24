@@ -1394,3 +1394,91 @@ async fn guardrail_blocked_carries_partial_trace_with_triggered_event() {
         partial_trace.events
     );
 }
+
+// ── #396: run_timeout_secs — wall-clock cap on the entire run ─────────────
+
+// #396: run_timeout_secs must cause engine.run() to return RunError::RunTimeout
+// when the provider does not respond within the wall-clock window.
+// The partial trace must contain a RunTimeout event.
+#[tokio::test(start_paused = true)]
+async fn run_timeout_fires_when_provider_hangs() {
+    let agent = make_agent(vec![], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+    let executor = MockExecutor::new();
+    let provider = HangingProvider;
+
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig {
+            run_timeout_secs: Some(10),
+            ..RunConfig::default()
+        },
+    );
+
+    let result = engine.run("hello").await;
+    let Err(RunError::RunTimeout { partial_trace }) = result else {
+        panic!("expected RunError::RunTimeout, got: {result:?}");
+    };
+    assert!(
+        partial_trace.events.iter().any(|e| matches!(
+            e,
+            RunEvent::RunTimeout { timeout_secs: 10 }
+        )),
+        "partial_trace must contain RunTimeout(10); got: {:?}",
+        partial_trace.events
+    );
+}
+
+// #396: when run_timeout_secs is None (default), runs complete normally.
+#[tokio::test]
+async fn no_run_timeout_when_run_timeout_secs_is_none() {
+    let agent = make_agent(vec![], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+    let executor = MockExecutor::new();
+    let provider = MockProvider::new();
+
+    provider.push_response(simple_response("done"));
+
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig {
+            run_timeout_secs: None,
+            ..RunConfig::default()
+        },
+    );
+
+    let result = engine.run("hello").await;
+    assert!(result.is_ok(), "expected Ok, got: {result:?}");
+}
+
+// #396: zero run_timeout_secs must return RunError::ConfigError.
+#[tokio::test]
+async fn zero_run_timeout_returns_config_error() {
+    let agent = make_agent(vec![], vec![], None);
+    let registry = ToolRegistry::from_agent(&agent);
+    let executor = MockExecutor::new();
+    let provider = MockProvider::new();
+
+    let engine = AgentEngine::new(
+        &provider,
+        &executor,
+        &registry,
+        vec![],
+        RunConfig {
+            run_timeout_secs: Some(0),
+            ..RunConfig::default()
+        },
+    );
+
+    let result = engine.run("hello").await;
+    assert!(
+        matches!(result, Err(RunError::ConfigError)),
+        "expected ConfigError for zero run_timeout_secs, got: {result:?}"
+    );
+}
