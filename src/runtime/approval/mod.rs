@@ -301,6 +301,14 @@ impl AuditingApprovalHandler {
     /// this constant rather than hardcoding `512` to ensure they stay in sync with the limit.
     pub const AGENT_OUTPUT_PREVIEW_LIMIT: usize = 512;
 
+    /// Suffix appended to `agent_output` in the audit record when the output is truncated.
+    ///
+    /// The `agent_output_truncated` bool in the audit metadata is the machine-readable
+    /// truncation signal; this marker is the human-readable companion. Tests should compute
+    /// expected maximum lengths using `AGENT_OUTPUT_PREVIEW_LIMIT + TRUNCATION_MARKER.len()`
+    /// rather than hardcoding the combined value.
+    pub const TRUNCATION_MARKER: &'static str = "… (truncated)";
+
     #[must_use]
     pub fn new(inner: Arc<dyn ApprovalHandler>, log: Arc<AuditLog>) -> Self {
         Self {
@@ -362,7 +370,7 @@ impl ApprovalHandler for AuditingApprovalHandler {
         let cut = agent_output.floor_char_boundary(Self::AGENT_OUTPUT_PREVIEW_LIMIT);
         let truncated = agent_output.len() > Self::AGENT_OUTPUT_PREVIEW_LIMIT;
         let output_preview = if truncated {
-            format!("{}… (truncated)", &agent_output[..cut])
+            format!("{}{}", &agent_output[..cut], Self::TRUNCATION_MARKER)
         } else {
             agent_output.to_string()
         };

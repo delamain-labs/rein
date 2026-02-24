@@ -133,7 +133,12 @@ impl AuditLog {
             // or parallel test threads create audit logs in the same directory.
             let probe = parent.join(format!(".rein-audit-probe-{}", Self::generate_id()));
             fs::File::create(&probe)?;
-            fs::remove_file(&probe)?;
+            // Cleanup is best-effort: writability is already confirmed by the
+            // successful create above. If remove_file fails (e.g. the file was
+            // deleted by a concurrent actor), propagating the error would reject
+            // a writable directory, which is misleading. The probe file is
+            // self-documenting by its name prefix (.rein-audit-probe-*).
+            let _ = fs::remove_file(&probe);
         }
         Ok(Self {
             path,

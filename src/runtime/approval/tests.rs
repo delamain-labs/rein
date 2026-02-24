@@ -505,10 +505,10 @@ async fn approval_requested_truncates_long_agent_output() {
     let entries = log.read_all().unwrap();
     assert_eq!(entries[0].kind, AuditKind::ApprovalRequested);
     let recorded = entries[0].metadata["agent_output"].as_str().unwrap();
-    // The maximum recorded length is AGENT_OUTPUT_PREVIEW_LIMIT bytes + the truncation
-    // marker suffix "… (truncated)" (~15 UTF-8 bytes). Use the constant so this stays
-    // in sync if the limit changes.
-    let max_expected = AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT + "… (truncated)".len();
+    // The maximum recorded length is AGENT_OUTPUT_PREVIEW_LIMIT bytes + TRUNCATION_MARKER.
+    // Both constants are on AuditingApprovalHandler so they stay in sync with production.
+    let max_expected = AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT
+        + AuditingApprovalHandler::TRUNCATION_MARKER.len();
     assert!(
         recorded.len() <= max_expected,
         "truncated output must be <= {} chars (limit + marker), got {}",
@@ -516,12 +516,59 @@ async fn approval_requested_truncates_long_agent_output() {
         recorded.len()
     );
     assert!(
-        recorded.contains("…") || recorded.contains("(truncated)"),
-        "truncated output must include truncation marker, got: {recorded}"
+        recorded.ends_with(AuditingApprovalHandler::TRUNCATION_MARKER),
+        "truncated output must end with TRUNCATION_MARKER, got: {recorded}"
     );
     assert_eq!(
         entries[0].metadata["agent_output_truncated"], true,
         "agent_output_truncated must be true when output exceeds limit"
+    );
+}
+
+/// #463: Truncation must not panic when byte 512 falls inside a multibyte character.
+/// Uses a string of ASCII + 4-byte emoji so the 512-byte boundary lands mid-codepoint.
+#[tokio::test]
+async fn approval_requested_truncates_multibyte_boundary_safely() {
+    use crate::runtime::audit::{AuditKind, AuditLog};
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let log = Arc::new(AuditLog::new(tmp.path().join("audit.jsonl")).unwrap());
+
+    let handler = AuditingApprovalHandler::new(Arc::new(AutoApproveHandler), Arc::clone(&log));
+    let approval = make_approval_for_channel("cli", "");
+
+    // Build a string where byte 512 falls inside a 4-byte emoji (🦀 = U+1F980).
+    // 510 ASCII 'a' chars (510 bytes) + enough emoji to push well past 512 bytes.
+    let mut multibyte_output = "a".repeat(510);
+    multibyte_output.push_str(&"🦀".repeat(50)); // each 🦀 is 4 bytes
+    assert!(multibyte_output.len() > AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT);
+
+    handler
+        .request_approval("deploy", &multibyte_output, &approval)
+        .await;
+
+    let entries = log.read_all().unwrap();
+    assert_eq!(entries[0].kind, AuditKind::ApprovalRequested);
+    let recorded = entries[0].metadata["agent_output"].as_str().unwrap();
+    // Must be valid UTF-8 (guaranteed by the str type), within the bound, and end
+    // with the truncation marker.
+    let max_expected = AuditingApprovalHandler::AGENT_OUTPUT_PREVIEW_LIMIT
+        + AuditingApprovalHandler::TRUNCATION_MARKER.len();
+    assert!(
+        recorded.len() <= max_expected,
+        "multibyte truncation must be <= {} bytes, got {}",
+        max_expected,
+        recorded.len()
+    );
+    assert!(
+        recorded.ends_with(AuditingApprovalHandler::TRUNCATION_MARKER),
+        "multibyte truncation must end with TRUNCATION_MARKER"
+    );
+    assert_eq!(
+        entries[0].metadata["agent_output_truncated"], true,
+        "agent_output_truncated must be true for multibyte truncation"
     );
 }
 
