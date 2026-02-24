@@ -2201,6 +2201,7 @@ async fn run_parallel_populates_events() {
 // #356: StepStarted / StepCompleted events (StepFailed emission deferred to #380)
 // ---------------------------------------------------------------------------
 
+/// #356, #403: StepStarted must be emitted before StepCompleted (ordering invariant).
 #[tokio::test]
 async fn run_steps_emits_step_started_and_completed() {
     let file = parse_file("agent worker { model: openai }");
@@ -2208,20 +2209,7 @@ async fn run_steps_emits_step_started_and_completed() {
     let executor = MockExecutor::new();
     provider.push_response(simple_response("done"));
 
-    let step = make_step("do_work", "worker", vec![]);
-    let workflow = WorkflowDef {
-        name: "wf".to_string(),
-        trigger: "go".to_string(),
-        stages: vec![],
-        steps: vec![step],
-        route_blocks: vec![],
-        parallel_blocks: vec![],
-        auto_resolve: None,
-        within_blocks: vec![],
-        mode: ExecutionMode::Sequential,
-        schedule: None,
-        span: Span::new(0, 1),
-    };
+    let workflow = make_workflow_steps("wf", "go", vec![make_step("do_work", "worker", vec![])]);
     let ctx = WorkflowContext {
         file: &file,
         provider: &provider,
@@ -2235,19 +2223,133 @@ async fn run_steps_emits_step_started_and_completed() {
 
     let (_, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
 
-    let started = events.iter().find(|e| {
-        matches!(e, crate::runtime::RunEvent::StepStarted { step, index: 0 } if step == "do_work")
+    // Existence assertions.
+    let started_pos = events
+        .iter()
+        .position(
+            |e| matches!(e, crate::runtime::RunEvent::StepStarted { step, index: 0 } if step == "do_work"),
+        )
+        .expect("StepStarted { step: do_work, index: 0 } must be emitted");
+    let completed_pos = events
+        .iter()
+        .position(
+            |e| matches!(e, crate::runtime::RunEvent::StepCompleted { step } if step == "do_work"),
+        )
+        .expect("StepCompleted for do_work must be emitted");
+
+    // #403: Ordering invariant — StepStarted must precede StepCompleted.
+    assert!(
+        started_pos < completed_pos,
+        "StepStarted (pos {started_pos}) must precede StepCompleted (pos {completed_pos})"
+    );
+}
+
+/// #404: Two-step workflow must emit StepStarted with index 0 then index 1 in order.
+#[tokio::test]
+async fn multi_step_step_started_index_sequence() {
+    let file = parse_file("agent worker { model: openai }");
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    provider.push_response(simple_response("step-a done"));
+    provider.push_response(simple_response("step-b done"));
+
+    let step_a = make_step("step_a", "worker", vec![]);
+    let step_b = make_step("step_b", "worker", vec![]);
+    let workflow = make_workflow_steps("wf", "go", vec![step_a, step_b]);
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let (_, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
+
+    let started_events: Vec<_> = events
+        .iter()
+        .filter_map(|e| {
+            if let crate::runtime::RunEvent::StepStarted { step, index } = e {
+                Some((step.clone(), *index))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    assert_eq!(
+        started_events.len(),
+        2,
+        "expected 2 StepStarted events; got: {started_events:?}"
+    );
+    assert_eq!(
+        started_events[0],
+        ("step_a".to_string(), 0),
+        "first step must be index 0"
+    );
+    assert_eq!(
+        started_events[1],
+        ("step_b".to_string(), 1),
+        "second step must be index 1"
+    );
+}
+
+/// #404 follow-up: `index` in `StepStarted` is the DAG enumeration position.
+/// `resolve_dag` places independent steps (no deps) before dependent ones, so
+/// step_c (independent) gets index 1 even though it appears after step_b in the
+/// source file. Skipped steps (step_b) never emit `StepStarted`, so their index
+/// is never visible in the event stream — but the remaining steps keep their
+/// enumerate positions (no index reset).
+#[tokio::test]
+async fn step_started_index_reflects_dag_position_after_skip() {
+    let file = parse_file("agent bot { model: openai }");
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    provider.push_response(simple_response("step-a output")); // step_a starts but fails (wrong agent)
+    provider.push_response(simple_response("step-c done")); // step_c runs
+
+    // step_a: nonexistent agent → fails.
+    // step_b: depends on step_a → cascade-skipped (no StepStarted emitted).
+    // step_c: independent → DAG places it at index 1 (before step_b in topo order).
+    let step_a = make_step("step_a", "nonexistent", vec![]);
+    let step_b = make_step("step_b", "bot", vec!["step_a"]);
+    let step_c = make_step("step_c", "bot", vec![]);
+
+    let workflow = make_workflow_steps("wf", "go", vec![step_a, step_b, step_c]);
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let (_, events) = run_steps(&workflow, &ctx)
+        .await
+        .expect("partial success — independent step still runs");
+
+    // step_a fails (index 0), step_b is cascade-skipped (no StepStarted),
+    // step_c is independent and lands at index 1 in the topological order
+    // (resolve_dag places no-dep steps together, before dep-carrying steps).
+    let step_c_started = events.iter().find(|e| {
+        matches!(e, crate::runtime::RunEvent::StepStarted { step, index: 1 } if step == "step_c")
     });
     assert!(
-        started.is_some(),
-        "expected StepStarted {{ step: do_work, index: 0 }}"
+        step_c_started.is_some(),
+        "step_c must have StepStarted with index=1 (its topo-sort position); events: {events:?}"
     );
-
+    // step_b must NOT emit StepStarted — it was cascade-skipped.
     assert!(
-        events.iter().any(
-            |e| matches!(e, crate::runtime::RunEvent::StepCompleted { step } if step == "do_work")
+        !events.iter().any(
+            |e| matches!(e, crate::runtime::RunEvent::StepStarted { step, .. } if step == "step_b")
         ),
-        "expected StepCompleted for do_work"
+        "step_b must not emit StepStarted (it was skipped); events: {events:?}"
     );
 }
 
