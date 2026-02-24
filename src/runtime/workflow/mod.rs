@@ -761,13 +761,33 @@ fn apply_step_result(
 ///
 /// # Errors
 /// Returns `WorkflowError` for hard errors or dependency cycles.
-pub async fn run_steps(
+///
+/// ## Return type on hard abort
+///
+/// On success: `Ok((results, events))`.
+///
+/// On hard error: `Err((error, partial_events))`. The `partial_events` vec
+/// includes a `RunEvent::WorkflowAborted` entry that carries the
+/// `error_kind` and `reason` from the abort, enabling callers (e.g. the
+/// stderr display in `run_workflow_mode`) to surface the abort cause. It
+/// also includes any step events collected before the abort (e.g. `StepStarted`).
+///
+/// Callers that propagate the error without inspecting partial events can use
+/// `.map_err(|(e, _)| e)?` to recover the original `WorkflowError`.
+#[allow(clippy::too_many_lines)]
+pub(crate) async fn run_steps(
     workflow: &WorkflowDef,
     ctx: &WorkflowContext<'_>,
-) -> Result<(Vec<StageResult>, Vec<super::RunEvent>), WorkflowError> {
+) -> Result<(Vec<StageResult>, Vec<super::RunEvent>), (WorkflowError, Vec<super::RunEvent>)> {
     use std::collections::{HashMap, HashSet};
 
-    let ordered = resolve_dag(&workflow.steps)?;
+    let ordered = resolve_dag(&workflow.steps).map_err(|e| {
+        let aborted = super::RunEvent::WorkflowAborted {
+            error_kind: e.kind_str().to_string(),
+            reason: e.to_string(),
+        };
+        (e, vec![aborted])
+    })?;
     let trigger_input = format!("Trigger: {}", workflow.trigger);
 
     let mut state = StepLoopState {
@@ -876,7 +896,16 @@ pub async fn run_steps(
         ) {
             StepOutcome::Continue => {}
             StepOutcome::AutoResolved => break,
-            StepOutcome::HardError(e) => return Err(e),
+            StepOutcome::HardError(e) => {
+                // Emit WorkflowAborted before returning so OTEL consumers and
+                // callers that inspect partial events can see why the workflow
+                // was hard-aborted — otherwise the abort is invisible (#506).
+                state.events.push(super::RunEvent::WorkflowAborted {
+                    error_kind: e.kind_str().to_string(),
+                    reason: e.to_string(),
+                });
+                return Err((e, state.events));
+            }
         }
     }
 
@@ -1098,19 +1127,43 @@ fn auto_resolve_matches(output: &str, ar: &crate::ast::AutoResolveBlock) -> Opti
 /// If the workflow has step blocks, those are executed after stages.
 ///
 /// # Errors
-/// Returns `WorkflowError` if execution fails.
+/// Returns `(WorkflowError, Vec<RunEvent>)` on failure. The event vec carries
+/// any events (including `WorkflowAborted`) that were emitted before the abort
+/// so OTEL consumers can observe the hard-error cause.
 pub async fn run_workflow(
     workflow: &WorkflowDef,
     ctx: &WorkflowContext<'_>,
-) -> Result<WorkflowResult, WorkflowError> {
+) -> Result<WorkflowResult, (WorkflowError, Vec<super::RunEvent>)> {
     let mut result = match workflow.mode {
-        ExecutionMode::Sequential => run_sequential(workflow, ctx).await?,
-        ExecutionMode::Parallel => run_parallel(workflow, ctx).await?,
+        ExecutionMode::Sequential => run_sequential(workflow, ctx).await.map_err(|e| {
+            let aborted = super::RunEvent::WorkflowAborted {
+                error_kind: e.kind_str().to_string(),
+                reason: e.to_string(),
+            };
+            (e, vec![aborted])
+        })?,
+        ExecutionMode::Parallel => run_parallel(workflow, ctx).await.map_err(|e| {
+            let aborted = super::RunEvent::WorkflowAborted {
+                error_kind: e.kind_str().to_string(),
+                reason: e.to_string(),
+            };
+            (e, vec![aborted])
+        })?,
     };
 
     // Execute step blocks if present
     if !workflow.steps.is_empty() {
-        let (step_results, step_events) = run_steps(workflow, ctx).await?;
+        // On hard abort, merge stage events already in result.events with the
+        // step-phase partial events (including WorkflowAborted) so callers
+        // receive full context of both what ran and why it aborted.
+        let (step_results, step_events) = match run_steps(workflow, ctx).await {
+            Ok(ok) => ok,
+            Err((e, step_partial)) => {
+                let mut merged = std::mem::take(&mut result.events);
+                merged.extend(step_partial);
+                return Err((e, merged));
+            }
+        };
         for sr in step_results {
             result.total_cost_cents += sr.cost_cents;
             result.total_tokens += sr.tokens;

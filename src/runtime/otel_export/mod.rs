@@ -458,6 +458,15 @@ fn event_to_span_data(event: &super::RunEvent) -> (String, Vec<OtelAttribute>) {
                 attr_str("rein.step.error_kind", error_kind),
             ],
         ),
+        RunEvent::WorkflowAborted {
+            error_kind, reason, ..
+        } => (
+            "rein.workflow.aborted".to_string(),
+            vec![
+                attr_str("rein.workflow.error_kind", error_kind),
+                attr_str("rein.workflow.reason", reason),
+            ],
+        ),
     }
 }
 
