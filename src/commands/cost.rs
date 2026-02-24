@@ -128,6 +128,7 @@ mod tests {
                 tool_calls_denied: 0,
                 duration_ms: 1000,
             },
+            is_partial: false,
         }
     }
 

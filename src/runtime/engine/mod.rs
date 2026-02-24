@@ -629,19 +629,35 @@ impl<'a> AgentEngine<'a> {
             total_tokens,
             total_cost_cents,
         };
-        self.apply_otel_export(&result, duration);
+        // #430: mark the OTEL export as partial so dashboards can distinguish
+        // timed-out runs from normally-empty completions via rein.run.partial.
+        self.apply_otel_export_with_flags(&result, duration, true);
     }
 
     /// Apply OTEL export after a run completes (side-effect only, never fails loudly).
     fn apply_otel_export(&self, result: &RunResult, duration: std::time::Duration) {
+        self.apply_otel_export_with_flags(result, duration, false);
+    }
+
+    /// Apply OTEL export with an optional `is_partial` flag.
+    ///
+    /// When `is_partial` is `true` (e.g. a timed-out run), the root OTEL span
+    /// will carry `rein.run.partial = "true"` so dashboards can distinguish
+    /// incomplete runs from normally-empty completions.
+    fn apply_otel_export_with_flags(
+        &self,
+        result: &RunResult,
+        duration: std::time::Duration,
+        is_partial: bool,
+    ) {
         let name = self.agent_name.as_deref().unwrap_or("agent");
         match &self.otel_mode {
             OtelMode::None => {}
             OtelMode::FileOnComplete => {
-                Self::export_otel_to_file(result, duration, name);
+                Self::export_otel_to_file(result, duration, name, is_partial);
             }
             OtelMode::StdoutOnComplete { metrics } => {
-                Self::export_otel_to_stdout(result, duration, metrics, name);
+                Self::export_otel_to_stdout(result, duration, metrics, name, is_partial);
             }
         }
     }
@@ -654,22 +670,30 @@ impl<'a> AgentEngine<'a> {
         result: &RunResult,
         duration: std::time::Duration,
         agent_name: &str,
+        is_partial: bool,
     ) -> (super::StructuredTrace, chrono::DateTime<chrono::Utc>) {
         let now = chrono::Utc::now();
         let started =
             now - chrono::Duration::from_std(duration).unwrap_or(chrono::Duration::zero());
-        let trace = result.trace.to_structured(
+        let mut trace = result.trace.to_structured(
             agent_name,
             &started.to_rfc3339(),
             &now.to_rfc3339(),
             duration.as_millis().try_into().unwrap_or(u64::MAX),
         );
+        trace.is_partial = is_partial;
         (trace, now)
     }
 
     /// Write OTLP JSON to a timestamped file.
-    fn export_otel_to_file(result: &RunResult, duration: std::time::Duration, agent_name: &str) {
-        let (structured, completed_at) = Self::build_structured_trace(result, duration, agent_name);
+    fn export_otel_to_file(
+        result: &RunResult,
+        duration: std::time::Duration,
+        agent_name: &str,
+        is_partial: bool,
+    ) {
+        let (structured, completed_at) =
+            Self::build_structured_trace(result, duration, agent_name, is_partial);
         match super::otel_export::to_otlp_json(&structured) {
             Ok(json) => {
                 // Reuse the timestamp captured in build_structured_trace so the
@@ -691,10 +715,11 @@ impl<'a> AgentEngine<'a> {
         duration: std::time::Duration,
         metrics: &[String],
         agent_name: &str,
+        is_partial: bool,
     ) {
         use super::otel_export::to_otlp;
         let (mut structured, _completed_at) =
-            Self::build_structured_trace(result, duration, agent_name);
+            Self::build_structured_trace(result, duration, agent_name, is_partial);
         if !metrics.is_empty() {
             structured
                 .events

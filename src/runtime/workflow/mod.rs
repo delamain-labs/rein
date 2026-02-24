@@ -116,6 +116,12 @@ pub enum WorkflowError {
         stage: String,
         error: super::RunError,
     },
+    /// A stage timed out. This is a hard error — the workflow is aborted
+    /// immediately rather than treating the timeout as a soft step failure.
+    StageTimedOut {
+        stage: String,
+        partial_trace: super::RunTrace,
+    },
     /// A route references a stage that doesn't exist.
     StageNotFound(String),
     /// State persistence failed (save/load/clear).
@@ -136,6 +142,9 @@ impl std::fmt::Display for WorkflowError {
             Self::AgentNotFound(name) => write!(f, "agent not found: {name}"),
             Self::StageFailed { stage, error } => {
                 write!(f, "stage '{stage}' failed: {error}")
+            }
+            Self::StageTimedOut { stage, .. } => {
+                write!(f, "stage '{stage}' timed out")
             }
             Self::StageNotFound(name) => write!(f, "route target stage not found: {name}"),
             Self::PersistenceFailure(msg) => write!(f, "state persistence failed: {msg}"),
@@ -176,12 +185,15 @@ impl WorkflowError {
             // deps, circular routes, missing route targets) mean the graph
             // itself is malformed — silently absorbing them hides operator
             // misconfiguration. State persistence failure risks data corruption.
+            // Provider timeout is hard: a hung provider will likely hang the
+            // next stage too — abort early rather than silently continuing.
             Self::ApprovalRejected { .. }
             | Self::ApprovalTimedOut { .. }
             | Self::CyclicDependency(_)
             | Self::CircularRoute(_)
             | Self::PersistenceFailure(_)
-            | Self::StageNotFound(_) => true,
+            | Self::StageNotFound(_)
+            | Self::StageTimedOut { .. } => true,
             // Soft — step is recorded as failed; dependents are skipped.
             Self::AgentNotFound(_) | Self::StageFailed { .. } => false,
         }
@@ -213,13 +225,21 @@ pub(super) async fn run_stage(
         ctx.config.clone(),
     );
 
-    let result = engine
-        .run(input)
-        .await
-        .map_err(|e| WorkflowError::StageFailed {
-            stage: stage_name.to_string(),
-            error: e,
-        })?;
+    let result = engine.run(input).await.map_err(|e| {
+        // #427: propagate timeout as a hard error so the workflow aborts
+        // immediately rather than silently continuing to the next stage.
+        if let super::RunError::Timeout { partial_trace } = e {
+            WorkflowError::StageTimedOut {
+                stage: stage_name.to_string(),
+                partial_trace,
+            }
+        } else {
+            WorkflowError::StageFailed {
+                stage: stage_name.to_string(),
+                error: e,
+            }
+        }
+    })?;
 
     let timestamps = result.trace.timestamps_ms.clone();
     let events = result.trace.events;
