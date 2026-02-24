@@ -1513,8 +1513,9 @@ async fn step_without_fallback_propagates_error() {
         "failed step output must be empty"
     );
     assert_eq!(
-        results[0].agent_name, SENTINEL_FAILED,
-        "failed StageResult must use SENTINEL_FAILED so consumers can distinguish it"
+        results[0].status,
+        StageResultStatus::Failed,
+        "failed StageResult must have status Failed so consumers can distinguish it"
     );
     // A StepFailed event must be emitted so the trace is observable.
     assert!(
@@ -1943,9 +1944,9 @@ async fn run_steps_returns_partial_success_on_missing_agent() {
         .await
         .expect("partial success: soft error should not return Err");
 
-    // The step result should use the SENTINEL_FAILED marker.
+    // The step result must have status Failed (not Executed or Skipped).
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].agent_name, SENTINEL_FAILED);
+    assert_eq!(results[0].status, StageResultStatus::Failed);
 
     // A StepFailed event must be emitted with the agent-not-found reason.
     assert!(
@@ -2249,10 +2250,10 @@ async fn independent_step_runs_even_if_sibling_fails() {
     );
 }
 
-/// #363 — Skipped StageResult uses `SENTINEL_SKIPPED` so consumers can
-/// distinguish it from a successfully-run step that returned no output.
+/// #363 — Skipped StageResult has `status == StageResultStatus::Skipped` so
+/// consumers can distinguish it from a successfully-run step.
 #[tokio::test]
-async fn skipped_step_result_uses_sentinel_agent_name() {
+async fn skipped_step_result_uses_skipped_status() {
     let file = parse_file(r#"agent bot { model: openai }"#);
     let provider = MockProvider::new();
     let executor = MockExecutor::new();
@@ -2260,7 +2261,7 @@ async fn skipped_step_result_uses_sentinel_agent_name() {
     // step_a: fails; step_b: depends on step_a → skipped.
     let step_a = make_step("step_a", "nonexistent", vec![]);
     let step_b = make_step("step_b", "bot", vec!["step_a"]);
-    let workflow = make_workflow_steps("sentinel_test", "start", vec![step_a, step_b]);
+    let workflow = make_workflow_steps("status_test", "start", vec![step_a, step_b]);
     let ctx = WorkflowContext {
         file: &file,
         provider: &provider,
@@ -2276,8 +2277,9 @@ async fn skipped_step_result_uses_sentinel_agent_name() {
 
     let step_b_result = results.iter().find(|r| r.stage_name == "step_b").unwrap();
     assert_eq!(
-        step_b_result.agent_name, SENTINEL_SKIPPED,
-        "skipped StageResult must use '<skipped>' sentinel"
+        step_b_result.status,
+        StageResultStatus::Skipped,
+        "skipped StageResult must have status Skipped"
     );
 }
 
@@ -2323,11 +2325,11 @@ async fn failed_step_output_inserted_into_outputs_map() {
         |e| matches!(e, crate::runtime::RunEvent::StepSkipped { step, .. } if step == "step_b")
     ));
 
-    // Failed and skipped results carry sentinels
+    // Failed and skipped results carry the correct status
     let step_a_r = results.iter().find(|r| r.stage_name == "step_a").unwrap();
-    assert_eq!(step_a_r.agent_name, SENTINEL_FAILED);
+    assert_eq!(step_a_r.status, StageResultStatus::Failed);
     let step_b_r = results.iter().find(|r| r.stage_name == "step_b").unwrap();
-    assert_eq!(step_b_r.agent_name, SENTINEL_SKIPPED);
+    assert_eq!(step_b_r.status, StageResultStatus::Skipped);
 }
 
 /// `CyclicDependency` is a hard error — `run_steps` must return `Err` and
@@ -2497,8 +2499,9 @@ async fn for_each_partial_failure_discards_completed_iterations() {
     // The step must be marked as failed, not completed.
     assert_eq!(results.len(), 1);
     assert_eq!(
-        results[0].agent_name, SENTINEL_FAILED,
-        "partial for_each failure must use SENTINEL_FAILED"
+        results[0].status,
+        StageResultStatus::Failed,
+        "partial for_each failure must have status Failed"
     );
     // Partial output from iteration 0 must be discarded.
     assert!(
@@ -2599,21 +2602,22 @@ async fn cascade_skip_propagates_three_hops() {
 
     // step_a failed
     let step_a_r = results.iter().find(|r| r.stage_name == "step_a").unwrap();
-    assert_eq!(step_a_r.agent_name, SENTINEL_FAILED);
+    assert_eq!(step_a_r.status, StageResultStatus::Failed);
 
     // step_b skipped (direct dependent of failed step)
     let step_b_r = results.iter().find(|r| r.stage_name == "step_b").unwrap();
     assert_eq!(
-        step_b_r.agent_name, SENTINEL_SKIPPED,
+        step_b_r.status,
+        StageResultStatus::Skipped,
         "step_b must be skipped"
     );
 
     // step_c skipped (transitive — depends on skipped step_b, not on step_a)
     let step_c_r = results.iter().find(|r| r.stage_name == "step_c").unwrap();
     assert_eq!(
-        step_c_r.agent_name, SENTINEL_SKIPPED,
-        "step_c must be skipped transitively; got agent: {}",
-        step_c_r.agent_name
+        step_c_r.status,
+        StageResultStatus::Skipped,
+        "step_c must be skipped transitively"
     );
 
     // StepSkipped events for both step_b and step_c

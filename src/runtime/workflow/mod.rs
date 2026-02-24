@@ -2,14 +2,21 @@ use std::sync::Arc;
 
 use crate::ast::{ExecutionMode, ReinFile, RouteRule, Stage, WorkflowDef};
 
-/// Sentinel agent name used in `StageResult` for steps that failed softly.
-/// Consumers of `WorkflowResult.stage_results` can use this to distinguish
-/// failed steps from steps that actually ran.
-pub const SENTINEL_FAILED: &str = "<failed>";
-/// Sentinel agent name used in `StageResult` for steps skipped due to a
-/// failed dependency. Consumers of `WorkflowResult.stage_results` can use
-/// this to distinguish skipped steps from steps that actually ran.
-pub const SENTINEL_SKIPPED: &str = "<skipped>";
+/// The execution outcome of a single workflow step.
+///
+/// `status` replaces the old sentinel-string pattern (`agent_name == "<failed>"`)
+/// with an explicit, compiler-checked enum field. Use `StageResult::is_real_execution()`
+/// as the single, canonical predicate; inspect `status` directly only when you need
+/// to distinguish `Failed` from `Skipped`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StageResultStatus {
+    /// The step ran to completion (agent produced a response).
+    Executed,
+    /// The step failed with a soft error (agent not found, LLM error, etc.).
+    Failed,
+    /// The step was cascade-skipped because a dependency failed or was skipped.
+    Skipped,
+}
 use crate::runtime::approval::{ApprovalHandler, ApprovalStatus};
 
 use super::engine::{AgentEngine, RunConfig};
@@ -46,6 +53,11 @@ pub struct WorkflowResult {
     /// Results from each stage, in order of execution.
     pub stage_results: Vec<StageResult>,
     /// The final output text.
+    ///
+    /// For step-based workflows: the output of the **last step that ran to
+    /// completion** in topological order (`status == Executed`). If the
+    /// terminal step fails or is skipped, this is the output of the last
+    /// earlier step that succeeded. Empty string if all steps failed.
     pub final_output: String,
     /// Total cost across all stages.
     pub total_cost_cents: u64,
@@ -68,15 +80,17 @@ pub struct StageResult {
     pub output: String,
     pub cost_cents: u64,
     pub tokens: u64,
+    /// Execution outcome. Prefer `is_real_execution()` over matching `status`
+    /// directly unless you need to distinguish `Failed` from `Skipped`.
+    pub status: StageResultStatus,
 }
 
 impl StageResult {
     /// Returns `true` if this result represents a step that actually executed
-    /// (as opposed to a step that failed or was skipped, which are recorded
-    /// using sentinel `agent_name` values).
+    /// (as opposed to a step that failed softly or was cascade-skipped).
     #[must_use]
     pub fn is_real_execution(&self) -> bool {
-        self.agent_name != SENTINEL_FAILED && self.agent_name != SENTINEL_SKIPPED
+        self.status == StageResultStatus::Executed
     }
 }
 
@@ -203,6 +217,7 @@ pub(super) async fn run_stage(
             output: result.response,
             cost_cents: result.total_cost_cents,
             tokens: result.total_tokens,
+            status: StageResultStatus::Executed,
         },
         events,
     ))
@@ -581,10 +596,11 @@ fn apply_step_result(
             });
             state.results.push(StageResult {
                 stage_name: step.name.clone(),
-                agent_name: SENTINEL_FAILED.to_string(),
+                agent_name: step.agent.clone(),
                 output: String::new(),
                 cost_cents: 0,
                 tokens: 0,
+                status: StageResultStatus::Failed,
             });
             StepOutcome::Continue
         }
@@ -643,12 +659,19 @@ pub async fn run_steps(
             // for skipped entries, not `None`. Dependent steps are prevented
             // from running by the skip-guard (via failed_steps below).
             state.outputs.insert(step.name.clone(), String::new());
+            // StepStarted is intentionally omitted for skipped steps — a skipped
+            // step never began execution, so the event lifecycle is:
+            //   normal:  StepStarted → StepCompleted
+            //   failed:  StepStarted → StepFailed
+            //   skipped: StepSkipped (no StepStarted)
+            // Do not add StepStarted here to avoid a spurious event before StepSkipped.
             state.results.push(StageResult {
                 stage_name: step.name.clone(),
-                agent_name: SENTINEL_SKIPPED.to_string(),
+                agent_name: step.agent.clone(),
                 output: String::new(),
                 cost_cents: 0,
                 tokens: 0,
+                status: StageResultStatus::Skipped,
             });
             // Also mark this step as blocked so its own dependents are skipped.
             state.blocked_steps.insert(step.name.clone());
@@ -822,6 +845,7 @@ async fn run_step_for_each(
             output: aggregated,
             cost_cents: total_cost,
             tokens: total_tokens,
+            status: StageResultStatus::Executed,
         },
         events,
     ))
@@ -935,11 +959,14 @@ pub async fn run_workflow(
         for sr in step_results {
             result.total_cost_cents += sr.cost_cents;
             result.total_tokens += sr.tokens;
-            // Only update final_output for steps that actually ran. Sentinel
-            // agent names mark steps that failed (SENTINEL_FAILED) or were
-            // cascade-skipped (SENTINEL_SKIPPED); their output is always "".
-            // Using is_real_execution() rather than `output.is_empty()` correctly
-            // handles agents that legitimately produce empty output.
+            // "Last real-execution wins" contract: final_output is updated for
+            // each step whose status == Executed (in topological order). The
+            // last Executed step in the order sets the output seen by callers.
+            // If the terminal step in declaration order fails/is skipped, the
+            // output of the last *successful* step is returned — this is
+            // intentional and documented on `WorkflowResult::final_output`.
+            // Steps with `status == Failed` or `status == Skipped` have an
+            // empty output and must not overwrite a previous real result.
             if sr.is_real_execution() {
                 result.final_output.clone_from(&sr.output);
             }

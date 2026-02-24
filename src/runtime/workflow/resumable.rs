@@ -4,8 +4,8 @@ use crate::ast::WorkflowDef;
 
 use super::persistence;
 use super::{
-    StageResult, WorkflowContext, WorkflowError, WorkflowResult, build_result, resolve_next_stage,
-    run_stage,
+    StageResult, StageResultStatus, WorkflowContext, WorkflowError, WorkflowResult, build_result,
+    resolve_next_stage, run_stage,
 };
 
 fn build_resume_context(
@@ -23,6 +23,7 @@ fn build_resume_context(
                 output: cs.output.clone(),
                 cost_cents: cs.cost_cents,
                 tokens: cs.tokens,
+                status: StageResultStatus::Executed,
             })
             .collect();
         let skip = state
