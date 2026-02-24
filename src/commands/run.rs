@@ -227,10 +227,12 @@ fn run_workflow_mode(
             // Skips only occur as cascades from upstream failures under current
             // semantics — a skipped step implies at least one failed step.
             // The assert makes this invariant machine-checked so a future change
-            // (e.g., when:-condition skips) cannot silently produce a zero exit.
+            // (e.g., when:-condition skips tracked in #461) cannot silently
+            // produce a wrong exit code. When #461 lands, remove this assert
+            // and update the exit-code table in docs/getting-started.md.
             debug_assert!(
                 failed_count > 0 || skipped_count == 0,
-                "skipped_count={skipped_count} but failed_count=0: skips must cascade from a failure"
+                "skipped_count={skipped_count} but failed_count=0: skips must cascade from a failure (see #461)"
             );
             // Exit 0: all steps succeeded.
             // Exit 1: partial success — step(s) failed or were cascade-skipped.

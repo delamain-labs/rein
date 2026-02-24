@@ -811,7 +811,21 @@ async fn run_step_for_each(
     let mut events: Vec<super::RunEvent> = Vec::new();
 
     for (index, item) in items.iter().enumerate() {
-        let (result, fallback_used) = run_step_with_fallback(step, item, ctx).await?;
+        // Augment soft errors with iteration context so a `StepFailed` event
+        // identifies which item caused the abort. The `stage` field is set to
+        // `"<step> (iteration N of M)"` so the Display output — and therefore
+        // the `StepFailed.reason` in the event trace — includes the iteration
+        // number. Hard errors (e.g. `ApprovalRejected`) propagate unchanged.
+        let (result, fallback_used) = match run_step_with_fallback(step, item, ctx).await {
+            Ok(r) => r,
+            Err(WorkflowError::StageFailed { error, .. }) => {
+                return Err(WorkflowError::StageFailed {
+                    stage: format!("{} (iteration {} of {})", step.name, index + 1, total),
+                    error,
+                });
+            }
+            Err(e) => return Err(e),
+        };
         total_cost += result.cost_cents;
         total_tokens += result.tokens;
         outputs.push(serde_json::Value::String(result.output));
