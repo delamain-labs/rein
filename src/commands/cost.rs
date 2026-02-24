@@ -77,14 +77,17 @@ fn print_summary_to(traces: &[StructuredTrace], out: &mut impl Write) -> io::Res
     let total_duration: u64 = traces.iter().map(|t| t.stats.duration_ms).sum();
     let total_timeouts: u64 = traces.iter().map(|t| t.stats.timeout_count).sum();
 
-    // Per-agent breakdown
-    let mut agent_costs: std::collections::HashMap<String, (u64, u64, u64)> =
+    // Per-agent breakdown: (cost_cents, tokens, runs, timeouts)
+    let mut agent_costs: std::collections::HashMap<String, (u64, u64, u64, u64)> =
         std::collections::HashMap::new();
     for trace in traces {
-        let entry = agent_costs.entry(trace.agent.clone()).or_insert((0, 0, 0));
+        let entry = agent_costs
+            .entry(trace.agent.clone())
+            .or_insert((0, 0, 0, 0));
         entry.0 += trace.stats.total_cost_cents;
         entry.1 += trace.stats.total_tokens;
         entry.2 += 1;
+        entry.3 += trace.stats.timeout_count;
     }
 
     writeln!(out, "Cost Summary")?;
@@ -116,13 +119,22 @@ fn print_summary_to(traces: &[StructuredTrace], out: &mut impl Write) -> io::Res
         writeln!(out, "---------")?;
         let mut agents: Vec<_> = agent_costs.into_iter().collect();
         agents.sort_by(|a, b| b.1.0.cmp(&a.1.0));
-        for (agent, (cost, tokens, runs)) in agents {
-            writeln!(
-                out,
-                "  {agent}: ${}.{:02} ({tokens} tokens, {runs} runs)",
-                cost / 100,
-                cost % 100
-            )?;
+        for (agent, (cost, tokens, runs, timeouts)) in agents {
+            if timeouts > 0 {
+                writeln!(
+                    out,
+                    "  {agent}: ${}.{:02} ({tokens} tokens, {runs} runs, {timeouts} timeouts)",
+                    cost / 100,
+                    cost % 100
+                )?;
+            } else {
+                writeln!(
+                    out,
+                    "  {agent}: ${}.{:02} ({tokens} tokens, {runs} runs)",
+                    cost / 100,
+                    cost % 100
+                )?;
+            }
         }
     }
 
@@ -244,6 +256,31 @@ mod tests {
         assert!(
             output.contains("Stage timeouts: 3"),
             "aggregate timeout count must be summed across traces; got:\n{output}"
+        );
+    }
+
+    /// #518: Per-agent breakdown must include timeout count when non-zero, and
+    /// omit it when zero (consistent with per-agent display convention).
+    #[test]
+    fn print_summary_per_agent_shows_timeouts_when_nonzero() {
+        let mut t1 = make_trace("agent_a", 500, 2000);
+        t1.stats.timeout_count = 2;
+        let mut t2 = make_trace("agent_b", 200, 800);
+        t2.stats.timeout_count = 0;
+        let mut buf = Vec::new();
+        print_summary_to(&[t1, t2], &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+
+        let agent_a_line = output.lines().find(|l| l.contains("agent_a")).unwrap_or("");
+        assert!(
+            agent_a_line.contains("2 timeouts"),
+            "per-agent line for agent_a must include timeout count when non-zero; got:\n{output}"
+        );
+
+        let agent_b_line = output.lines().find(|l| l.contains("agent_b")).unwrap_or("");
+        assert!(
+            !agent_b_line.contains("timeouts"),
+            "per-agent line for agent_b must NOT include timeout count when zero; got:\n{output}"
         );
     }
 
