@@ -136,9 +136,11 @@ pub enum RunEvent {
     StepSkipped {
         /// Name of the step that was skipped.
         step: String,
-        /// Name of the dependency step that caused this step to be skipped.
-        /// Enables structured OTEL queries like `rein.step.failed_dependency = "step_a"`.
-        failed_dependency: String,
+        /// Name of the immediate dependency that blocked this step. May itself be a
+        /// skipped step rather than a directly failed step (transitive chains).
+        /// Use the `StepFailed` event to find the root-cause step.
+        /// Enables structured OTEL queries via `rein.step.blocked_dependency`.
+        blocked_dependency: String,
         /// Human-readable reason (e.g. "dependency '`step_a`' failed").
         reason: String,
     },

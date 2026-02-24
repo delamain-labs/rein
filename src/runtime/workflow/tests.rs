@@ -2854,7 +2854,7 @@ async fn cyclic_dependency_is_hard_error() {
 
 /// #363/#374 — A `for_each` step that fails (agent not found) is a soft error:
 /// it is recorded as `StepFailed` and its declared dependents receive
-/// `StepSkipped`. The `StepSkipped` event must include `failed_dependency`
+/// `StepSkipped`. The `StepSkipped` event must include `blocked_dependency`
 /// set to the failing step's name (not a generic "unknown").
 #[tokio::test]
 async fn for_each_step_failure_cascades_to_dependent() {
@@ -2898,7 +2898,7 @@ async fn for_each_step_failure_cascades_to_dependent() {
         result.events
     );
 
-    // step_b skipped because step_a failed → StepSkipped with correct failed_dependency.
+    // step_b skipped because step_a failed → StepSkipped with correct blocked_dependency.
     let skipped_b = result.events.iter().find(
         |e| matches!(e, crate::runtime::RunEvent::StepSkipped { step, .. } if step == "step_b"),
     );
@@ -2908,12 +2908,12 @@ async fn for_each_step_failure_cascades_to_dependent() {
         result.events
     );
     if let Some(crate::runtime::RunEvent::StepSkipped {
-        failed_dependency, ..
+        blocked_dependency, ..
     }) = skipped_b
     {
         assert_eq!(
-            failed_dependency, "step_a",
-            "StepSkipped.failed_dependency must be 'step_a'"
+            blocked_dependency, "step_a",
+            "StepSkipped.blocked_dependency must be 'step_a'"
         );
     }
 

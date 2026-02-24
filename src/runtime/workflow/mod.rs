@@ -707,7 +707,7 @@ pub async fn run_steps(
             let reason = format!("dependency '{failed_dep}' failed");
             state.events.push(super::RunEvent::StepSkipped {
                 step: step.name.clone(),
-                failed_dependency: failed_dep.clone(),
+                blocked_dependency: failed_dep.clone(),
                 reason,
             });
             // Insert an empty output so the step appears in `outputs` for
