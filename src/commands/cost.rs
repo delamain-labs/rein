@@ -231,6 +231,22 @@ mod tests {
         );
     }
 
+    /// #534: Stage timeouts line must show the sum across all traces.
+    #[test]
+    fn print_summary_aggregates_timeout_counts_across_traces() {
+        let mut t1 = make_trace("bot1", 100, 500);
+        t1.stats.timeout_count = 3;
+        let mut t2 = make_trace("bot2", 100, 500);
+        t2.stats.timeout_count = 0;
+        let mut buf = Vec::new();
+        print_summary_to(&[t1, t2], &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(
+            output.contains("Stage timeouts: 3"),
+            "aggregate timeout count must be summed across traces; got:\n{output}"
+        );
+    }
+
     /// #510: run_cost must succeed (exit 0) when traces include StageTimeout events.
     /// Stage timeouts: N is now always printed regardless of count (#520).
     #[test]
