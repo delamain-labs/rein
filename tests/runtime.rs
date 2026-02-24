@@ -1,8 +1,12 @@
 /// Integration tests for the full agent runtime pipeline.
 ///
 /// Tests the flow: parse .rein → build engine → run with mocks → verify trace.
+use std::sync::Arc;
+
 use serde_json::json;
 
+use rein::runtime::approval::{AutoApproveHandler, AuditingApprovalHandler};
+use rein::runtime::audit::{AuditKind, AuditLog};
 use rein::runtime::engine::{AgentEngine, RunConfig};
 use rein::runtime::executor::MockExecutor;
 use rein::runtime::permissions::ToolRegistry;
@@ -401,5 +405,140 @@ async fn integration_resumable_workflow_timestamps_parallel() {
         result.event_timestamps_ms.len(),
         result.events.len(),
         "event_timestamps_ms must have one entry per event in resumable path"
+    );
+}
+
+// ── #438: --audit-log end-to-end integration test ───────────────────────────
+
+/// #438: Running a workflow with `audit_log` set and an approval step must
+/// produce a JSONL audit file containing at least one `ApprovalRequested` and
+/// one `ApprovalResolved` entry, each with the correct `workflow` and `step`
+/// fields.
+#[tokio::test]
+async fn audit_log_records_approval_requested_and_resolved() {
+    use rein::ast::{
+        ApprovalDef, ApprovalKind, ExecutionMode, RouteRule, Span, StepDef, WorkflowDef,
+    };
+
+    let source = r#"
+        agent reviewer { model: openai }
+    "#;
+    let file = rein::parser::parse(source).expect("parse");
+
+    // Build a step with an approval gate.
+    let step = StepDef {
+        name: "review_step".to_string(),
+        agent: "reviewer".to_string(),
+        goal: None,
+        input: None,
+        output_constraints: vec![],
+        depends_on: vec![],
+        when: None,
+        on_failure: None,
+        send_to: None,
+        fallback: None,
+        for_each: None,
+        typed_input: None,
+        typed_outputs: vec![],
+        escalate: None,
+        approval: Some(ApprovalDef {
+            kind: ApprovalKind::Approve,
+            channel: "slack".to_string(),
+            destination: "#approvals".to_string(),
+            timeout: None,
+            mode: None,
+            span: Span::new(0, 1),
+        }),
+        span: Span::new(0, 1),
+    };
+
+    let workflow = WorkflowDef {
+        name: "approval_workflow".to_string(),
+        trigger: "ticket".to_string(),
+        stages: vec![],
+        steps: vec![step],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("review result"));
+
+    let executor = MockExecutor::new();
+
+    // Point audit log at a temp file.
+    let audit_path = std::env::temp_dir().join("rein_test_audit_438.jsonl");
+    let _ = std::fs::remove_file(&audit_path);
+    let audit_log = Arc::new(AuditLog::new(&audit_path).expect("audit log should be creatable"));
+
+    // Use AutoApproveHandler so the step executes without blocking.
+    let approval_handler: Arc<dyn rein::runtime::approval::ApprovalHandler> =
+        Arc::new(AutoApproveHandler);
+
+    let ctx = rein::runtime::workflow::WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: Some(approval_handler),
+        audit_log: Some(Arc::clone(&audit_log)),
+        workflow_name: Some("approval_workflow".to_string()),
+    };
+
+    rein::runtime::workflow::run_workflow(&workflow, &ctx)
+        .await
+        .expect("workflow should succeed");
+
+    // Read audit JSONL entries.
+    let entries = audit_log
+        .read_all()
+        .expect("audit log should be readable");
+
+    // Assert at least one ApprovalRequested entry.
+    let requested: Vec<_> = entries
+        .iter()
+        .filter(|e| e.kind == AuditKind::ApprovalRequested)
+        .collect();
+    assert!(
+        !requested.is_empty(),
+        "expected at least one ApprovalRequested in audit log; got entries: {entries:?}"
+    );
+    let req = &requested[0];
+    assert_eq!(
+        req.workflow.as_deref(),
+        Some("approval_workflow"),
+        "ApprovalRequested.workflow must be 'approval_workflow'"
+    );
+    assert_eq!(
+        req.step.as_deref(),
+        Some("review_step"),
+        "ApprovalRequested.step must be 'review_step'"
+    );
+
+    // Assert at least one ApprovalResolved entry.
+    let resolved: Vec<_> = entries
+        .iter()
+        .filter(|e| e.kind == AuditKind::ApprovalResolved)
+        .collect();
+    assert!(
+        !resolved.is_empty(),
+        "expected at least one ApprovalResolved in audit log; got entries: {entries:?}"
+    );
+    let res = &resolved[0];
+    assert_eq!(
+        res.workflow.as_deref(),
+        Some("approval_workflow"),
+        "ApprovalResolved.workflow must be 'approval_workflow'"
+    );
+    assert_eq!(
+        res.step.as_deref(),
+        Some("review_step"),
+        "ApprovalResolved.step must be 'review_step'"
     );
 }
