@@ -781,7 +781,6 @@ fn apply_step_result(
 ///
 /// Callers that propagate the error without inspecting partial events can use
 /// `.map_err(|(e, _)| e)?` to recover the original `WorkflowError`.
-#[allow(clippy::too_many_lines)]
 pub(crate) async fn run_steps(
     workflow: &WorkflowDef,
     ctx: &WorkflowContext<'_>,
@@ -805,108 +804,18 @@ pub(crate) async fn run_steps(
     };
 
     for (index, step) in ordered.into_iter().enumerate() {
-        // Skip this step if any declared dependency is blocked (failed or cascade-skipped).
-        if let Some(failed_dep) = step
-            .depends_on
-            .iter()
-            .find(|dep| state.blocked_steps.contains(*dep))
-        {
-            let reason = format!("dependency '{failed_dep}' failed");
-            state.events.push(super::RunEvent::StepSkipped {
-                step: step.name.clone(),
-                blocked_dependency: failed_dep.clone(),
-                reason,
-            });
-            // Insert an empty output so the step appears in `outputs` for
-            // downstream input-building. `outputs.get(dep)` returns `Some("")`
-            // for skipped entries, not `None`. Dependent steps are prevented
-            // from running by the skip-guard (via failed_steps below).
-            state.outputs.insert(step.name.clone(), String::new());
-            // StepStarted is intentionally omitted for skipped steps — a skipped
-            // step never began execution, so the event lifecycle is:
-            //   normal:  StepStarted → StepCompleted
-            //   failed:  StepStarted → StepFailed
-            //   skipped: StepSkipped (no StepStarted)
-            // Do not add StepStarted here to avoid a spurious event before StepSkipped.
-            state.results.push(StageResult {
-                stage_name: step.name.clone(),
-                agent_name: step.agent.clone(),
-                output: String::new(),
-                cost_cents: 0,
-                tokens: 0,
-                status: StageResultStatus::Skipped,
-            });
-            // Also mark this step as blocked so its own dependents are skipped.
-            state.blocked_steps.insert(step.name.clone());
-            continue;
+        if let Some(outcome) = handle_skip_guard(step, &mut state) {
+            match outcome {
+                StepOutcome::Continue => continue,
+                StepOutcome::AutoResolved => break,
+                StepOutcome::HardError(_) => unreachable!("skip-guard never returns HardError"),
+            }
         }
 
-        // Safety invariant: this block is only reached when every entry in
-        // `step.depends_on` succeeded (the skip-guard above ensures any step
-        // with a failed/skipped dependency is `continue`d before here).
-        // Therefore `outputs.get(dep)` will not return `Some("")` for any dep.
-        state.events.push(super::RunEvent::StepStarted {
-            step: step.name.clone(),
-            index,
-        });
-
-        let input = if step.depends_on.is_empty() {
-            trigger_input.clone()
-        } else {
-            step.depends_on
-                .iter()
-                .filter_map(|dep| state.outputs.get(dep))
-                .cloned()
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-
-        // For for_each, prefer the raw trigger JSON (no "Trigger: " prefix) so
-        // serde_json can parse it. Falls back to `input` when depends_on is set
-        // (previous step output is already plain text/JSON).
-        let for_each_input = if step.depends_on.is_empty() {
-            workflow.trigger.clone()
-        } else {
-            input.clone()
-        };
-
-        let step_result = if let Some(ref key) = step.for_each {
-            run_step_for_each(step, &for_each_input, key, ctx).await
-        } else {
-            run_step_with_fallback(step, &input, ctx)
-                .await
-                .map(|(r, fallback_used)| {
-                    let mut evts = Vec::new();
-                    if fallback_used {
-                        let fallback_name = step
-                            .fallback
-                            .as_ref()
-                            .expect(
-                                "run_step: fallback_used is only true when step.fallback is Some",
-                            )
-                            .name
-                            .clone();
-                        evts.push(super::RunEvent::StepFallback {
-                            step: step.name.clone(),
-                            fallback_step: fallback_name,
-                        });
-                    }
-                    (r, evts)
-                })
-        };
-
-        match apply_step_result(
-            step,
-            step_result,
-            workflow.auto_resolve.as_ref(),
-            &mut state,
-        ) {
+        match execute_step_in_dag(step, index, &trigger_input, workflow, ctx, &mut state).await {
             StepOutcome::Continue => {}
             StepOutcome::AutoResolved => break,
             StepOutcome::HardError(e) => {
-                // Emit WorkflowAborted before returning so OTEL consumers and
-                // callers that inspect partial events can see why the workflow
-                // was hard-aborted — otherwise the abort is invisible (#506).
                 state.events.push(super::RunEvent::WorkflowAborted {
                     error_kind: e.kind_str().to_string(),
                     reason: e.to_string(),
@@ -917,6 +826,118 @@ pub(crate) async fn run_steps(
     }
 
     Ok((state.results, state.events))
+}
+
+/// Apply cascade-skip logic for a step whose dependency is blocked.
+///
+/// Returns `Some(StepOutcome::Continue)` when the step was skipped (caller
+/// should `continue` the loop), or `None` when the step has no blocked
+/// dependency and should proceed to execution.
+fn handle_skip_guard(step: &crate::ast::StepDef, state: &mut StepLoopState) -> Option<StepOutcome> {
+    let failed_dep = step
+        .depends_on
+        .iter()
+        .find(|dep| state.blocked_steps.contains(*dep))?;
+
+    let reason = format!("dependency '{failed_dep}' failed");
+    state.events.push(super::RunEvent::StepSkipped {
+        step: step.name.clone(),
+        blocked_dependency: failed_dep.clone(),
+        reason,
+    });
+    // Insert an empty output so the step appears in `outputs` for
+    // downstream input-building. `outputs.get(dep)` returns `Some("")`
+    // for skipped entries, not `None`. Dependent steps are prevented
+    // from running by the skip-guard (via failed_steps below).
+    state.outputs.insert(step.name.clone(), String::new());
+    // StepStarted is intentionally omitted for skipped steps — a skipped
+    // step never began execution, so the event lifecycle is:
+    //   normal:  StepStarted → StepCompleted
+    //   failed:  StepStarted → StepFailed
+    //   skipped: StepSkipped (no StepStarted)
+    // Do not add StepStarted here to avoid a spurious event before StepSkipped.
+    state.results.push(StageResult {
+        stage_name: step.name.clone(),
+        agent_name: step.agent.clone(),
+        output: String::new(),
+        cost_cents: 0,
+        tokens: 0,
+        status: StageResultStatus::Skipped,
+    });
+    // Also mark this step as blocked so its own dependents are skipped.
+    state.blocked_steps.insert(step.name.clone());
+    Some(StepOutcome::Continue)
+}
+
+/// Execute one step in the DAG loop body.
+///
+/// Emits `StepStarted`, builds the step input from prior outputs or trigger,
+/// runs the step (with `for_each` or fallback as applicable), then delegates to
+/// `apply_step_result`. Callers must have already confirmed this step has no
+/// blocked dependency (i.e. `handle_skip_guard` returned `None`).
+async fn execute_step_in_dag(
+    step: &crate::ast::StepDef,
+    index: usize,
+    trigger_input: &str,
+    workflow: &WorkflowDef,
+    ctx: &WorkflowContext<'_>,
+    state: &mut StepLoopState,
+) -> StepOutcome {
+    // Safety invariant: this function is only called when every entry in
+    // `step.depends_on` succeeded (the skip-guard ensures any step with a
+    // failed/skipped dependency is handled before this call).
+    // Therefore `outputs.get(dep)` will not return `Some("")` for any dep.
+    state.events.push(super::RunEvent::StepStarted {
+        step: step.name.clone(),
+        index,
+    });
+
+    let input = if step.depends_on.is_empty() {
+        trigger_input.to_string()
+    } else {
+        step.depends_on
+            .iter()
+            .filter_map(|dep| state.outputs.get(dep))
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    // For for_each, prefer the raw trigger JSON (no "Trigger: " prefix) so
+    // serde_json can parse it. Falls back to `input` when depends_on is set
+    // (previous step output is already plain text/JSON).
+    let for_each_input = if step.depends_on.is_empty() {
+        workflow.trigger.clone()
+    } else {
+        input.clone()
+    };
+
+    let step_result = if let Some(ref key) = step.for_each {
+        run_step_for_each(step, &for_each_input, key, ctx).await
+    } else {
+        run_step_with_fallback(step, &input, ctx)
+            .await
+            .map(|(r, fallback_used)| {
+                let mut evts = Vec::new();
+                if fallback_used {
+                    let fallback_name = step
+                        .fallback
+                        .as_ref()
+                        .expect(
+                            "run_step: fallback_used is only true when step.fallback is Some",
+                        )
+                        .name
+                        .clone();
+                    evts.push(super::RunEvent::StepFallback {
+                        step: step.name.clone(),
+                        fallback_step: fallback_name,
+                    });
+                }
+                (r, evts)
+            })
+    };
+
+    apply_step_result(step, step_result, workflow.auto_resolve.as_ref(), state)
 }
 
 /// Execute a step once per item in a JSON array extracted from the input.
