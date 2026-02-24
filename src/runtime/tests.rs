@@ -943,3 +943,61 @@ fn to_structured_counts_stage_timeouts() {
         "two StageTimeout events must produce timeout_count = 2"
     );
 }
+
+/// #509: Mixing StageTimeout events with LlmCall and ToolCallAttempt events
+/// must not cause counter interference — each counter is incremented only by
+/// its own event type, not by others.
+#[test]
+fn to_structured_timeout_count_does_not_interfere_with_other_counters() {
+    use crate::runtime::{ToolCall, ToolResult};
+
+    let trace = RunTrace::from_events(vec![
+        RunEvent::LlmCall {
+            model: "gpt-4o".to_string(),
+            input_tokens: 100,
+            output_tokens: 50,
+            cost_cents: 5,
+        },
+        RunEvent::StageTimeout {
+            turn: 0,
+            timeout_secs: 30,
+        },
+        RunEvent::ToolCallAttempt {
+            tool: ToolCall {
+                namespace: "files".to_string(),
+                action: "read".to_string(),
+                arguments: serde_json::json!({}),
+            },
+            allowed: true,
+            reason: None,
+        },
+        RunEvent::StageTimeout {
+            turn: 1,
+            timeout_secs: 30,
+        },
+        RunEvent::LlmCall {
+            model: "gpt-4o".to_string(),
+            input_tokens: 80,
+            output_tokens: 40,
+            cost_cents: 4,
+        },
+    ]);
+    let structured = trace.to_structured(
+        "agent",
+        "2024-01-01T00:00:00Z",
+        "2024-01-01T00:01:00Z",
+        60000,
+    );
+    assert_eq!(
+        structured.stats.timeout_count, 2,
+        "two StageTimeout events must produce timeout_count = 2"
+    );
+    assert_eq!(
+        structured.stats.llm_calls, 2,
+        "two LlmCall events must produce llm_calls = 2"
+    );
+    assert_eq!(
+        structured.stats.tool_calls, 1,
+        "one ToolCallAttempt must produce tool_calls = 1"
+    );
+}

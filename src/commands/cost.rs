@@ -63,6 +63,7 @@ fn print_summary(traces: &[StructuredTrace]) {
     let total_tool_calls: u64 = traces.iter().map(|t| t.stats.tool_calls).sum();
     let total_denied: u64 = traces.iter().map(|t| t.stats.tool_calls_denied).sum();
     let total_duration: u64 = traces.iter().map(|t| t.stats.duration_ms).sum();
+    let total_timeouts: u64 = traces.iter().map(|t| t.stats.timeout_count).sum();
 
     // Per-agent breakdown
     let mut agent_costs: std::collections::HashMap<String, (u64, u64, u64)> =
@@ -85,6 +86,9 @@ fn print_summary(traces: &[StructuredTrace]) {
     println!("Total tokens: {total_tokens}");
     println!("LLM calls:    {total_llm_calls}");
     println!("Tool calls:   {total_tool_calls} ({total_denied} denied)");
+    if total_timeouts > 0 {
+        println!("Stage timeouts: {total_timeouts}");
+    }
     println!(
         "Total time:   {}.{:01}s",
         total_duration / 1000,
