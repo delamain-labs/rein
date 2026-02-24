@@ -175,15 +175,14 @@ pub enum RunEvent {
         step: String,
         /// Human-readable error description.
         reason: String,
-        /// Machine-parseable error category in `snake_case` (e.g. `"agent_not_found"`,
-        /// `"stage_failed"`). Mapped from the underlying `WorkflowError` variant at
-        /// the emit site. OTEL dashboards and alerting rules should use this field
-        /// rather than parsing `reason` with regex.
+        /// Machine-parseable error category. OTEL dashboards and alerting rules
+        /// should match on this enum rather than parsing `reason` with regex.
         ///
-        /// Defaults to `"unknown"` when deserializing JSON produced before this field
-        /// was added, so consumers can replay persisted event streams without errors.
+        /// Defaults to `StepErrorKind::Unknown` when deserializing JSON produced
+        /// before this field was added, so consumers can replay persisted event
+        /// streams without errors.
         #[serde(default = "default_error_kind")]
-        error_kind: String,
+        error_kind: StepErrorKind,
     },
     /// A workflow was hard-aborted by a policy-enforcement or infrastructure
     /// error. Emitted on any hard abort — by `run_steps` before returning a
@@ -206,12 +205,51 @@ pub enum RunEvent {
     },
 }
 
-/// Default value for `StepFailed::error_kind` when deserializing JSON that predates the field.
+/// Machine-parseable error category for `RunEvent::StepFailed`.
 ///
-/// Returning `"unknown"` rather than `""` makes it detectable by consumers
-/// (an empty string is ambiguous — was it explicitly set to empty or was it missing?).
-fn default_error_kind() -> String {
-    "unknown".to_string()
+/// Rust SDK consumers can pattern-match exhaustively on this enum instead of
+/// comparing strings. New variants may be added in future releases — the
+/// `#[non_exhaustive]` attribute requires `_ => {}` arms in `match` blocks to
+/// remain forward-compatible.
+///
+/// OTEL export serializes this via `serde_json` to the existing `snake_case`
+/// attribute value so there is no wire-format break.
+///
+/// `#[serde(other)]` maps any unknown string (from a future Rein version) to
+/// `Unknown` so older SDK consumers can deserialize persisted traces safely.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StepErrorKind {
+    AgentNotFound,
+    StageFailed,
+    StageTimedOut,
+    StageNotFound,
+    PersistenceFailure,
+    CircularRoute,
+    ApprovalRejected,
+    ApprovalTimedOut,
+    ApprovalPending,
+    CyclicDependency,
+    #[serde(other)]
+    Unknown,
+}
+
+impl std::fmt::Display for StepErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Delegate to serde's snake_case representation so the Display output
+        // matches what OTEL attribute values contain.
+        let s = serde_json::to_string(self).unwrap_or_else(|_| "\"unknown\"".to_string());
+        // Strip the JSON quotes produced by serde_json::to_string.
+        write!(f, "{}", s.trim_matches('"'))
+    }
+}
+
+/// Default value for `StepFailed::error_kind` when deserializing JSON that
+/// predates the typed enum (pre-#505). Maps the legacy `"unknown"` sentinel
+/// to `StepErrorKind::Unknown`.
+fn default_error_kind() -> StepErrorKind {
+    StepErrorKind::Unknown
 }
 
 /// An ordered log of all events that occurred during a run.
