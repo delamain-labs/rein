@@ -15,17 +15,19 @@ pub struct Event {
     pub timestamp_ms: u64,
 }
 
-/// Event categories.
+/// Event categories for the `EventBus` pub/sub system.
+///
+/// These represent workflow-level and agent/tool-level events suitable for
+/// streaming to external consumers. Step lifecycle events (`StepStarted`,
+/// `StepCompleted`, `StepFailed`, `StepSkipped`) are intentionally absent —
+/// those are owned by `RunEvent` (in `src/runtime/mod.rs`) which is the
+/// single canonical step-lifecycle event system. (#381)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum EventKind {
     WorkflowStarted,
     WorkflowCompleted,
     WorkflowFailed,
-    StepStarted,
-    StepCompleted,
-    StepFailed,
-    StepSkipped,
     AgentInvoked,
     ToolCalled,
     GuardrailTriggered,
