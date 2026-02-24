@@ -507,8 +507,7 @@ async fn approval_requested_truncates_long_agent_output() {
     let recorded = entries[0].metadata["agent_output"].as_str().unwrap();
     // The maximum recorded length is AGENT_OUTPUT_PREVIEW_LIMIT bytes + TRUNCATION_MARKER.
     // Both constants are module-level in approval/mod.rs so they stay in sync with production.
-    let max_expected = AGENT_OUTPUT_PREVIEW_LIMIT
-        + TRUNCATION_MARKER.len();
+    let max_expected = AGENT_OUTPUT_PREVIEW_LIMIT + TRUNCATION_MARKER.len();
     assert!(
         recorded.len() <= max_expected,
         "truncated output must be <= {} chars (limit + marker), got {}",
@@ -554,8 +553,7 @@ async fn approval_requested_truncates_multibyte_boundary_safely() {
     let recorded = entries[0].metadata["agent_output"].as_str().unwrap();
     // Must be valid UTF-8 (guaranteed by the str type), within the bound, and end
     // with the truncation marker.
-    let max_expected = AGENT_OUTPUT_PREVIEW_LIMIT
-        + TRUNCATION_MARKER.len();
+    let max_expected = AGENT_OUTPUT_PREVIEW_LIMIT + TRUNCATION_MARKER.len();
     assert!(
         recorded.len() <= max_expected,
         "multibyte truncation must be <= {} bytes, got {}",
@@ -629,11 +627,12 @@ async fn webhook_handler_truncates_long_agent_output_in_payload() {
     assert_eq!(received.len(), 1, "expected exactly one POST");
     let body: serde_json::Value =
         serde_json::from_slice(&received[0].body).expect("body must be valid JSON");
-    let sent_output = body["agent_output"].as_str().expect("agent_output must be present");
+    let sent_output = body["agent_output"]
+        .as_str()
+        .expect("agent_output must be present");
 
     // The sent output must not exceed the preview limit + marker.
-    let max_len =
-        AGENT_OUTPUT_PREVIEW_LIMIT + TRUNCATION_MARKER.len();
+    let max_len = AGENT_OUTPUT_PREVIEW_LIMIT + TRUNCATION_MARKER.len();
     assert!(
         sent_output.len() <= max_len,
         "webhook agent_output must be truncated; got {} bytes (limit {})",
@@ -675,8 +674,7 @@ async fn slack_handler_truncates_long_agent_output_in_message() {
         serde_json::from_slice(&received[0].body).expect("body must be valid JSON");
     let text = body["text"].as_str().expect("text field must be present");
 
-    let max_len =
-        AGENT_OUTPUT_PREVIEW_LIMIT + TRUNCATION_MARKER.len();
+    let max_len = AGENT_OUTPUT_PREVIEW_LIMIT + TRUNCATION_MARKER.len();
     // The Slack text ends with "\n{output_preview}"; extract the output portion
     // after the fixed prefix and assert its length directly.
     let output_portion = text
@@ -720,7 +718,9 @@ async fn webhook_handler_short_agent_output_not_truncated() {
     let received = server.received_requests().await.unwrap();
     let body: serde_json::Value =
         serde_json::from_slice(&received[0].body).expect("body must be valid JSON");
-    let sent_output = body["agent_output"].as_str().expect("agent_output must be present");
+    let sent_output = body["agent_output"]
+        .as_str()
+        .expect("agent_output must be present");
 
     assert_eq!(
         sent_output, short_output,
@@ -804,7 +804,9 @@ async fn webhook_handler_truncates_multibyte_boundary_safely() {
     let received = server.received_requests().await.unwrap();
     let body: serde_json::Value =
         serde_json::from_slice(&received[0].body).expect("body must be valid JSON");
-    let sent_output = body["agent_output"].as_str().expect("agent_output must be present");
+    let sent_output = body["agent_output"]
+        .as_str()
+        .expect("agent_output must be present");
 
     let max_len = AGENT_OUTPUT_PREVIEW_LIMIT + TRUNCATION_MARKER.len();
     assert!(
@@ -913,9 +915,17 @@ async fn resolve_handler_webhook_with_audit_log_emits_audit_entries_on_2xx() {
         entries.len()
     );
     assert_eq!(entries[0].kind, AuditKind::ApprovalRequested);
-    assert_eq!(entries[0].step.as_deref(), Some("deploy"), "step must be set on ApprovalRequested");
+    assert_eq!(
+        entries[0].step.as_deref(),
+        Some("deploy"),
+        "step must be set on ApprovalRequested"
+    );
     assert_eq!(entries[1].kind, AuditKind::ApprovalResolved);
-    assert_eq!(entries[1].step.as_deref(), Some("deploy"), "step must be set on ApprovalResolved");
+    assert_eq!(
+        entries[1].step.as_deref(),
+        Some("deploy"),
+        "step must be set on ApprovalResolved"
+    );
     assert_eq!(entries[1].metadata["decision"], "approved");
 }
 
@@ -963,8 +973,16 @@ async fn resolve_handler_slack_with_audit_log_emits_audit_entries_on_2xx() {
         entries.len()
     );
     assert_eq!(entries[0].kind, AuditKind::ApprovalRequested);
-    assert_eq!(entries[0].step.as_deref(), Some("notify"), "step must be set on ApprovalRequested");
+    assert_eq!(
+        entries[0].step.as_deref(),
+        Some("notify"),
+        "step must be set on ApprovalRequested"
+    );
     assert_eq!(entries[1].kind, AuditKind::ApprovalResolved);
-    assert_eq!(entries[1].step.as_deref(), Some("notify"), "step must be set on ApprovalResolved");
+    assert_eq!(
+        entries[1].step.as_deref(),
+        Some("notify"),
+        "step must be set on ApprovalResolved"
+    );
     assert_eq!(entries[1].metadata["decision"], "approved");
 }

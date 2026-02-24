@@ -15,6 +15,24 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// even when two IDs are generated within the same nanosecond.
 static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+fn default_true() -> bool {
+    true
+}
+
+/// Returns `true` if `*v` is `true`.
+///
+/// Used as `skip_serializing_if` predicate for `is_clock_reliable` so that
+/// the field is omitted from serialized JSON when the clock is reliable (the
+/// common case). Combined with `default = "default_true"`, absent fields
+/// round-trip correctly for both old and new entries.
+///
+/// `bool` is `Copy`, but serde's `skip_serializing_if` always passes `&T`,
+/// so the `&bool` argument is unavoidable here.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_true(v: &bool) -> bool {
+    *v
+}
+
 /// A single audit log entry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuditEntry {
@@ -35,6 +53,18 @@ pub struct AuditEntry {
     /// Additional structured metadata.
     #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
     pub metadata: serde_json::Value,
+    /// Whether the system clock was post-epoch when this entry's ID was
+    /// generated. `false` means `duration_since(UNIX_EPOCH)` returned `Err`
+    /// (clock before epoch — e.g. RTC not set, certain CI containers). The
+    /// hex timestamp prefix in `id` will be `0` rather than a real timestamp,
+    /// so compliance consumers must not rely on it for time ordering.
+    ///
+    /// Deserializes as `true` when the field is absent (entries produced before
+    /// this field was added are assumed reliable). Omitted from serialized JSON
+    /// when `true` (the common case) to keep audit lines compact; always
+    /// written when `false` so compliance consumers can detect the anomaly.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub is_clock_reliable: bool,
 }
 
 /// Categories of auditable events.
@@ -114,32 +144,45 @@ impl From<serde_json::Error> for AuditError {
 impl AuditLog {
     /// Create a new audit log at the given path.
     ///
-    /// Creates parent directories if needed and verifies that the parent
+    /// Creates parent directories if needed and verifies that the probe
     /// directory is writable **without** creating the target file. The target
     /// file is created lazily on the first `append` call. This prevents
     /// compliance tools from seeing a zero-byte audit file and misinterpreting
     /// it as "logging is active but nothing was approved" when the workflow
-    /// never executed (e.g. because `.rein` validation failed after `AuditLog::new`).
+    /// never executed (e.g. because `.rein` validation failed after
+    /// `AuditLog::new`).
+    ///
+    /// **Bare-filename fallback:** when `path` is a bare filename with no
+    /// directory component (e.g. `"audit.jsonl"`), `parent()` returns an
+    /// empty path. In that case the probe falls back to `current_dir()` so
+    /// the writability check is always performed against a real directory.
     ///
     /// The writability probe uses a temporary file in the same directory.
     pub fn new(path: impl Into<PathBuf>) -> Result<Self, AuditError> {
         let path = path.into();
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-            // Probe writability via a temp file in the same directory without
-            // creating or touching the target file. The temp file is created and
-            // immediately removed so it leaves no side effect.
-            // Use generate_id() suffix to avoid collisions when multiple processes
-            // or parallel test threads create audit logs in the same directory.
-            let probe = parent.join(format!(".rein-audit-probe-{}", Self::generate_id()));
-            fs::File::create(&probe)?;
-            // Cleanup is best-effort: writability is already confirmed by the
-            // successful create above. If remove_file fails (e.g. the file was
-            // deleted by a concurrent actor), propagating the error would reject
-            // a writable directory, which is misleading. The probe file is
-            // self-documenting by its name prefix (.rein-audit-probe-*).
-            let _ = fs::remove_file(&probe);
-        }
+        // Resolve the probe directory. `parent()` returns `Some("")` for a
+        // bare filename ("audit.jsonl") which is not a usable directory path.
+        // Fall back to cwd explicitly rather than silently skipping the probe.
+        let probe_dir = match path.parent() {
+            Some(p) if !p.as_os_str().is_empty() => {
+                fs::create_dir_all(p)?;
+                p.to_path_buf()
+            }
+            _ => std::env::current_dir()?,
+        };
+        // Probe writability via a temp file in the probe directory without
+        // creating or touching the target file. The temp file is created and
+        // immediately removed so it leaves no side effect.
+        // Use generate_id() suffix to avoid collisions when multiple processes
+        // or parallel test threads create audit logs in the same directory.
+        let probe = probe_dir.join(format!(".rein-audit-probe-{}", Self::generate_id().0));
+        fs::File::create(&probe)?;
+        // Cleanup is best-effort: writability is already confirmed by the
+        // successful create above. If remove_file fails (e.g. the file was
+        // deleted by a concurrent actor), propagating the error would reject
+        // a writable directory, which is misleading. The probe file is
+        // self-documenting by its name prefix (.rein-audit-probe-*).
+        let _ = fs::remove_file(&probe);
         Ok(Self {
             path,
             write_lock: Mutex::new(()),
@@ -210,32 +253,30 @@ impl AuditLog {
 
     /// Generate a unique event ID.
     ///
-    /// Combines a nanosecond wall-clock timestamp with a process-local atomic
-    /// sequence number so IDs remain unique even when two events are generated
-    /// within the same nanosecond (e.g. in parallel workflow steps or tests).
+    /// Returns `(id, is_clock_reliable)` where `is_clock_reliable` is `false`
+    /// when the system clock is set before the Unix epoch (e.g. RTC not set,
+    /// certain CI containers). In that case the hex timestamp prefix in `id`
+    /// will be `0` rather than a real timestamp; IDs remain unique because the
+    /// atomic sequence counter still increments.
     ///
-    /// **Clock-before-epoch fallback:** if the system clock is set before the
-    /// Unix epoch (e.g. RTC not set, certain CI containers), `duration_since`
-    /// returns an error and `unwrap_or_default()` substitutes 0 nanoseconds.
-    /// IDs remain unique because the atomic sequence counter still increments,
-    /// but the hex timestamp prefix will be `0` rather than a real timestamp.
-    /// Compliance consumers that parse the prefix for time ordering should treat
-    /// `audit-0-N` IDs as having unknown wall-clock time.
-    pub fn generate_id() -> String {
+    /// Compliance consumers that parse the prefix for time ordering should
+    /// treat `audit-0-N` IDs (or any entry with `is_clock_reliable: false`)
+    /// as having unknown wall-clock time.
+    pub fn generate_id() -> (String, bool) {
         use std::time::{SystemTime, UNIX_EPOCH};
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
+        let clock_result = SystemTime::now().duration_since(UNIX_EPOCH);
+        let is_clock_reliable = clock_result.is_ok();
+        let nanos = clock_result.unwrap_or_default().as_nanos();
         let seq = ID_COUNTER.fetch_add(1, Ordering::Relaxed);
-        format!("audit-{nanos:x}-{seq}")
+        (format!("audit-{nanos:x}-{seq}"), is_clock_reliable)
     }
 }
 
 /// Convenience builder for audit entries.
 pub fn entry(kind: AuditKind, description: impl Into<String>) -> AuditEntry {
+    let (id, is_clock_reliable) = AuditLog::generate_id();
     AuditEntry {
-        id: AuditLog::generate_id(),
+        id,
         timestamp: Utc::now(),
         kind,
         workflow: None,
@@ -243,6 +284,7 @@ pub fn entry(kind: AuditKind, description: impl Into<String>) -> AuditEntry {
         step: None,
         description: description.into(),
         metadata: serde_json::Value::Null,
+        is_clock_reliable,
     }
 }
 

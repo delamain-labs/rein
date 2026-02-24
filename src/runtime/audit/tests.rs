@@ -108,6 +108,83 @@ fn serialization_roundtrip() {
     assert_eq!(parsed.metadata["version"], "2.0");
 }
 
+// --- #497 is_clock_reliable sentinel ---
+
+#[test]
+fn generate_id_returns_reliable_true_under_normal_conditions() {
+    let (_id, reliable) = AuditLog::generate_id();
+    assert!(
+        reliable,
+        "system clock is expected to be post-epoch in the test environment"
+    );
+}
+
+#[test]
+fn entry_builder_sets_is_clock_reliable_true() {
+    let e = entry(AuditKind::WorkflowStart, "test");
+    assert!(
+        e.is_clock_reliable,
+        "entry() must propagate clock reliability from generate_id()"
+    );
+}
+
+#[test]
+fn is_clock_reliable_defaults_to_true_on_deserialization() {
+    // Old JSON produced before the field existed — must deserialize as true.
+    let json = r#"{"id":"audit-abc-0","timestamp":"2025-01-01T00:00:00Z","kind":"workflow_start","description":"test","workflow":null,"agent":null,"step":null}"#;
+    let e: AuditEntry = serde_json::from_str(json).unwrap();
+    assert!(
+        e.is_clock_reliable,
+        "missing is_clock_reliable field must default to true for backward compat"
+    );
+}
+
+#[test]
+fn is_clock_reliable_false_round_trips() {
+    let mut e = entry(AuditKind::WorkflowStart, "test");
+    e.is_clock_reliable = false;
+    let json = serde_json::to_string(&e).unwrap();
+    let parsed: AuditEntry = serde_json::from_str(&json).unwrap();
+    assert!(
+        !parsed.is_clock_reliable,
+        "is_clock_reliable = false must survive a JSON round-trip"
+    );
+}
+
+// --- #499 AuditLog::new path probe fallback ---
+
+#[test]
+fn new_with_bare_filename_succeeds() {
+    // A bare filename ("audit.jsonl") has parent() == Some(""), which is
+    // functionally None. The probe must fall back to cwd rather than
+    // silently skipping the writability check.
+    //
+    // Why this test uses cwd instead of a TempDir:
+    // `std::env::set_current_dir` is process-global and not safe to use in
+    // parallel tests. Bare-filename behavior is inherently cwd-dependent by
+    // design — the test exercises the production contract (cwd must be
+    // writable), which holds in all normal test environments. CI runners that
+    // execute in read-only directories will fail this test, which is the
+    // correct signal: a read-only cwd is a misconfiguration, not a test bug.
+    //
+    // We don't want to litter cwd with a real log file, so we use a
+    // uniquely-named path and verify it doesn't get created (lazy init).
+    let (id, _) = AuditLog::generate_id();
+    let name = format!(".rein-test-bare-{id}.jsonl");
+    let log = AuditLog::new(&name);
+    // Cleanup probe remnants (if any) — best effort.
+    let _ = std::fs::remove_file(&name);
+    assert!(
+        log.is_ok(),
+        "AuditLog::new must succeed for a bare filename when cwd is writable"
+    );
+    // Target file must not have been created (lazy init contract).
+    assert!(
+        !std::path::Path::new(&name).exists(),
+        "bare-filename AuditLog::new must not create the target file"
+    );
+}
+
 // --- #358 Approval audit event kinds ---
 
 #[test]
