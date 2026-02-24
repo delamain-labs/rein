@@ -3239,3 +3239,83 @@ async fn stage_timeout_in_workflow_is_hard_error() {
         "timeout inside workflow stage must produce StageTimedOut (hard error); got: {err:?}"
     );
 }
+
+// --- #453: final_output contract in mixed stage+step workflows ---
+
+/// #453: When a workflow has both stages (that succeed) and steps (that all fail),
+/// `final_output` must retain the last successful stage output.
+///
+/// This covers the mixed-workflow case documented on `WorkflowResult::final_output`:
+/// "If all steps fail or are skipped, `final_output` retains the last successful
+/// stage output."
+#[tokio::test]
+async fn mixed_workflow_final_output_retains_stage_output_when_all_steps_fail() {
+    // The file defines only the stage agent; the step references "ghost_agent"
+    // which is not defined — causing AgentNotFound (soft error) on the step.
+    let file = parse_file(r#"agent writer { model: openai }"#);
+
+    let workflow = WorkflowDef {
+        name: "mixed_wf".to_string(),
+        trigger: "start".to_string(),
+        stages: vec![Stage {
+            name: "writer".to_string(),
+            agent: "writer".to_string(),
+            route: RouteRule::Next,
+            span: Span::new(0, 1),
+        }],
+        steps: vec![StepDef {
+            name: "failing_step".to_string(),
+            // "ghost_agent" is not in the file → AgentNotFound → soft fail
+            agent: "ghost_agent".to_string(),
+            goal: None,
+            input: None,
+            output_constraints: vec![],
+            depends_on: vec![],
+            when: None,
+            on_failure: None,
+            send_to: None,
+            fallback: None,
+            for_each: None,
+            typed_input: None,
+            typed_outputs: vec![],
+            escalate: None,
+            approval: None,
+            span: crate::ast::Span::new(0, 1),
+        }],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("stage output"));
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    // run_workflow must succeed even though the step fails (soft error).
+    let result = run_workflow(&workflow, &ctx)
+        .await
+        .expect("workflow must succeed even when all steps fail");
+
+    // final_output must be the stage output, not an empty string from the
+    // failed step (which has is_real_execution() == false).
+    assert_eq!(
+        result.final_output,
+        "stage output",
+        "final_output must retain stage output when all steps fail; got: {:?}",
+        result.final_output
+    );
+}
