@@ -120,7 +120,7 @@ fn print_summary_to(traces: &[StructuredTrace], out: &mut impl Write) -> io::Res
         (total_duration % 1000) / 100
     )?;
 
-    if agent_costs.len() > 1 {
+    if agent_costs.len() > 1 || total_timeouts > 0 {
         writeln!(out)?;
         writeln!(out, "Per Agent")?;
         writeln!(out, "---------")?;
@@ -344,6 +344,46 @@ mod tests {
         assert_eq!(
             code, 0,
             "run_cost must succeed even when traces contain timeouts"
+        );
+    }
+
+    // #540: single-agent run with a timeout must show the Per Agent section
+    // so operators can see per-agent timeout attribution.
+    #[test]
+    fn single_agent_with_timeouts_shows_per_agent_section() {
+        let trace = StructuredTrace {
+            version: "1.0".to_string(),
+            started_at: "2024-01-01T00:00:00Z".to_string(),
+            completed_at: "2024-01-01T00:01:00Z".to_string(),
+            agent: "deployer".to_string(),
+            events: vec![],
+            stats: TraceStats {
+                total_tokens: 500,
+                total_cost_cents: 100,
+                llm_calls: 3,
+                tool_calls: 1,
+                tool_calls_denied: 0,
+                duration_ms: 5000,
+                timeout_count: 2,
+            },
+            is_partial: false,
+        };
+
+        let mut buf = Vec::new();
+        print_summary_to(&[trace], &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+
+        assert!(
+            output.contains("Per Agent"),
+            "single-agent run with timeouts must show the Per Agent section; got:\n{output}"
+        );
+        assert!(
+            output.contains("deployer"),
+            "Per Agent section must list the agent name; got:\n{output}"
+        );
+        assert!(
+            output.contains("timeouts"),
+            "Per Agent section must include timeout count; got:\n{output}"
         );
     }
 }
