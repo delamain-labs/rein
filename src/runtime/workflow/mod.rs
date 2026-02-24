@@ -644,6 +644,9 @@ struct StepLoopState {
 ///
 /// Extracts the success/failure logic from the `run_steps` loop so that the
 /// outer function stays within the project line-limit.
+///
+/// Accepts only the `auto_resolve` slice of the workflow definition rather than
+/// the full `WorkflowDef` — the function only uses this field (ISP — #469).
 fn apply_step_result(
     step: &crate::ast::StepDef,
     step_result: Result<(StageResult, Vec<super::RunEvent>), WorkflowError>,

@@ -3318,4 +3318,14 @@ async fn mixed_workflow_final_output_retains_stage_output_when_all_steps_fail() 
         "final_output must retain stage output when all steps fail; got: {:?}",
         result.final_output
     );
+    // Confirm the step actually ran and was recorded as Failed, not silently skipped.
+    // Without this check the test could pass vacuously if routing bypassed run_steps.
+    assert!(
+        result
+            .stage_results
+            .iter()
+            .any(|r| r.status == StageResultStatus::Failed),
+        "at least one step result must be Failed; got: {:?}",
+        result.stage_results
+    );
 }
