@@ -153,6 +153,7 @@ pub fn parse_timeout(s: &str) -> Option<u64> {
 /// Both [`truncate_agent_output`] (which appends [`TRUNCATION_MARKER`]) and
 /// [`write_cli_prompt`] (which shows a standalone notice line) call this
 /// helper so the threshold logic has a single source of truth.
+#[must_use]
 fn byte_truncation_cut(output: &str) -> Option<usize> {
     if output.len() > AGENT_OUTPUT_PREVIEW_LIMIT {
         Some(output.floor_char_boundary(AGENT_OUTPUT_PREVIEW_LIMIT))

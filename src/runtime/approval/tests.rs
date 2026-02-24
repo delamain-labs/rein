@@ -1214,3 +1214,70 @@ fn write_cli_prompt_no_truncation_notice_for_short_output() {
         "truncation notice must NOT appear for short output; got:\n{output}"
     );
 }
+
+/// #539: Direct unit tests for `byte_truncation_cut` — the single source of
+/// truth for the truncation threshold. Covers all four meaningful cases so
+/// a future regression at the helper level is caught immediately without
+/// relying solely on indirect coverage through the callers.
+#[test]
+fn byte_truncation_cut_returns_none_for_short_input() {
+    let short = "hello";
+    assert_eq!(
+        byte_truncation_cut(short),
+        None,
+        "input shorter than the limit must return None"
+    );
+}
+
+#[test]
+fn byte_truncation_cut_returns_none_at_exact_limit() {
+    let exact = "x".repeat(AGENT_OUTPUT_PREVIEW_LIMIT);
+    assert_eq!(
+        byte_truncation_cut(&exact),
+        None,
+        "input at exactly the limit must return None (guard is `>`, not `>=`)"
+    );
+}
+
+#[test]
+fn byte_truncation_cut_returns_some_for_long_input() {
+    let long = "x".repeat(AGENT_OUTPUT_PREVIEW_LIMIT + 1);
+    let cut = byte_truncation_cut(&long).expect("input over the limit must return Some");
+    assert!(
+        cut <= AGENT_OUTPUT_PREVIEW_LIMIT,
+        "cut index must not exceed AGENT_OUTPUT_PREVIEW_LIMIT; got {cut}"
+    );
+}
+
+#[test]
+fn byte_truncation_cut_returns_valid_char_boundary_for_multibyte_input() {
+    // Build a string where the AGENT_OUTPUT_PREVIEW_LIMIT-th byte falls in
+    // the middle of a 3-byte UTF-8 codepoint (U+4E2D, '中', encoded as
+    // 0xE4 0xB8 0xAD).  Pad with single-byte 'a' characters so that the
+    // LIMIT-th byte lands inside the codepoint.
+    //
+    // We place the multibyte character starting at byte AGENT_OUTPUT_PREVIEW_LIMIT - 1
+    // so that bytes [LIMIT-1, LIMIT, LIMIT+1] are the three bytes of '中'.
+    // The cut must be at LIMIT-1 (the start of the codepoint), not LIMIT.
+    let prefix_len = AGENT_OUTPUT_PREVIEW_LIMIT - 1;
+    let prefix = "a".repeat(prefix_len);
+    let long = format!("{prefix}中extra");
+    assert!(long.len() > AGENT_OUTPUT_PREVIEW_LIMIT, "test string must exceed limit");
+    let cut = byte_truncation_cut(&long).expect("must return Some for overlong input");
+    // The cut must be at a valid char boundary.
+    assert!(
+        long.is_char_boundary(cut),
+        "cut index {cut} must be a valid char boundary"
+    );
+    // The cut must not exceed the limit.
+    assert!(
+        cut <= AGENT_OUTPUT_PREVIEW_LIMIT,
+        "cut index {cut} must not exceed AGENT_OUTPUT_PREVIEW_LIMIT"
+    );
+    // The cut must be at prefix_len (start of the multibyte codepoint),
+    // not at AGENT_OUTPUT_PREVIEW_LIMIT (which would split the codepoint).
+    assert_eq!(
+        cut, prefix_len,
+        "cut must land at the start of the multibyte codepoint, not mid-codepoint"
+    );
+}
