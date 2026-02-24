@@ -96,7 +96,11 @@ fn vault_unavailable_without_env() {
         span: span(),
     };
     let resolver = SecretResolver::from_def(&def);
-    assert!(resolver.resolve_all().is_err());
+    let err = resolver.resolve_all().unwrap_err();
+    assert!(
+        matches!(err, SecretError::VaultUnavailable { .. }),
+        "expected VaultUnavailable, got {err:?}"
+    );
 }
 
 #[test]

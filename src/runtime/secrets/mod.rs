@@ -45,7 +45,7 @@ impl std::fmt::Display for SecretError {
             Self::VaultUnavailable { path, env_key } => {
                 write!(
                     f,
-                    "vault path '{path}' not accessible; set '{env_key}' as a fallback env var"
+                    "vault path '{path}' not accessible; env var fallback '{env_key}' is also not set"
                 )
             }
         }
