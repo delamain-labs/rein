@@ -496,9 +496,11 @@ fn run_error_config_error_roundtrips() {
 
 #[test]
 fn run_error_serializes_as_snake_case() {
-    // Struct variants (BudgetExceeded, CircuitBreakerOpen, Timeout) serialize as
-    // {"<variant>": {}} — empty object because partial_trace is #[serde(skip)].
-    // Unit variants serialize as bare strings via #[serde(rename_all = "snake_case")].
+    // Struct variants (BudgetExceeded, CircuitBreakerOpen, Timeout, GuardrailBlocked,
+    // EvalFailed) serialize as {"<variant>": {}} — empty object because
+    // partial_trace is #[serde(skip)].
+    // Unit variants (PermissionDenied, ProviderError, ConfigError) serialize as
+    // bare strings via #[serde(rename_all = "snake_case")].
     let v: serde_json::Value = serde_json::to_value(RunError::BudgetExceeded {
         partial_trace: RunTrace::from_events(vec![]),
     })
@@ -584,6 +586,74 @@ fn run_error_circuit_breaker_open_roundtrips() {
     );
     let back: RunError = serde_json::from_str(&json).expect("deserialize");
     assert!(matches!(back, RunError::CircuitBreakerOpen { .. }));
+}
+
+// --- #490: GuardrailBlocked and EvalFailed must carry partial_trace ---
+
+/// #490: GuardrailBlocked must be a struct variant with `partial_trace` so
+/// callers can inspect events that occurred before the block.
+/// partial_trace must NOT appear on the wire (it carries `#[serde(skip)]`).
+#[test]
+fn run_error_guardrail_blocked_carries_partial_trace() {
+    let event = RunEvent::GuardrailTriggered {
+        rule: "no_pii".to_string(),
+        action: "Block".to_string(),
+        blocked: true,
+    };
+    let err = RunError::GuardrailBlocked {
+        partial_trace: RunTrace::from_events(vec![event]),
+    };
+    // partial_trace is accessible in-process.
+    let RunError::GuardrailBlocked { partial_trace } = &err else {
+        panic!("expected GuardrailBlocked");
+    };
+    assert_eq!(partial_trace.events.len(), 1, "partial_trace must contain 1 event");
+
+    // partial_trace must NOT appear on the wire.
+    let json = serde_json::to_string(&err).expect("serialize");
+    let v: serde_json::Value = serde_json::from_str(&json).expect("parse");
+    assert!(
+        v["guardrail_blocked"].is_object(),
+        "expected {{\"guardrail_blocked\": {{}}}} shape, got: {v}"
+    );
+    assert!(
+        v["guardrail_blocked"].get("partial_trace").is_none(),
+        "partial_trace must not be serialized; got: {v}"
+    );
+    // Round-trips correctly.
+    let back: RunError = serde_json::from_str(&json).expect("deserialize");
+    assert!(matches!(back, RunError::GuardrailBlocked { .. }));
+}
+
+/// #490: EvalFailed must be a struct variant with `partial_trace` so
+/// callers can inspect events that occurred before the eval failure.
+/// partial_trace must NOT appear on the wire (it carries `#[serde(skip)]`).
+#[test]
+fn run_error_eval_failed_carries_partial_trace() {
+    let err = RunError::EvalFailed {
+        partial_trace: RunTrace::from_events(vec![RunEvent::EvalResult {
+            metric: "accuracy".to_string(),
+            passed: false,
+            detail: "below threshold".to_string(),
+        }]),
+    };
+    let RunError::EvalFailed { partial_trace } = &err else {
+        panic!("expected EvalFailed");
+    };
+    assert_eq!(partial_trace.events.len(), 1, "partial_trace must contain 1 event");
+
+    let json = serde_json::to_string(&err).expect("serialize");
+    let v: serde_json::Value = serde_json::from_str(&json).expect("parse");
+    assert!(
+        v["eval_failed"].is_object(),
+        "expected {{\"eval_failed\": {{}}}} shape, got: {v}"
+    );
+    assert!(
+        v["eval_failed"].get("partial_trace").is_none(),
+        "partial_trace must not be serialized; got: {v}"
+    );
+    let back: RunError = serde_json::from_str(&json).expect("deserialize");
+    assert!(matches!(back, RunError::EvalFailed { .. }));
 }
 
 // ── RunTrace output ────────────────────────────────────────────────────────
