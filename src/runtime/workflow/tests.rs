@@ -2400,7 +2400,7 @@ async fn run_steps_returns_partial_success_on_missing_agent() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            crate::runtime::RunEvent::StepFailed { step, reason }
+            crate::runtime::RunEvent::StepFailed { step, reason, .. }
             if step == "broken" && reason.contains("ghost_agent")
         )),
         "expected StepFailed for broken; events: {events:?}"
@@ -3048,7 +3048,7 @@ async fn for_each_partial_failure_discards_completed_iterations() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            crate::runtime::RunEvent::StepFailed { step, reason }
+            crate::runtime::RunEvent::StepFailed { step, reason, .. }
             if step == "batch" && !reason.is_empty()
         )),
         "expected StepFailed for 'batch' with non-empty reason; events: {events:?}"
@@ -3237,5 +3237,106 @@ async fn stage_timeout_in_workflow_is_hard_error() {
     assert!(
         matches!(err, WorkflowError::StageTimedOut { .. }),
         "timeout inside workflow stage must produce StageTimedOut (hard error); got: {err:?}"
+    );
+}
+
+// --- #452: error_kind field on StepFailed ---
+
+/// #452: StepFailed must carry an `error_kind` field set to the snake_case
+/// WorkflowError variant name (e.g. "agent_not_found", "stage_failed").
+#[tokio::test]
+async fn step_failed_carries_error_kind_agent_not_found() {
+    let file = parse_file("agent other { model: openai }");
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    let workflow = WorkflowDef {
+        name: "wf".to_string(),
+        trigger: "go".to_string(),
+        stages: vec![],
+        steps: vec![make_step("broken", "nonexistent_agent", vec![])],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let (_, events) = run_steps(&workflow, &ctx).await.unwrap();
+    let failed = events
+        .iter()
+        .find(
+            |e| matches!(e, crate::runtime::RunEvent::StepFailed { step, .. } if step == "broken"),
+        )
+        .expect("StepFailed for 'broken' must be emitted");
+
+    let crate::runtime::RunEvent::StepFailed { error_kind, .. } = failed else {
+        panic!("expected StepFailed variant");
+    };
+    assert_eq!(
+        error_kind, "agent_not_found",
+        "AgentNotFound error must produce error_kind=\"agent_not_found\""
+    );
+}
+
+/// #452: StepFailed for a stage execution failure must carry error_kind "stage_failed".
+#[tokio::test]
+async fn step_failed_carries_error_kind_stage_failed() {
+    let file = parse_file("agent worker { model: openai }");
+    // Provider that returns a network error → triggers StageFailed (soft error).
+    let provider = MockProvider::new();
+    provider.push_error("simulated network failure");
+    let executor = MockExecutor::new();
+
+    let workflow = WorkflowDef {
+        name: "wf".to_string(),
+        trigger: "go".to_string(),
+        stages: vec![],
+        steps: vec![make_step("do_work", "worker", vec![])],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let (_, events) = run_steps(&workflow, &ctx).await.unwrap();
+    let failed = events
+        .iter()
+        .find(
+            |e| matches!(e, crate::runtime::RunEvent::StepFailed { step, .. } if step == "do_work"),
+        )
+        .expect("StepFailed for 'do_work' must be emitted");
+
+    let crate::runtime::RunEvent::StepFailed { error_kind, .. } = failed else {
+        panic!("expected StepFailed variant");
+    };
+    assert_eq!(
+        error_kind, "stage_failed",
+        "StageFailed error must produce error_kind=\"stage_failed\""
     );
 }

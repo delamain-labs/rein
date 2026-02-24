@@ -446,11 +446,16 @@ fn event_to_span_data(event: &super::RunEvent) -> (String, Vec<OtelAttribute>) {
                 attr_str("rein.step.reason", reason),
             ],
         ),
-        RunEvent::StepFailed { step, reason } => (
+        RunEvent::StepFailed {
+            step,
+            reason,
+            error_kind,
+        } => (
             "rein.step.failed".to_string(),
             vec![
                 attr_str("rein.step.name", step),
                 attr_str("rein.step.reason", reason),
+                attr_str("rein.step.error_kind", error_kind),
             ],
         ),
     }

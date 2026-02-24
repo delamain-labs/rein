@@ -213,6 +213,30 @@ impl WorkflowError {
             Self::AgentNotFound(_) | Self::StageFailed { .. } => false,
         }
     }
+
+    /// Returns a stable, `snake_case` string identifying the error variant.
+    ///
+    /// Used to populate the `error_kind` field on `RunEvent::StepFailed` so that
+    /// OTEL dashboards and alerting rules can distinguish failure modes without
+    /// parsing the human-readable `reason` string with regex.
+    ///
+    /// Uses an exhaustive `match` (no wildcard) so that adding a new variant
+    /// produces a compile error until its kind string is made explicit.
+    #[must_use]
+    pub fn kind_str(&self) -> &'static str {
+        match self {
+            Self::AgentNotFound(_) => "agent_not_found",
+            Self::StageFailed { .. } => "stage_failed",
+            Self::StageTimedOut { .. } => "stage_timed_out",
+            Self::StageNotFound(_) => "stage_not_found",
+            Self::PersistenceFailure(_) => "persistence_failure",
+            Self::CircularRoute(_) => "circular_route",
+            Self::ApprovalRejected { .. } => "approval_rejected",
+            Self::ApprovalTimedOut { .. } => "approval_timed_out",
+            Self::ApprovalPending { .. } => "approval_pending",
+            Self::CyclicDependency(_) => "cyclic_dependency",
+        }
+    }
 }
 
 impl std::error::Error for WorkflowError {}
@@ -675,6 +699,7 @@ fn apply_step_result(
             if e.is_hard_error() {
                 return StepOutcome::HardError(e);
             }
+            let error_kind = e.kind_str().to_string();
             let reason = e.to_string();
             state.blocked_steps.insert(step.name.clone());
             // Insert an empty output so the step appears in `outputs` for
@@ -689,6 +714,7 @@ fn apply_step_result(
             state.events.push(super::RunEvent::StepFailed {
                 step: step.name.clone(),
                 reason,
+                error_kind,
             });
             state.results.push(StageResult {
                 stage_name: step.name.clone(),
