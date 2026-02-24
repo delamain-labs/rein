@@ -279,8 +279,9 @@ fn run_workflow_mode(
         }
         Err((e, partial_events)) => {
             eprintln!("Workflow failed: {e}");
-            // Emit any partial events (e.g. WorkflowAborted) collected before
-            // the abort so users and OTEL consumers can see the abort cause.
+            // Emit any partial events (e.g. WorkflowAborted) to stderr so the
+            // operator can see the abort cause. (OTEL export is not wired to
+            // the workflow path; these events do not reach an OTEL sink here.)
             if !partial_events.is_empty() {
                 eprintln!(
                     "{}",
