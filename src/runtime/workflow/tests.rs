@@ -2239,6 +2239,16 @@ async fn independent_step_runs_even_if_sibling_fails() {
         .await
         .expect("run_steps must not abort when only independent step fails");
 
+    // step_a must be recorded as Failed (not Executed or Skipped)
+    let step_a_result = results
+        .iter()
+        .find(|r| r.stage_name == "step_a")
+        .expect("step_a must have a result entry");
+    assert_eq!(
+        step_a_result.status,
+        StageResultStatus::Failed,
+        "failed step must have status Failed; results: {results:?}"
+    );
     // step_b should have produced output
     let step_b_result = results
         .iter()
@@ -2509,12 +2519,14 @@ async fn for_each_partial_failure_discards_completed_iterations() {
         "partial for_each results must be discarded; got: {:?}",
         results[0].output
     );
-    // A StepFailed event must be emitted.
+    // A StepFailed event must be emitted with a non-empty reason.
     assert!(
-        events.iter().any(
-            |e| matches!(e, crate::runtime::RunEvent::StepFailed { step, .. } if step == "batch")
-        ),
-        "expected StepFailed for 'batch'; events: {events:?}"
+        events.iter().any(|e| matches!(
+            e,
+            crate::runtime::RunEvent::StepFailed { step, reason }
+            if step == "batch" && !reason.is_empty()
+        )),
+        "expected StepFailed for 'batch' with non-empty reason; events: {events:?}"
     );
     // No StepCompleted event for the step (it did not complete).
     assert!(

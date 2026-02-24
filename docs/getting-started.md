@@ -291,6 +291,27 @@ Verify the path to your `.rein` file. Rein does not recursively search directori
 | `rein run --dry-run <file>` | Show execution plan without API calls |
 | `rein serve <file> [--port N]` | Start the REST API server |
 
+### Workflow exit codes
+
+`rein run` uses a three-level exit code convention for workflow runs:
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | All steps succeeded — no failures or skips |
+| `1` | Partial success — one or more steps failed softly or were cascade-skipped; the workflow ran to completion |
+| `2` | Hard abort — a non-recoverable error (cyclic dependency, approval rejection, policy violation) terminated the run before all steps executed |
+
+Shell scripts and CI pipelines should check for `$? -ge 1` to detect any failure, or use the specific codes to distinguish partial success (`1`) from hard abort (`2`):
+
+```bash
+rein run workflow.rein
+case $? in
+  0) echo "All steps succeeded" ;;
+  1) echo "Partial success — check trace for StepFailed events" ;;
+  2) echo "Hard abort — run was terminated early" ;;
+esac
+```
+
 ---
 
 ## Next Steps

@@ -587,8 +587,10 @@ fn apply_step_result(
             // downstream input-building. Note: `outputs.get(dep)` will return
             // `Some("")` for failed entries — not `None` — so `filter_map`
             // in the input-building block will include these as empty strings.
-            // The skip-guard above ensures dependent steps never run with
-            // this empty output.
+            // This is safe only because the skip-guard at the top of this loop
+            // prevents any step that declares a blocked step as a dependency
+            // from executing. Do not read `outputs` outside of `run_steps`
+            // without accounting for this invariant.
             state.outputs.insert(step.name.clone(), String::new());
             state.events.push(super::RunEvent::StepFailed {
                 step: step.name.clone(),
