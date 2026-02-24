@@ -761,13 +761,33 @@ fn apply_step_result(
 ///
 /// # Errors
 /// Returns `WorkflowError` for hard errors or dependency cycles.
+///
+/// ## Return type on hard abort
+///
+/// On success: `Ok((results, events))`.
+///
+/// On hard error: `Err((error, partial_events))`. The `partial_events` vec
+/// includes a `RunEvent::WorkflowAborted` entry that carries the
+/// `error_kind` and `reason` from the abort, enabling OTEL consumers to
+/// attribute the abort to a specific cause. It also includes any step events
+/// that were collected before the abort (e.g. `StepStarted`).
+///
+/// Callers that propagate the error without inspecting partial events can use
+/// `.map_err(|(e, _)| e)?` to recover the original `WorkflowError`.
+#[allow(clippy::too_many_lines)]
 pub async fn run_steps(
     workflow: &WorkflowDef,
     ctx: &WorkflowContext<'_>,
-) -> Result<(Vec<StageResult>, Vec<super::RunEvent>), WorkflowError> {
+) -> Result<(Vec<StageResult>, Vec<super::RunEvent>), (WorkflowError, Vec<super::RunEvent>)> {
     use std::collections::{HashMap, HashSet};
 
-    let ordered = resolve_dag(&workflow.steps)?;
+    let ordered = resolve_dag(&workflow.steps).map_err(|e| {
+        let aborted = super::RunEvent::WorkflowAborted {
+            error_kind: e.kind_str().to_string(),
+            reason: e.to_string(),
+        };
+        (e, vec![aborted])
+    })?;
     let trigger_input = format!("Trigger: {}", workflow.trigger);
 
     let mut state = StepLoopState {
@@ -876,7 +896,16 @@ pub async fn run_steps(
         ) {
             StepOutcome::Continue => {}
             StepOutcome::AutoResolved => break,
-            StepOutcome::HardError(e) => return Err(e),
+            StepOutcome::HardError(e) => {
+                // Emit WorkflowAborted before returning so OTEL consumers and
+                // callers that inspect partial events can see why the workflow
+                // was hard-aborted — otherwise the abort is invisible (#506).
+                state.events.push(super::RunEvent::WorkflowAborted {
+                    error_kind: e.kind_str().to_string(),
+                    reason: e.to_string(),
+                });
+                return Err((e, state.events));
+            }
         }
     }
 
@@ -1110,7 +1139,10 @@ pub async fn run_workflow(
 
     // Execute step blocks if present
     if !workflow.steps.is_empty() {
-        let (step_results, step_events) = run_steps(workflow, ctx).await?;
+        // run_steps carries partial events alongside the error on hard abort;
+        // discard the partial events here since run_workflow propagates the
+        // WorkflowError to the engine which handles OTEL via apply_otel_export.
+        let (step_results, step_events) = run_steps(workflow, ctx).await.map_err(|(e, _)| e)?;
         for sr in step_results {
             result.total_cost_cents += sr.cost_cents;
             result.total_tokens += sr.tokens;

@@ -2854,7 +2854,7 @@ async fn approval_timed_out_aborts_workflow() {
 
     let result = run_steps(&workflow, &ctx).await;
     assert!(
-        matches!(result, Err(WorkflowError::ApprovalTimedOut { .. })),
+        matches!(result, Err((WorkflowError::ApprovalTimedOut { .. }, _))),
         "ApprovalTimedOut must abort run_steps immediately; got: {result:?}"
     );
 }
@@ -2902,7 +2902,7 @@ async fn approval_rejected_aborts_workflow() {
 
     let result = run_steps(&workflow, &ctx).await;
     assert!(
-        matches!(result, Err(WorkflowError::ApprovalRejected { .. })),
+        matches!(result, Err((WorkflowError::ApprovalRejected { .. }, _))),
         "ApprovalRejected must abort run_steps immediately; got: {result:?}"
     );
 }
@@ -2952,7 +2952,7 @@ async fn approval_pending_returns_approval_pending_error() {
 
     let result = run_steps(&workflow, &ctx).await;
     assert!(
-        matches!(result, Err(WorkflowError::ApprovalPending { .. })),
+        matches!(result, Err((WorkflowError::ApprovalPending { .. }, _))),
         "Pending approval must return ApprovalPending, not ApprovalTimedOut; got: {result:?}"
     );
 }
@@ -3126,7 +3126,7 @@ async fn cyclic_dependency_is_hard_error() {
         workflow_name: None,
     };
 
-    let err = run_steps(&workflow, &ctx)
+    let (err, _partial_events) = run_steps(&workflow, &ctx)
         .await
         .expect_err("cyclic dependency must return Err");
 
@@ -3682,5 +3682,177 @@ async fn step_failed_carries_error_kind_stage_failed() {
     assert_eq!(
         error_kind, "stage_failed",
         "StageFailed error must produce error_kind=\"stage_failed\""
+    );
+}
+
+// --- #506: WorkflowAborted event for hard-error OTEL visibility ---
+
+fn make_gated_step_workflow(
+    workflow_name: &str,
+) -> (crate::ast::WorkflowDef, crate::ast::ReinFile) {
+    use crate::ast::{ApprovalDef, ApprovalKind, Span as AstSpan};
+
+    let file = parse_file(r#"agent writer { model: openai }"#);
+    let workflow = WorkflowDef {
+        name: workflow_name.to_string(),
+        trigger: "start".to_string(),
+        stages: vec![],
+        steps: vec![StepDef {
+            name: "gated".to_string(),
+            agent: "writer".to_string(),
+            goal: None,
+            input: None,
+            output_constraints: vec![],
+            depends_on: vec![],
+            when: None,
+            on_failure: None,
+            send_to: None,
+            fallback: None,
+            for_each: None,
+            typed_input: None,
+            typed_outputs: vec![],
+            escalate: None,
+            approval: Some(ApprovalDef {
+                kind: ApprovalKind::Approve,
+                channel: "cli".to_string(),
+                destination: "#ops".to_string(),
+                timeout: None,
+                mode: None,
+                span: AstSpan::new(0, 1),
+            }),
+            span: AstSpan::new(0, 1),
+        }],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+    (workflow, file)
+}
+
+/// #506: When a step's approval gate is rejected, run_steps must emit a
+/// WorkflowAborted event as part of the returned partial events on error, so
+/// OTEL consumers can distinguish hard-abort causes.
+///
+/// The return type carries `(WorkflowError, Vec<RunEvent>)` on hard abort.
+/// The events vec includes WorkflowAborted with error_kind="approval_rejected".
+#[tokio::test]
+async fn run_steps_emits_workflow_aborted_on_approval_rejected() {
+    use crate::runtime::RunEvent;
+    use crate::runtime::approval::AutoRejectHandler;
+    use std::sync::Arc;
+
+    let (workflow, file) = make_gated_step_workflow("abort_test");
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: Some(Arc::new(AutoRejectHandler::new("test rejection"))),
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let result = run_steps(&workflow, &ctx).await;
+    assert!(
+        result.is_err(),
+        "ApprovalRejected is a hard error — run_steps must return Err"
+    );
+
+    let (_err, partial_events) = result.unwrap_err();
+    assert!(
+        partial_events
+            .iter()
+            .any(|e| matches!(e, RunEvent::WorkflowAborted { .. })),
+        "WorkflowAborted event must be emitted on hard abort; events: {partial_events:?}"
+    );
+}
+
+/// #506: The WorkflowAborted event must carry error_kind="approval_rejected"
+/// and a non-empty reason so OTEL dashboards can distinguish abort causes
+/// without parsing the human-readable reason string.
+#[tokio::test]
+async fn workflow_aborted_event_has_correct_error_kind_and_reason() {
+    use crate::runtime::RunEvent;
+    use crate::runtime::approval::AutoRejectHandler;
+    use std::sync::Arc;
+
+    let (workflow, file) = make_gated_step_workflow("abort_test_2");
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: Some(Arc::new(AutoRejectHandler::new("test rejection"))),
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let (_err, partial_events) = run_steps(&workflow, &ctx).await.unwrap_err();
+
+    let aborted = partial_events
+        .iter()
+        .find(|e| matches!(e, RunEvent::WorkflowAborted { .. }))
+        .expect("WorkflowAborted event must be emitted on hard abort");
+
+    let RunEvent::WorkflowAborted {
+        error_kind, reason, ..
+    } = aborted
+    else {
+        panic!("expected WorkflowAborted variant");
+    };
+    assert_eq!(
+        error_kind, "approval_rejected",
+        "WorkflowAborted error_kind must be 'approval_rejected'"
+    );
+    assert!(
+        !reason.is_empty(),
+        "WorkflowAborted reason must not be empty"
+    );
+}
+
+/// #506: The soft-error path must NOT emit WorkflowAborted — it produces
+/// StepFailed and continues executing. WorkflowAborted is hard-error-only.
+#[tokio::test]
+async fn soft_error_does_not_emit_workflow_aborted() {
+    use crate::runtime::RunEvent;
+
+    // "nonexistent" agent → AgentNotFound → soft error (run_steps returns Ok)
+    let file = parse_file(r#"agent bot { model: openai }"#);
+    let workflow = make_workflow_steps(
+        "soft_wf",
+        "start",
+        vec![make_step("s", "nonexistent", vec![])],
+    );
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    let (_, events) = run_steps(&workflow, &ctx)
+        .await
+        .expect("soft errors return Ok");
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, RunEvent::WorkflowAborted { .. })),
+        "WorkflowAborted must NOT be emitted for soft errors; events: {events:?}"
     );
 }

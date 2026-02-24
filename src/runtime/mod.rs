@@ -185,6 +185,25 @@ pub enum RunEvent {
         #[serde(default = "default_error_kind")]
         error_kind: String,
     },
+    /// A workflow was hard-aborted by a policy-enforcement or infrastructure
+    /// error. Emitted by `run_steps` before returning a hard error so that
+    /// OTEL consumers can attribute the abort to a specific cause.
+    ///
+    /// Hard aborts include: approval rejected/timed-out/pending, cyclic
+    /// dependencies, circular routes, missing route targets, and persistence
+    /// failures. Soft errors (agent not found, LLM failure) produce
+    /// `StepFailed` instead.
+    ///
+    /// `#[non_exhaustive]` allows future fields (e.g. `step`, `workflow`) to
+    /// be added without breaking existing `match` arms.
+    #[non_exhaustive]
+    WorkflowAborted {
+        /// `snake_case` error category from `WorkflowError::kind_str()`.
+        /// Use this field in OTEL dashboards rather than parsing `reason`.
+        error_kind: String,
+        /// Human-readable description of the abort cause.
+        reason: String,
+    },
 }
 
 /// Default value for `StepFailed::error_kind` when deserializing JSON that predates the field.
@@ -520,6 +539,9 @@ fn summarize_event(event: &RunEvent, lines: &mut Vec<String>, turn: &mut usize) 
         }
         RunEvent::StepSkipped { step, reason, .. } => {
             lines.push(format!("  ⏭ step '{step}' skipped: {reason}"));
+        }
+        RunEvent::WorkflowAborted { error_kind, reason } => {
+            lines.push(format!("  ✗ workflow aborted [{error_kind}]: {reason}"));
         }
     }
 }
