@@ -83,17 +83,24 @@ impl ApprovalHandler for CliApprovalHandler {
 
         eprint!("Approve? [y/n]: ");
 
-        let mut input = String::new();
-        if std::io::stdin().read_line(&mut input).is_err() {
-            return ApprovalStatus::Rejected {
-                reason: "Failed to read input".to_string(),
-            };
-        }
+        // Offload the blocking stdin read to a dedicated thread so the Tokio
+        // executor thread is not blocked while waiting for human input.
+        let line = tokio::task::spawn_blocking(|| {
+            let mut s = String::new();
+            std::io::stdin().read_line(&mut s).map(|_| s)
+        })
+        .await
+        .unwrap_or_else(|_| Err(std::io::Error::other("join error")));
 
-        match input.trim().to_lowercase().as_str() {
-            "y" | "yes" => ApprovalStatus::Approved,
-            _ => ApprovalStatus::Rejected {
-                reason: "Human reviewer rejected".to_string(),
+        match line {
+            Err(_) => ApprovalStatus::Rejected {
+                reason: "Failed to read input".to_string(),
+            },
+            Ok(input) => match input.trim().to_lowercase().as_str() {
+                "y" | "yes" => ApprovalStatus::Approved,
+                _ => ApprovalStatus::Rejected {
+                    reason: "Human reviewer rejected".to_string(),
+                },
             },
         }
     }
@@ -602,12 +609,30 @@ impl ApprovalHandler for AuditingApprovalHandler {
 
 /// Select an `ApprovalHandler` based on the channel type in the `ApprovalDef`.
 ///
+/// **Test override:** When the `REIN_TEST_APPROVAL_HANDLER` environment variable
+/// is set, the channel-based selection is bypassed:
+/// - `"auto_approve"` → `AutoApproveHandler` (always approves, non-blocking)
+/// - `"auto_reject"` → `AutoRejectHandler` (always rejects with `"test rejection"`)
+///
+/// Unknown values are silently ignored and the normal channel dispatch proceeds.
+/// This override exists so integration tests can exercise the production
+/// `resolve_approval_handler` code path without blocking on stdin.
+///
 /// - `"webhook"` → `WebhookApprovalHandler` (POST to `destination` URL)
 /// - `"slack"` → `SlackApprovalHandler` (POST to `destination` Slack webhook URL)
 /// - `"cli"` → `CliApprovalHandler` (interactive stdin prompt)
 /// - anything else → warning + `CliApprovalHandler` fallback
 #[must_use]
 pub fn resolve_approval_handler(approval: &ApprovalDef) -> Box<dyn ApprovalHandler> {
+    // Allow hermetic test overrides without requiring callers to inject a handler.
+    // Unknown values fall through to the normal channel dispatch so a typo cannot
+    // silently auto-approve a production workflow.
+    match std::env::var("REIN_TEST_APPROVAL_HANDLER").as_deref() {
+        Ok("auto_approve") => return Box::new(AutoApproveHandler),
+        Ok("auto_reject") => return Box::new(AutoRejectHandler::new("test rejection")),
+        _ => {}
+    }
+
     match approval.channel.as_str() {
         "webhook" => Box::new(WebhookApprovalHandler::new(approval.destination.clone())),
         "slack" => Box::new(SlackApprovalHandler::new(approval.destination.clone())),
