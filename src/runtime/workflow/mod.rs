@@ -622,28 +622,34 @@ pub async fn run_step(
     ctx: &WorkflowContext<'_>,
 ) -> Result<StageResult, WorkflowError> {
     // Check approval gate before execution.
-    // Resolve both the injected handler (tests/CI env-var overrides) and the
-    // channel-derived handler into a single Arc so the audit wrapper can be
-    // applied uniformly regardless of which path produced the handler.
+    //
+    // #411: Pre-injected handlers (`ctx.approval_handler.is_some()`) are used
+    // as-is — the caller is responsible for audit-wrapping them before
+    // assembling `WorkflowContext`. Channel-resolved handlers (when
+    // `ctx.approval_handler` is `None`) are wrapped here when an audit log is
+    // present, because run_step is the only site that knows the step's channel.
     if let Some(approval_def) = &step.approval {
-        let base: Arc<dyn ApprovalHandler> = if let Some(h) = ctx.approval_handler.as_ref() {
-            Arc::clone(h)
+        let status = if let Some(h) = ctx.approval_handler.as_ref() {
+            // Pre-injected (already audit-wrapped if the caller required it).
+            h.request_approval(&step.name, input, approval_def).await
         } else {
-            Arc::from(crate::runtime::approval::resolve_approval_handler(
+            // Channel-resolved: build handler from approval def, optionally
+            // wrapping with auditing so compliance consumers see the entry.
+            let base = Arc::from(crate::runtime::approval::resolve_approval_handler(
                 approval_def,
-            ))
-        };
-        let status = if let Some(log) = &ctx.audit_log {
-            crate::runtime::approval::AuditingApprovalHandler::with_context(
-                Arc::clone(&base),
-                Arc::clone(log),
-                ctx.workflow_name.as_deref(),
-                Some(step.agent.as_str()),
-            )
-            .request_approval(&step.name, input, approval_def)
-            .await
-        } else {
-            base.request_approval(&step.name, input, approval_def).await
+            ));
+            if let Some(log) = &ctx.audit_log {
+                crate::runtime::approval::AuditingApprovalHandler::with_context(
+                    base,
+                    Arc::clone(log),
+                    ctx.workflow_name.as_deref(),
+                    Some(step.agent.as_str()),
+                )
+                .request_approval(&step.name, input, approval_def)
+                .await
+            } else {
+                base.request_approval(&step.name, input, approval_def).await
+            }
         };
         match status {
             ApprovalStatus::Approved => {}

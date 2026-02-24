@@ -1409,13 +1409,24 @@ async fn step_with_audit_log_records_approval_events() {
     let provider = MockProvider::new();
     provider.push_response(simple_response("approved output"));
     let executor = MockExecutor::new();
+    // #411: pre-wrap the handler with AuditingApprovalHandler so run_step
+    // receives an already-wrapped handler and doesn't add a second wrapper.
+    let inner = Arc::new(AutoApproveHandler);
+    let approval_handler = Arc::new(
+        crate::runtime::approval::AuditingApprovalHandler::with_context(
+            inner as Arc<dyn crate::runtime::approval::ApprovalHandler>,
+            Arc::clone(&log),
+            Some("audit_test_workflow"),
+            None::<&str>,
+        ),
+    );
     let ctx = WorkflowContext {
         file: &file,
         provider: &provider,
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: Some(Arc::new(AutoApproveHandler)),
+        approval_handler: Some(approval_handler),
         audit_log: Some(Arc::clone(&log)),
         workflow_name: Some("audit_test_workflow".to_string()),
     };
@@ -1512,13 +1523,23 @@ async fn for_each_step_audit_entries_carry_workflow_name() {
     provider.push_response(simple_response("processed T-1"));
     provider.push_response(simple_response("processed T-2"));
     let executor = MockExecutor::new();
+    // #411: pre-wrap the handler.
+    let inner = Arc::new(AutoApproveHandler);
+    let approval_handler = Arc::new(
+        crate::runtime::approval::AuditingApprovalHandler::with_context(
+            inner as Arc<dyn crate::runtime::approval::ApprovalHandler>,
+            Arc::clone(&log),
+            Some("triage_pipeline"),
+            None::<&str>,
+        ),
+    );
     let ctx = WorkflowContext {
         file: &file,
         provider: &provider,
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: Some(Arc::new(AutoApproveHandler)),
+        approval_handler: Some(approval_handler),
         audit_log: Some(Arc::clone(&log)),
         workflow_name: Some("triage_pipeline".to_string()),
     };
@@ -1625,15 +1646,25 @@ async fn step_with_audit_log_and_no_workflow_name_omits_workflow_field() {
     let provider = MockProvider::new();
     provider.push_response(simple_response("output"));
     let executor = MockExecutor::new();
+    // #411: pre-wrap; workflow_name is intentionally None.
+    let inner = Arc::new(AutoApproveHandler);
+    let approval_handler = Arc::new(
+        crate::runtime::approval::AuditingApprovalHandler::with_context(
+            inner as Arc<dyn crate::runtime::approval::ApprovalHandler>,
+            Arc::clone(&log),
+            None::<&str>, // workflow_name intentionally absent
+            None::<&str>,
+        ),
+    );
     let ctx = WorkflowContext {
         file: &file,
         provider: &provider,
         executor: &executor,
         tool_defs: &[],
         config: &RunConfig::default(),
-        approval_handler: Some(Arc::new(AutoApproveHandler)),
+        approval_handler: Some(approval_handler),
         audit_log: Some(Arc::clone(&log)),
-        workflow_name: None, // intentionally absent
+        workflow_name: None,
     };
 
     run_workflow(&workflow, &ctx)

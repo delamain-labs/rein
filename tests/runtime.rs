@@ -476,9 +476,17 @@ async fn audit_log_records_approval_requested_and_resolved() {
     let _ = std::fs::remove_file(&audit_path);
     let audit_log = Arc::new(AuditLog::new(&audit_path).expect("audit log should be creatable"));
 
-    // Use AutoApproveHandler so the step executes without blocking.
-    let approval_handler: Arc<dyn rein::runtime::approval::ApprovalHandler> =
-        Arc::new(AutoApproveHandler);
+    // Pre-wrap with AuditingApprovalHandler — run_step no longer adds its own
+    // wrapper around pre-injected handlers (#411).
+    let inner: Arc<dyn rein::runtime::approval::ApprovalHandler> = Arc::new(AutoApproveHandler);
+    let approval_handler: Arc<dyn rein::runtime::approval::ApprovalHandler> = Arc::new(
+        AuditingApprovalHandler::with_context(
+            inner,
+            Arc::clone(&audit_log),
+            Some("approval_workflow"),
+            None::<&str>,
+        ),
+    );
 
     let ctx = rein::runtime::workflow::WorkflowContext {
         file: &file,
@@ -540,5 +548,114 @@ async fn audit_log_records_approval_requested_and_resolved() {
         res.step.as_deref(),
         Some("review_step"),
         "ApprovalResolved.step must be 'review_step'"
+    );
+}
+
+/// #411: When a caller pre-wraps the approval_handler with AuditingApprovalHandler
+/// before building WorkflowContext, run_step must NOT add a second audit wrapper.
+/// Exactly ONE ApprovalRequested and ONE ApprovalResolved entry must appear.
+#[tokio::test]
+async fn no_double_audit_wrapping_when_handler_pre_wrapped() {
+    use rein::ast::{
+        ApprovalDef, ApprovalKind, ExecutionMode, RouteRule, Span, StepDef, WorkflowDef,
+    };
+    use rein::runtime::approval::ApprovalHandler;
+    use rein::runtime::engine::RunConfig;
+
+    let source = r#"agent reviewer { model: openai }"#;
+    let file = rein::parser::parse(source).expect("parse");
+
+    let step = StepDef {
+        name: "review_step".to_string(),
+        agent: "reviewer".to_string(),
+        goal: None,
+        input: None,
+        output_constraints: vec![],
+        depends_on: vec![],
+        when: None,
+        on_failure: None,
+        send_to: None,
+        fallback: None,
+        for_each: None,
+        typed_input: None,
+        typed_outputs: vec![],
+        escalate: None,
+        approval: Some(ApprovalDef {
+            kind: ApprovalKind::Approve,
+            channel: "slack".to_string(),
+            destination: "#approvals".to_string(),
+            timeout: None,
+            mode: None,
+            span: Span::new(0, 1),
+        }),
+        span: Span::new(0, 1),
+    };
+
+    let workflow = WorkflowDef {
+        name: "approval_wf".to_string(),
+        trigger: "ticket".to_string(),
+        stages: vec![],
+        steps: vec![step],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("review result"));
+    let executor = MockExecutor::new();
+
+    let audit_path = std::env::temp_dir().join("rein_test_audit_411.jsonl");
+    let _ = std::fs::remove_file(&audit_path);
+    let audit_log = Arc::new(AuditLog::new(&audit_path).expect("audit log"));
+
+    // Caller pre-wraps the handler — run_step must NOT add a second wrapper.
+    let inner: Arc<dyn ApprovalHandler> = Arc::new(AutoApproveHandler);
+    let pre_wrapped: Arc<dyn ApprovalHandler> = Arc::new(
+        AuditingApprovalHandler::with_context(
+            inner,
+            Arc::clone(&audit_log),
+            Some("approval_wf"),
+            None::<&str>,
+        ),
+    );
+
+    let ctx = rein::runtime::workflow::WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: Some(pre_wrapped),
+        audit_log: Some(Arc::clone(&audit_log)),
+        workflow_name: Some("approval_wf".to_string()),
+    };
+
+    rein::runtime::workflow::run_workflow(&workflow, &ctx)
+        .await
+        .expect("workflow should succeed");
+
+    let entries = audit_log.read_all().expect("should be readable");
+    let req_count = entries
+        .iter()
+        .filter(|e| e.kind == AuditKind::ApprovalRequested)
+        .count();
+    assert_eq!(
+        req_count, 1,
+        "#411: must not double-wrap — expected exactly 1 ApprovalRequested entry, \
+         got {req_count}; entries: {entries:?}"
+    );
+    let res_count = entries
+        .iter()
+        .filter(|e| e.kind == AuditKind::ApprovalResolved)
+        .count();
+    assert_eq!(
+        res_count, 1,
+        "#411: must not double-wrap — expected exactly 1 ApprovalResolved entry, \
+         got {res_count}; entries: {entries:?}"
     );
 }
