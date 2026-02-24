@@ -301,7 +301,7 @@ fn run_engine(engine: &rein::runtime::engine::AgentEngine<'_>, user_message: &st
             eprintln!("Duration: {duration:.2?}");
             0
         }
-        Err(rein::runtime::RunError::Timeout { partial_trace }) => {
+        Err(rein::runtime::RunError::Timeout { partial_trace, .. }) => {
             eprintln!();
             eprintln!(
                 "Run timed out: a provider call did not respond within the configured timeout."

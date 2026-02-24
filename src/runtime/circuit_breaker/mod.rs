@@ -86,7 +86,7 @@ impl CircuitBreaker {
             BreakerState::Open => Err(format!(
                 "Circuit breaker '{}' is open: {} failures in window exceeded threshold of {}",
                 self.name,
-                self.count_recent_failures(),
+                self.failure_count(),
                 self.failure_threshold
             )),
         }
@@ -114,7 +114,7 @@ impl CircuitBreaker {
             return;
         }
 
-        if self.count_recent_failures() >= self.failure_threshold {
+        if self.failure_count() >= self.failure_threshold {
             self.state = BreakerState::Open;
             self.opened_at = Some(now);
         }
@@ -129,18 +129,13 @@ impl CircuitBreaker {
     /// Current failure count within the rolling window.
     #[must_use]
     pub fn failure_count(&self) -> u32 {
-        self.count_recent_failures()
+        self.failures.len().try_into().unwrap_or(u32::MAX)
     }
 
     /// The configured failure threshold at which the breaker trips open.
     #[must_use]
     pub fn threshold(&self) -> u32 {
         self.failure_threshold
-    }
-
-    /// Count failures within the current window.
-    fn count_recent_failures(&self) -> u32 {
-        self.failures.len().try_into().unwrap_or(u32::MAX)
     }
 
     /// Remove failures older than the window.

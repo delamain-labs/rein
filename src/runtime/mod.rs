@@ -52,6 +52,20 @@ pub struct ToolResult {
 /// This enum is `#[non_exhaustive]`: new variants may be added in minor
 /// versions without a semver major bump. Downstream crates that `match` on
 /// `RunEvent` must include a wildcard (`_ => {}`) arm.
+///
+/// # Downstream usage
+/// ```rust,ignore
+/// // In a crate that depends on `rein`:
+/// use rein::runtime::RunEvent;
+///
+/// fn handle(event: RunEvent) {
+///     match event {
+///         RunEvent::LlmCall { cost_cents, .. } => { /* ... */ }
+///         RunEvent::StepFailed { step, reason } => { /* ... */ }
+///         _ => {} // required — new variants may be added in minor versions
+///     }
+/// }
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -537,6 +551,7 @@ pub enum RunError {
     /// treats struct variants differently from unit variants even when all
     /// fields are skipped. Consumers that pattern-match on the raw JSON shape
     /// must update their deserialization logic.
+    #[non_exhaustive]
     BudgetExceeded {
         #[serde(skip)]
         partial_trace: RunTrace,
@@ -556,6 +571,7 @@ pub enum RunError {
     /// serializes as `{"circuit_breaker_open": {}}` (an object with an empty
     /// body). Consumers that pattern-match on the raw JSON shape must update
     /// their deserialization logic.
+    #[non_exhaustive]
     CircuitBreakerOpen {
         #[serde(skip)]
         partial_trace: RunTrace,
@@ -574,6 +590,7 @@ pub enum RunError {
     /// serialized its events on the wire as `{"timeout": {"events": [...]}}`.
     /// It now serializes as `{"timeout": {}}` (empty object). Consumers that
     /// deserialize the raw JSON shape must update their logic.
+    #[non_exhaustive]
     Timeout {
         #[serde(skip)]
         partial_trace: RunTrace,
