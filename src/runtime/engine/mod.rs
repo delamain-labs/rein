@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+use tracing::{info, warn};
+
 use super::budget::{BudgetExceeded, BudgetTracker, calculate_cost};
 use super::circuit_breaker::CircuitBreaker;
 use super::executor::{Secrets, ToolExecutor};
@@ -96,7 +98,7 @@ impl StreamCallback for StdoutStream {
         let _ = std::io::stdout().flush();
     }
     fn on_tool_call(&self, namespace: &str, action: &str) {
-        eprintln!("[tool] {namespace}.{action}");
+        info!("[tool] {namespace}.{action}");
     }
     fn on_complete(&self) {
         println!();
@@ -814,11 +816,11 @@ impl<'a> AgentEngine<'a> {
                 let ts = completed_at.format("%Y%m%d-%H%M%S");
                 let path = format!("rein-trace-{ts}.json");
                 match std::fs::write(&path, &json) {
-                    Ok(()) => eprintln!("OTLP trace written to {path}"),
-                    Err(e) => eprintln!("Failed to write OTLP trace: {e}"),
+                    Ok(()) => info!("OTLP trace written to {path}"),
+                    Err(e) => warn!("Failed to write OTLP trace: {e}"),
                 }
             }
-            Err(e) => eprintln!("Failed to serialize OTLP trace: {e}"),
+            Err(e) => warn!("Failed to serialize OTLP trace: {e}"),
         }
     }
 
@@ -841,7 +843,7 @@ impl<'a> AgentEngine<'a> {
         let resource_spans = to_otlp(&structured);
         match serde_json::to_string_pretty(&resource_spans) {
             Ok(json) => println!("{json}"),
-            Err(e) => eprintln!("Failed to serialize OTLP trace: {e}"),
+            Err(e) => warn!("Failed to serialize OTLP trace: {e}"),
         }
     }
 

@@ -5,6 +5,8 @@
 
 use std::collections::HashMap;
 
+use tracing::warn;
+
 use crate::ast::{CompareOp, ConditionMatcher, WhenExpr, WhenValue};
 
 /// Extract the value of a `field: value` or `field=value` line from output.
@@ -54,7 +56,7 @@ pub fn condition_matches(output: &str, field: &str, matcher: &ConditionMatcher) 
             match regex::Regex::new(pattern) {
                 Ok(re) => re.is_match(val),
                 Err(err) => {
-                    eprintln!("warning: invalid regex pattern '{pattern}': {err}");
+                    warn!("invalid regex pattern '{pattern}': {err}");
                     false
                 }
             }

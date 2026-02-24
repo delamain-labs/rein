@@ -2,6 +2,8 @@ use std::borrow::Cow;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
+use tracing::{info, warn};
+
 use crate::ast::{ApprovalDef, ApprovalKind};
 use crate::runtime::audit::{self, AuditKind, AuditLog};
 
@@ -108,13 +110,13 @@ impl ApprovalHandler for CliApprovalHandler {
         })
         .await
         .unwrap_or_else(|join_err| {
-            eprintln!("warn: approval stdin task failed to join: {join_err}");
+            warn!("approval stdin task failed to join: {join_err}");
             Err(std::io::Error::other("join error"))
         });
 
         match line {
             Err(e) => {
-                eprintln!("warn: approval stdin read failed: {e}");
+                warn!("approval stdin read failed: {e}");
                 ApprovalStatus::Rejected {
                     reason: "Failed to read input".to_string(),
                 }
@@ -140,7 +142,7 @@ impl ApprovalHandler for AutoApproveHandler {
         _agent_output: &str,
         _approval: &ApprovalDef,
     ) -> ApprovalStatus {
-        eprintln!("[auto-approve] Step '{step_name}' auto-approved (non-interactive mode)");
+        info!("[auto-approve] Step '{step_name}' auto-approved (non-interactive mode)");
         ApprovalStatus::Approved
     }
 }
@@ -321,12 +323,12 @@ impl ApprovalHandler for WebhookApprovalHandler {
             Ok(resp) if resp.status().is_success() => {
                 // 2xx: webhook accepted the notification; step is synchronously approved (v1).
                 // Interactive async callbacks (e.g. Block Kit) are deferred to v2.
-                eprintln!("[webhook] Approval notification sent for step '{step_name}'");
+                info!("[webhook] Approval notification sent for step '{step_name}'");
                 ApprovalStatus::Approved
             }
             Ok(resp) => {
                 let status = resp.status();
-                eprintln!(
+                warn!(
                     "[webhook] Approval endpoint returned {status} for step '{step_name}': rejecting"
                 );
                 ApprovalStatus::Rejected {
@@ -334,7 +336,7 @@ impl ApprovalHandler for WebhookApprovalHandler {
                 }
             }
             Err(e) => {
-                eprintln!(
+                warn!(
                     "[webhook] Failed to reach approval endpoint for step '{step_name}': {e} — rejecting"
                 );
                 ApprovalStatus::Rejected {
@@ -399,19 +401,19 @@ impl ApprovalHandler for SlackApprovalHandler {
             .await
         {
             Ok(resp) if resp.status().is_success() => {
-                eprintln!("[slack] Approval notification sent for step '{step_name}'");
+                info!("[slack] Approval notification sent for step '{step_name}'");
                 "ok"
             }
             Ok(resp) => {
-                eprintln!(
+                warn!(
                     "[slack] Slack endpoint returned {}: auto-approving step '{step_name}'",
                     resp.status()
                 );
                 "http_error"
             }
             Err(e) => {
-                eprintln!("[slack] Failed to send Slack notification for step '{step_name}': {e}");
-                eprintln!("[slack] Auto-approving to avoid blocking workflow");
+                warn!("[slack] Failed to send Slack notification for step '{step_name}': {e}");
+                warn!("[slack] Auto-approving to avoid blocking workflow");
                 "connection_error"
             }
         };
@@ -549,13 +551,10 @@ impl ApprovalHandler for AuditingApprovalHandler {
         }
         requested.metadata = req_meta;
         if let Err(e) = self.log.append(&requested) {
-            // TODO(#377): replace with tracing::warn! once the `tracing` crate
-            // is added to Cargo.toml.
-            eprintln!(
-                "rein[audit]: warning: could not write ApprovalRequested entry \
-                 (step='{}', workflow='{}'): {e}",
-                step_name,
-                self.workflow_name.as_deref().unwrap_or("<none>")
+            warn!(
+                step = step_name,
+                workflow = self.workflow_name.as_deref().unwrap_or("<none>"),
+                "rein[audit]: could not write ApprovalRequested entry: {e}"
             );
         }
         // Start the clock after writing ApprovalRequested so elapsed_ms
@@ -639,13 +638,11 @@ impl ApprovalHandler for AuditingApprovalHandler {
         }
         resolved.metadata = meta;
         if let Err(e) = self.log.append(&resolved) {
-            // TODO(#377): replace with tracing::warn! once the `tracing` crate
-            // is added to Cargo.toml.
-            eprintln!(
-                "rein[audit]: warning: could not write ApprovalResolved entry \
-                 (step='{}', workflow='{}', decision='{decision}'): {e}",
-                step_name,
-                self.workflow_name.as_deref().unwrap_or("<none>")
+            warn!(
+                step = step_name,
+                workflow = self.workflow_name.as_deref().unwrap_or("<none>"),
+                decision = decision,
+                "rein[audit]: could not write ApprovalResolved entry: {e}"
             );
         }
 
@@ -688,15 +685,15 @@ pub fn resolve_approval_handler(approval: &ApprovalDef) -> Box<dyn ApprovalHandl
     #[cfg(test)]
     match std::env::var("REIN_TEST_APPROVAL_HANDLER").as_deref() {
         Ok("auto_approve") => {
-            eprintln!(
-                "warn: REIN_TEST_APPROVAL_HANDLER=auto_approve — \
+            warn!(
+                "REIN_TEST_APPROVAL_HANDLER=auto_approve — \
                  all approval gates will be automatically granted"
             );
             return Box::new(AutoApproveHandler);
         }
         Ok("auto_reject") => {
-            eprintln!(
-                "warn: REIN_TEST_APPROVAL_HANDLER=auto_reject — \
+            warn!(
+                "REIN_TEST_APPROVAL_HANDLER=auto_reject — \
                  all approval gates will be automatically rejected"
             );
             return Box::new(AutoRejectHandler::new("test rejection"));
@@ -709,11 +706,11 @@ pub fn resolve_approval_handler(approval: &ApprovalDef) -> Box<dyn ApprovalHandl
         "slack" => Box::new(SlackApprovalHandler::new(approval.destination.clone())),
         "cli" => Box::new(CliApprovalHandler),
         "" => {
-            eprintln!("warn: approval channel is empty, falling back to CLI prompt");
+            warn!("approval channel is empty, falling back to CLI prompt");
             Box::new(CliApprovalHandler)
         }
         other => {
-            eprintln!("warn: unknown approval channel '{other}', falling back to CLI prompt");
+            warn!("unknown approval channel '{other}', falling back to CLI prompt");
             Box::new(CliApprovalHandler)
         }
     }

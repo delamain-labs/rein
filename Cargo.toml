@@ -35,6 +35,7 @@ tower = { version = "0.5.3", features = ["util"] }
 sha2 = "0.10.9"
 tower-lsp = "0.20"
 futures = "0.3"
+tracing = "0.1"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
