@@ -2687,6 +2687,10 @@ async fn approval_pending_returns_approval_pending_error() {
     }
 
     let file = parse_file(r#"agent bot { model: openai }"#);
+    // `make_cli_approval_def()` is used for convenience — the channel type is
+    // irrelevant here because `PendingHandler` overrides the handler entirely.
+    // The test exercises the workflow engine's response to `ApprovalStatus::Pending`,
+    // not the CLI handler's interactive flow.
     let step_a = make_approved_step("gated", "bot", make_cli_approval_def());
     let workflow = make_workflow_steps("pending_wf", "start", vec![step_a]);
 

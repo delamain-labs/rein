@@ -78,6 +78,6 @@ grouped by type: **Breaking**, **Added**, **Changed**, **Fixed**, **Removed**.
 
 ---
 
-## [0.2.1] — 2025-xx-xx
+## [0.2.1] — 2025-12-01
 
-Initial changelog. See git history for pre-changelog changes.
+Initial changelog entry. See git history for pre-changelog changes.

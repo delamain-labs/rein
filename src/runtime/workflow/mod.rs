@@ -166,7 +166,7 @@ impl std::fmt::Display for WorkflowError {
             Self::ApprovalPending { step } => {
                 write!(
                     f,
-                    "approval pending for step '{step}' — resubmit once external decision is received"
+                    "approval pending for step '{step}' - resubmit once external decision is received"
                 )
             }
             Self::CyclicDependency(detail) => {

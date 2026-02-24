@@ -375,15 +375,13 @@ impl ApprovalHandler for AuditingApprovalHandler {
         let decision = match &status {
             ApprovalStatus::Approved => "approved",
             ApprovalStatus::Rejected { .. } => "rejected",
-            // Both TimedOut and Pending are raised as WorkflowError::ApprovalTimedOut
-            // by the workflow engine (see workflow/mod.rs — the match arm that handles
-            // ApprovalStatus::TimedOut | ApprovalStatus::Pending). Recording "timed_out"
-            // for both ensures compliance consumers do not incorrectly infer the workflow
-            // is still running when it has already been terminated. The raw handler status
-            // is preserved in the "original_status" field (see below) so operators can
-            // distinguish a genuine timeout from a Pending return without affecting
-            // compliance parsers. If the engine ever adds a resume path for Pending, this
-            // mapping must be revisited.
+            // `TimedOut` maps to `WorkflowError::ApprovalTimedOut`; `Pending` now maps
+            // to `WorkflowError::ApprovalPending` (split in #419). Both are recorded as
+            // "timed_out" here for compliance-field stability — the distinction is
+            // preserved in the `original_status` field (see below) so operators can
+            // distinguish a genuine timeout from a deferred async decision without
+            // affecting compliance parsers. If a resume path for Pending is added in
+            // future, this mapping must be revisited.
             ApprovalStatus::TimedOut | ApprovalStatus::Pending => "timed_out",
         };
         // Record the raw handler status separately from the compliance-stable
