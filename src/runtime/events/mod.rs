@@ -25,6 +25,7 @@ pub enum EventKind {
     StepStarted,
     StepCompleted,
     StepFailed,
+    StepSkipped,
     AgentInvoked,
     ToolCalled,
     GuardrailTriggered,
