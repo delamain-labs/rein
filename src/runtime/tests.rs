@@ -496,12 +496,9 @@ fn run_error_config_error_roundtrips() {
 
 #[test]
 fn run_error_serializes_as_snake_case() {
-    // Unit variants use #[serde(rename_all = "snake_case")] and serialize as
-    // bare strings. Struct variants (`BudgetExceeded`, `CircuitBreakerOpen`,
-    // `Timeout`) serialize as `{"variant": {}}` — empty object because
-    // partial_trace carries #[serde(skip)].
-    // Struct variants: BudgetExceeded, CircuitBreakerOpen, Timeout all serialize
-    // as {"<variant>": {}} — empty object because partial_trace is #[serde(skip)].
+    // Struct variants (BudgetExceeded, CircuitBreakerOpen, Timeout) serialize as
+    // {"<variant>": {}} — empty object because partial_trace is #[serde(skip)].
+    // Unit variants serialize as bare strings via #[serde(rename_all = "snake_case")].
     let v: serde_json::Value = serde_json::to_value(RunError::BudgetExceeded {
         partial_trace: RunTrace::from_events(vec![]),
     })
