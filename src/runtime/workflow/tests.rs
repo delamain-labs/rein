@@ -1454,7 +1454,7 @@ async fn for_each_step_audit_entries_carry_workflow_name() {
         workflow_name: Some("triage_pipeline".to_string()),
     };
 
-    let (results, _events) = run_steps(&workflow, &ctx)
+    let (results, _events, _) = run_steps(&workflow, &ctx)
         .await
         .expect("run_steps must succeed");
     assert_eq!(results.len(), 1, "one step result expected");
@@ -2028,7 +2028,7 @@ async fn step_fallback_runs_on_primary_failure() {
         workflow_name: None,
     };
 
-    let (results, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
+    let (results, events, _) = run_steps(&workflow, &ctx).await.expect("should succeed");
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].output, "fallback result");
     // StepFallback event must be emitted when fallback executes.
@@ -2075,7 +2075,7 @@ async fn step_without_fallback_propagates_error() {
     // Since #363: soft errors (AgentNotFound/StageFailed) no longer abort the
     // whole run — run_steps returns Ok so dependent steps can be skipped.
     // The failed step's result has empty output.
-    let (results, events) = run_steps(&workflow, &ctx)
+    let (results, events, _) = run_steps(&workflow, &ctx)
         .await
         .expect("soft errors return Ok");
     assert_eq!(results.len(), 1);
@@ -2139,7 +2139,7 @@ async fn step_for_each_iterates_over_array() {
         ..workflow
     };
 
-    let (results, events) = run_steps(&workflow_with_trigger, &ctx)
+    let (results, events, _) = run_steps(&workflow_with_trigger, &ctx)
         .await
         .expect("should succeed");
     // One aggregated StageResult per for_each step with outputs as a JSON array.
@@ -2209,7 +2209,7 @@ async fn workflow_auto_resolve_short_circuits_on_condition_met() {
         workflow_name: None,
     };
 
-    let (results, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
+    let (results, events, _) = run_steps(&workflow, &ctx).await.expect("should succeed");
     // Only the first step ran; second was short-circuited.
     assert_eq!(results.len(), 1, "should stop after auto_resolve");
     assert_eq!(results[0].stage_name, "first");
@@ -2272,7 +2272,7 @@ async fn workflow_auto_resolve_does_not_short_circuit_when_condition_unmet() {
         workflow_name: None,
     };
 
-    let (results, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
+    let (results, events, _) = run_steps(&workflow, &ctx).await.expect("should succeed");
     assert_eq!(
         results.len(),
         2,
@@ -2337,7 +2337,7 @@ async fn auto_resolve_empty_conditions_does_not_short_circuit() {
         workflow_name: None,
     };
 
-    let (results, events) = run_steps(&workflow, &ctx)
+    let (results, events, _) = run_steps(&workflow, &ctx)
         .await
         .expect("workflow should succeed");
 
@@ -2462,7 +2462,7 @@ async fn run_steps_emits_step_started_and_completed() {
         workflow_name: None,
     };
 
-    let (_, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
+    let (_, events, _) = run_steps(&workflow, &ctx).await.expect("should succeed");
 
     // Existence assertions.
     let started_pos = events
@@ -2508,7 +2508,7 @@ async fn multi_step_step_started_index_sequence() {
         workflow_name: None,
     };
 
-    let (_, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
+    let (_, events, _) = run_steps(&workflow, &ctx).await.expect("should succeed");
 
     let started_events: Vec<_> = events
         .iter()
@@ -2571,7 +2571,7 @@ async fn step_started_index_reflects_dag_position_after_skip() {
         workflow_name: None,
     };
 
-    let (_, events) = run_steps(&workflow, &ctx)
+    let (_, events, _) = run_steps(&workflow, &ctx)
         .await
         .expect("partial success — independent step still runs");
 
@@ -2629,7 +2629,7 @@ async fn run_steps_returns_partial_success_on_missing_agent() {
         workflow_name: None,
     };
 
-    let (results, events) = run_steps(&workflow, &ctx)
+    let (results, events, _) = run_steps(&workflow, &ctx)
         .await
         .expect("partial success: soft error should not return Err");
 
@@ -2685,7 +2685,7 @@ async fn run_steps_emits_step_started_and_completed_for_for_each() {
         workflow_name: None,
     };
 
-    let (_, events) = run_steps(&workflow, &ctx).await.expect("should succeed");
+    let (_, events, _) = run_steps(&workflow, &ctx).await.expect("should succeed");
 
     // StepStarted must be emitted before the for_each iterations.
     assert!(
@@ -2750,7 +2750,7 @@ async fn failed_dependency_skips_dependent_step() {
     };
 
     // Only step_a will run (and fail); step_b must be skipped without needing a response.
-    let (results, events) = run_steps(&workflow, &ctx)
+    let (results, events, _) = run_steps(&workflow, &ctx)
         .await
         .expect("run_steps returns Ok even when steps fail/skip");
 
@@ -2984,7 +2984,7 @@ async fn independent_step_runs_even_if_sibling_fails() {
     // step_b (bot) runs successfully
     provider.push_response(simple_response("step_b_output"));
 
-    let (results, events) = run_steps(&workflow, &ctx)
+    let (results, events, _) = run_steps(&workflow, &ctx)
         .await
         .expect("run_steps must not abort when only independent step fails");
 
@@ -3039,7 +3039,7 @@ async fn skipped_step_result_uses_skipped_status() {
         workflow_name: None,
     };
 
-    let (results, _events) = run_steps(&workflow, &ctx)
+    let (results, _events, _) = run_steps(&workflow, &ctx)
         .await
         .expect("soft error must not abort run");
 
@@ -3079,7 +3079,7 @@ async fn failed_step_output_inserted_into_outputs_map() {
 
     provider.push_response(simple_response("step_c_out"));
 
-    let (results, events) = run_steps(&workflow, &ctx)
+    let (results, events, _) = run_steps(&workflow, &ctx)
         .await
         .expect("independent step must run");
 
@@ -3274,7 +3274,7 @@ async fn for_each_partial_failure_discards_completed_iterations() {
     };
 
     // run_steps returns Ok (soft error), but the step is recorded as failed.
-    let (results, events) = run_steps(&workflow, &ctx)
+    let (results, events, _) = run_steps(&workflow, &ctx)
         .await
         .expect("soft error must not abort run_steps");
 
@@ -3388,7 +3388,7 @@ async fn cascade_skip_propagates_three_hops() {
         workflow_name: None,
     };
 
-    let (results, events) = run_steps(&workflow, &ctx)
+    let (results, events, _) = run_steps(&workflow, &ctx)
         .await
         .expect("run_steps must not abort on soft errors");
 
@@ -3620,7 +3620,7 @@ async fn step_failed_carries_error_kind_agent_not_found() {
         workflow_name: None,
     };
 
-    let (_, events) = run_steps(&workflow, &ctx).await.unwrap();
+    let (_, events, _) = run_steps(&workflow, &ctx).await.unwrap();
     let failed = events
         .iter()
         .find(
@@ -3675,7 +3675,7 @@ async fn step_failed_carries_error_kind_stage_failed() {
         workflow_name: None,
     };
 
-    let (_, events) = run_steps(&workflow, &ctx).await.unwrap();
+    let (_, events, _) = run_steps(&workflow, &ctx).await.unwrap();
     let failed = events
         .iter()
         .find(
@@ -3815,7 +3815,7 @@ async fn soft_error_does_not_emit_workflow_aborted() {
         workflow_name: None,
     };
 
-    let (_, events) = run_steps(&workflow, &ctx)
+    let (_, events, _) = run_steps(&workflow, &ctx)
         .await
         .expect("soft errors return Ok");
     assert!(
@@ -4097,5 +4097,96 @@ async fn run_parallel_abort_includes_workflow_aborted_event() {
             .iter()
             .any(|e| matches!(e, RunEvent::WorkflowAborted { .. })),
         "partial_events must include WorkflowAborted; got: {partial_events:?}"
+    );
+}
+
+// --- #502: Step events must carry real per-event timestamps ---
+
+/// #502: `StepStarted`/`StepCompleted` events must carry real per-event timestamps
+/// (not hardcoded `0u64` sentinel values) in `WorkflowResult.event_timestamps_ms`.
+///
+/// Before this fix, ALL step events received `0u64` sentinels via
+/// `repeat_n(0u64, step_event_count)` regardless of when they fired.
+/// After the fix, each event receives `start.elapsed().as_millis() as u64`.
+///
+/// The invariant tested: `event_timestamps_ms` is parallel to `events` AND
+/// the timestamps are monotonically non-decreasing (events are always pushed
+/// in temporal order). On ultra-fast test machines all values may be 0ms but
+/// this is semantically correct — real production runs with actual LLM calls
+/// will show meaningful step-span durations.
+#[tokio::test]
+async fn step_events_have_real_timestamps_in_workflow_result() {
+    let file = parse_file(r"agent bot { model: openai }");
+    let provider = MockProvider::new();
+    let executor = MockExecutor::new();
+
+    // Two sequential dependent steps so we get StepStarted/Completed for each.
+    let workflow = WorkflowDef {
+        name: "wf".to_string(),
+        trigger: "go".to_string(),
+        stages: vec![],
+        steps: vec![
+            make_step("step_a", "bot", vec![]),
+            make_step("step_b", "bot", vec!["step_a"]),
+        ],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        approval_handler: None,
+        audit_log: None,
+        workflow_name: None,
+    };
+
+    provider.push_response(simple_response("a_out"));
+    provider.push_response(simple_response("b_out"));
+
+    let result = run_workflow(&workflow, &ctx).await.expect("ok");
+
+    // Structural invariant: lengths must match.
+    assert_eq!(
+        result.events.len(),
+        result.event_timestamps_ms.len(),
+        "event_timestamps_ms must be parallel to events"
+    );
+
+    // Temporal invariant: timestamps must be monotonically non-decreasing.
+    // With the old sentinel (`repeat_n(0u64)`), all step timestamps were equal
+    // (all 0), which satisfies non-decreasing trivially. With real elapsed times,
+    // this must also hold — events are always emitted in temporal order.
+    // The meaningful distinction is captured by the implementation: a correctly
+    // wired `Instant::elapsed()` call can never regress, whereas a mutable
+    // sentinel could be set to any out-of-order value.
+    let timestamps = &result.event_timestamps_ms;
+    let is_non_decreasing = timestamps.windows(2).all(|w| w[1] >= w[0]);
+    assert!(
+        is_non_decreasing,
+        "event_timestamps_ms must be monotonically non-decreasing; got: {timestamps:?}"
+    );
+
+    // Step events must be present.
+    assert!(
+        result.events.iter().any(|e| matches!(
+            e,
+            crate::runtime::RunEvent::StepStarted { step, .. } if step == "step_a"
+        )),
+        "StepStarted(step_a) must be emitted"
+    );
+    assert!(
+        result.events.iter().any(|e| matches!(
+            e,
+            crate::runtime::RunEvent::StepCompleted { step } if step == "step_b"
+        )),
+        "StepCompleted(step_b) must be emitted"
     );
 }

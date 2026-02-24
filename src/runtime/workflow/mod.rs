@@ -679,7 +679,34 @@ struct StepLoopState {
     /// the set includes cascade-skipped steps, not just steps that errored.
     blocked_steps: std::collections::HashSet<String>,
     events: Vec<super::RunEvent>,
+    /// Wall-clock timestamps (ms from workflow-step phase start) for each
+    /// entry in `events`. Always kept in sync: `events.len() == event_timestamps_ms.len()`.
+    event_timestamps_ms: Vec<u64>,
     results: Vec<StageResult>,
+    /// Reference instant for computing per-event elapsed times.
+    start: std::time::Instant,
+}
+
+impl StepLoopState {
+    /// Push a step-phase event with the current wall-clock timestamp.
+    ///
+    /// Always updates both `events` and `event_timestamps_ms` atomically so
+    /// the two vecs stay in sync. Use this for all step-level events
+    /// (`StepStarted`, `StepCompleted`, `StepFailed`, `StepSkipped`, etc.).
+    fn push_event(&mut self, event: super::RunEvent) {
+        // Saturating cast: u128→u64. Clamp to u64::MAX before truncating so
+        // the result is well-defined. A workflow lasting > ~584 million years
+        // is an acceptable limitation for a CLI tool.
+        let elapsed_ms = u64::try_from(
+            self.start
+                .elapsed()
+                .as_millis()
+                .min(u128::from(u64::MAX)),
+        )
+        .unwrap_or(u64::MAX);
+        self.events.push(event);
+        self.event_timestamps_ms.push(elapsed_ms);
+    }
 }
 
 /// Process the result of a single step execution, updating shared loop state.
@@ -697,7 +724,10 @@ fn apply_step_result(
 ) -> StepOutcome {
     match step_result {
         Ok((result, step_events)) => {
-            state.events.extend(step_events);
+            // Push each step event (e.g. StepFallback) with a real timestamp.
+            for event in step_events {
+                state.push_event(event);
+            }
 
             // Check workflow-level auto_resolve conditions after each step.
             let resolved = if let Some(ar) = auto_resolve {
@@ -711,7 +741,7 @@ fn apply_step_result(
                 .insert(step.name.clone(), result.output.clone());
 
             if let Some(ref condition) = resolved {
-                state.events.push(super::RunEvent::AutoResolved {
+                state.push_event(super::RunEvent::AutoResolved {
                     step: step.name.clone(),
                     condition: condition.clone(),
                 });
@@ -720,7 +750,7 @@ fn apply_step_result(
             }
 
             state.results.push(result);
-            state.events.push(super::RunEvent::StepCompleted {
+            state.push_event(super::RunEvent::StepCompleted {
                 step: step.name.clone(),
             });
             StepOutcome::Continue
@@ -743,7 +773,7 @@ fn apply_step_result(
             // from executing. Do not read `outputs` outside of `run_steps`
             // without accounting for this invariant.
             state.outputs.insert(step.name.clone(), String::new());
-            state.events.push(super::RunEvent::StepFailed {
+            state.push_event(super::RunEvent::StepFailed {
                 step: step.name.clone(),
                 reason,
                 error_kind,
@@ -795,7 +825,10 @@ fn apply_step_result(
 pub(crate) async fn run_steps(
     workflow: &WorkflowDef,
     ctx: &WorkflowContext<'_>,
-) -> Result<(Vec<StageResult>, Vec<super::RunEvent>), (WorkflowError, Vec<super::RunEvent>)> {
+) -> Result<
+    (Vec<StageResult>, Vec<super::RunEvent>, Vec<u64>),
+    (WorkflowError, Vec<super::RunEvent>),
+> {
     use std::collections::{HashMap, HashSet};
 
     let ordered = resolve_dag(&workflow.steps).map_err(|e| {
@@ -807,11 +840,14 @@ pub(crate) async fn run_steps(
     })?;
     let trigger_input = format!("Trigger: {}", workflow.trigger);
 
+    let start = std::time::Instant::now();
     let mut state = StepLoopState {
         outputs: HashMap::new(),
         blocked_steps: HashSet::new(),
         results: Vec::new(),
         events: Vec::new(),
+        event_timestamps_ms: Vec::new(),
+        start,
     };
 
     for (index, step) in ordered.into_iter().enumerate() {
@@ -823,7 +859,7 @@ pub(crate) async fn run_steps(
             StepOutcome::Continue => {}
             StepOutcome::AutoResolved => break,
             StepOutcome::HardError(e) => {
-                state.events.push(super::RunEvent::WorkflowAborted {
+                state.push_event(super::RunEvent::WorkflowAborted {
                     error_kind: e.kind_str().to_string(),
                     reason: e.to_string(),
                 });
@@ -832,7 +868,7 @@ pub(crate) async fn run_steps(
         }
     }
 
-    Ok((state.results, state.events))
+    Ok((state.results, state.events, state.event_timestamps_ms))
 }
 
 /// Apply cascade-skip logic for a step whose dependency is blocked.
@@ -850,7 +886,7 @@ fn handle_skip_guard(step: &crate::ast::StepDef, state: &mut StepLoopState) -> b
     };
 
     let reason = format!("dependency '{failed_dep}' failed");
-    state.events.push(super::RunEvent::StepSkipped {
+    state.push_event(super::RunEvent::StepSkipped {
         step: step.name.clone(),
         blocked_dependency: failed_dep.clone(),
         reason,
@@ -897,7 +933,7 @@ async fn execute_step_in_dag(
     // `step.depends_on` succeeded (the skip-guard ensures any step with a
     // failed/skipped dependency is handled before this call).
     // Therefore `outputs.get(dep)` will not return `Some("")` for any dep.
-    state.events.push(super::RunEvent::StepStarted {
+    state.push_event(super::RunEvent::StepStarted {
         step: step.name.clone(),
         index,
     });
@@ -1198,7 +1234,7 @@ pub async fn run_workflow(
         // On hard abort, merge stage events already in result.events with the
         // step-phase partial events (including WorkflowAborted) so callers
         // receive full context of both what ran and why it aborted.
-        let (step_results, step_events) = match run_steps(workflow, ctx).await {
+        let (step_results, step_events, step_timestamps) = match run_steps(workflow, ctx).await {
             Ok(ok) => ok,
             Err((e, step_partial)) => {
                 let mut merged = std::mem::take(&mut result.events);
@@ -1222,12 +1258,8 @@ pub async fn run_workflow(
             }
             result.stage_results.push(sr);
         }
-        let step_event_count = step_events.len();
         result.events.extend(step_events);
-        // Step-based events don't carry per-event timestamps yet; use 0 as sentinel.
-        result
-            .event_timestamps_ms
-            .extend(std::iter::repeat_n(0u64, step_event_count));
+        result.event_timestamps_ms.extend(step_timestamps);
     }
 
     Ok(result)
