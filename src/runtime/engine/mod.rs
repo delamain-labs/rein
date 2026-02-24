@@ -228,7 +228,17 @@ impl<'a> AgentEngine<'a> {
     ///
     /// # Errors
     /// Returns `RunError` if the run fails (budget exceeded, provider error, etc.).
+    /// Validate config before starting a run.
+    fn validate_config(&self) -> Result<(), RunError> {
+        if self.config.stage_timeout_secs == Some(0) {
+            return Err(RunError::ConfigError);
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_lines)] // tracked in #460
     pub async fn run(&self, user_message: &str) -> Result<RunResult, RunError> {
+        self.validate_config()?;
         let run_start = std::time::Instant::now();
         let mut state = RunState {
             messages: Vec::new(),
