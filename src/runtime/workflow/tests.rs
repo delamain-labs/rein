@@ -1562,6 +1562,129 @@ async fn step_without_audit_log_calls_handler_exactly_once() {
     );
 }
 
+/// #474 — When `approval_handler` is `None` and `audit_log` is `Some`, `run_step`
+/// must call `resolve_approval_handler` (not panic or skip auditing), wrap the
+/// resolved handler in `AuditingApprovalHandler`, and write audit entries.
+///
+/// This is the production path for users who pass `--audit-log` without injecting
+/// a handler — they rely entirely on `resolve_approval_handler` + the wrapping logic.
+/// Previous tests always set `approval_handler: Some(AutoApproveHandler)`, leaving
+/// the `Arc::from(Box<dyn ApprovalHandler>)` conversion branch uncovered by CI.
+#[tokio::test]
+async fn step_with_audit_log_and_no_injected_handler_uses_resolved_handler() {
+    use crate::ast::{ApprovalDef, ApprovalKind, Span as AstSpan};
+    use crate::runtime::audit::{AuditKind, AuditLog};
+    use std::sync::Arc;
+
+    let tmp = tempfile::NamedTempFile::new().expect("temp file");
+    let log = Arc::new(AuditLog::new(tmp.path()).expect("AuditLog::new"));
+
+    let file = parse_file(r#"agent writer { model: openai }"#);
+    let workflow = WorkflowDef {
+        name: "no_handler_wf".to_string(),
+        trigger: "start".to_string(),
+        stages: vec![],
+        steps: vec![crate::ast::StepDef {
+            name: "gated".to_string(),
+            agent: "writer".to_string(),
+            goal: None,
+            input: None,
+            output_constraints: vec![],
+            depends_on: vec![],
+            when: None,
+            on_failure: None,
+            send_to: None,
+            fallback: None,
+            for_each: None,
+            typed_input: None,
+            typed_outputs: vec![],
+            escalate: None,
+            approval: Some(ApprovalDef {
+                kind: ApprovalKind::Approve,
+                // "cli" routes through resolve_approval_handler → CliApprovalHandler.
+                // CliApprovalHandler reads stdin; in non-interactive CI stdin is EOF
+                // so it returns ApprovalRejected. That is expected — the test goal is
+                // to confirm the Arc::from + AuditingApprovalHandler wrapping path.
+                channel: "cli".to_string(),
+                destination: "#ops".to_string(),
+                timeout: None,
+                mode: None,
+                span: AstSpan::new(0, 1),
+            }),
+            span: AstSpan::new(0, 1),
+        }],
+        route_blocks: vec![],
+        parallel_blocks: vec![],
+        auto_resolve: None,
+        within_blocks: vec![],
+        mode: ExecutionMode::Sequential,
+        schedule: None,
+        span: Span::new(0, 1),
+    };
+
+    let provider = MockProvider::new();
+    provider.push_response(simple_response("resolved output"));
+    let executor = MockExecutor::new();
+    let ctx = WorkflowContext {
+        file: &file,
+        provider: &provider,
+        executor: &executor,
+        tool_defs: &[],
+        config: &RunConfig::default(),
+        // No injected handler — must fall through to resolve_approval_handler.
+        approval_handler: None,
+        audit_log: Some(Arc::clone(&log)),
+        workflow_name: Some("no_handler_wf".to_string()),
+    };
+
+    // The resolved CliApprovalHandler reads stdin; in non-interactive CI, stdin
+    // is EOF so read_line returns Ok(0) → empty string → Rejected. Wrap in a
+    // timeout so the test fails fast (with a clear message) rather than hanging
+    // if stdin is not closed in some CI configurations.
+    //
+    // The goal is not to verify approval outcome but to confirm:
+    //   (a) no panic from the Arc::from(Box<dyn ApprovalHandler>) conversion,
+    //   (b) AuditingApprovalHandler wraps the resolved handler and writes entries.
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        run_workflow(&workflow, &ctx),
+    )
+    .await
+    .expect("test timed out — CliApprovalHandler may be blocking on stdin");
+
+    // CliApprovalHandler rejects on EOF stdin; assert the specific error so a
+    // failure here (e.g., AgentNotFound before approval) surfaces clearly.
+    assert!(
+        matches!(result, Err(WorkflowError::ApprovalRejected { .. })),
+        "expected ApprovalRejected from CliApprovalHandler on empty stdin; got: {result:?}"
+    );
+
+    // Both audit entries must be present even on rejection: AuditingApprovalHandler
+    // writes ApprovalRequested before delegating and ApprovalResolved after.
+    let entries = log.read_all().expect("read audit log");
+    assert_eq!(
+        entries.len(),
+        2,
+        "expected ApprovalRequested + ApprovalResolved; got: {entries:#?}"
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.kind == AuditKind::ApprovalRequested),
+        "missing ApprovalRequested entry"
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.kind == AuditKind::ApprovalResolved),
+        "missing ApprovalResolved entry"
+    );
+    for entry in &entries {
+        assert_eq!(entry.workflow.as_deref(), Some("no_handler_wf"));
+        assert_eq!(entry.step.as_deref(), Some("gated"));
+    }
+}
+
 // --- #303 DAG depends_on Tests ---
 
 fn make_step(name: &str, agent: &str, depends_on: Vec<&str>) -> StepDef {
