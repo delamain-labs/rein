@@ -184,13 +184,14 @@ pub fn run_agent(
             stage_timeout_secs,
             run_timeout_secs,
             secret_fallback_events,
+            otel,
+            &agent.name,
         );
     }
 
     run_engine(&engine, user_message, secret_fallback_events)
 }
 
-// TODO(#440): extract RunOptions struct to reduce parameter count.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_lines)]
 fn run_workflow_mode(
@@ -203,6 +204,8 @@ fn run_workflow_mode(
     stage_timeout_secs: Option<u64>,
     run_timeout_secs: Option<u64>,
     pre_events: Vec<rein::runtime::RunEvent>,
+    otel: bool,
+    agent_name: &str,
 ) -> i32 {
     // Only inject a global handler when env-var overrides are active (CI/testing).
     // In normal runs `approval_handler` is `None` so each step resolves its own
@@ -250,6 +253,15 @@ fn run_workflow_mode(
             )),
             (h, _) => h,
         };
+
+    // Resolve OTEL mode from an observe block (matched by agent name, falling
+    // back to first) or the --otel flag. Same resolution logic as agent runs.
+    let obs = file
+        .observes
+        .iter()
+        .find(|o| o.name == agent_name)
+        .or_else(|| file.observes.first());
+    let otel_mode = resolve_otel_mode(obs, otel);
 
     let ctx = rein::runtime::workflow::WorkflowContext {
         file,
@@ -327,6 +339,7 @@ fn run_workflow_mode(
                 );
             }
             eprintln!("Duration: {duration:.2?}");
+            emit_workflow_otel(&otel_mode, &display_events, duration, &workflow.name);
             // Exit 0: all steps succeeded.
             // Exit 1: partial success — step(s) failed, were cascade-skipped, or
             //         were conditionally skipped via when: (#455).
@@ -335,10 +348,6 @@ fn run_workflow_mode(
         }
         Err((e, partial_events)) => {
             eprintln!("Workflow failed: {e}");
-            // Emit pre-events (e.g. SecretFallback) followed by any partial
-            // events (e.g. WorkflowAborted) to stderr so the operator can see
-            // the abort cause. (OTEL export is not wired to the workflow path;
-            // these events do not reach an OTEL sink here.)
             let mut display_events = pre_events;
             display_events.extend(partial_events.iter().cloned());
             if !display_events.is_empty() {
@@ -347,11 +356,51 @@ fn run_workflow_mode(
                     rein::runtime::RunTrace::summarize_events(&display_events)
                 );
             }
+            emit_workflow_otel(&otel_mode, &display_events, duration, &workflow.name);
             // Exit 2: hard abort (policy rejection, cyclic deps, infra failure).
             // Distinct from exit 1 (partial success) so shell consumers can
             // tell whether the workflow completed with some failures vs. was
             // terminated before all steps ran.
             2
+        }
+    }
+}
+
+/// Emit workflow OTEL spans if the mode requires it.
+///
+/// Handles `FileOnComplete` (write to a timestamped file) and
+/// `StdoutOnComplete` (print JSON to stdout). `OtelMode::None` is a no-op.
+/// Called after `run_workflow` completes on both success and hard-abort paths.
+/// (#547)
+fn emit_workflow_otel(
+    mode: &rein::runtime::otel_export::OtelMode,
+    events: &[rein::runtime::RunEvent],
+    duration: std::time::Duration,
+    name: &str,
+) {
+    use rein::runtime::otel_export::OtelMode;
+    match mode {
+        OtelMode::None => {}
+        OtelMode::FileOnComplete => {
+            let json = rein::runtime::otel_export::export_workflow_events(
+                events, &[], duration, name,
+            );
+            if !json.is_empty() {
+                let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+                let path = format!("rein-trace-{ts}.json");
+                match std::fs::write(&path, &json) {
+                    Ok(()) => eprintln!("OTLP trace written to {path}"),
+                    Err(e) => eprintln!("warning: failed to write OTEL trace: {e}"),
+                }
+            }
+        }
+        OtelMode::StdoutOnComplete { .. } => {
+            let json = rein::runtime::otel_export::export_workflow_events(
+                events, &[], duration, name,
+            );
+            if !json.is_empty() {
+                println!("{json}");
+            }
         }
     }
 }

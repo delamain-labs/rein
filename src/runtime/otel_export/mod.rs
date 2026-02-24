@@ -515,6 +515,48 @@ pub fn to_otlp_json(trace: &StructuredTrace) -> Result<String, serde_json::Error
     serde_json::to_string_pretty(&resource_spans)
 }
 
+/// Convert a slice of `RunEvent`s (e.g. from a workflow run) into OTLP JSON.
+///
+/// `timestamps_ms` is a parallel slice of wall-clock offsets (milliseconds
+/// from the run start) for each event. It may be empty or shorter than
+/// `events` — missing timestamps fall back to a monotonic counter in
+/// [`RunTrace::to_structured`].
+///
+/// Returns the serialized OTLP JSON string, or `None` if the events slice is
+/// empty or serialization fails (a warning is printed to stderr in that case).
+///
+/// Intended for workflow runs where `AgentEngine::apply_otel_export` is not
+/// available. (#547)
+pub fn export_workflow_events(
+    events: &[super::RunEvent],
+    timestamps_ms: &[u64],
+    duration: std::time::Duration,
+    name: &str,
+) -> String {
+    use super::RunTrace;
+    let trace = if timestamps_ms.len() == events.len() && !timestamps_ms.is_empty() {
+        RunTrace::from_events_timed(events.to_vec(), timestamps_ms.to_vec())
+    } else {
+        RunTrace::from_events(events.to_vec())
+    };
+    let now = chrono::Utc::now();
+    let started = now
+        - chrono::Duration::from_std(duration).unwrap_or(chrono::Duration::zero());
+    let structured = trace.to_structured(
+        name,
+        &started.to_rfc3339(),
+        &now.to_rfc3339(),
+        duration.as_millis().try_into().unwrap_or(u64::MAX),
+    );
+    match to_otlp_json(&structured) {
+        Ok(json) => json,
+        Err(e) => {
+            warn!("rein[otel]: failed to serialize workflow OTEL trace: {e}");
+            String::new()
+        }
+    }
+}
+
 /// Determines how OTEL traces are exported after a run.
 #[derive(Debug, Clone, Default)]
 pub enum OtelMode {
